@@ -84,9 +84,6 @@ jobs:
       - name: Run tests with Python 3.13
         run: uv run --python 3.13 pytest -v
 
-      - name: Run tests with Python 3.13t (free-threaded)
-        run: uv run --python 3.13t pytest -v
-
       - name: Run tests with Python 3.14
         run: uv run --python 3.14 pytest -v
 

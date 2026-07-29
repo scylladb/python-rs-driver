@@ -164,6 +164,42 @@ where
     }
 }
 
+pub(crate) struct PrependedIterator<I: ExactSizeIterator> {
+    first: Option<I::Item>,
+    rest: I,
+}
+
+impl<I: ExactSizeIterator> PrependedIterator<I> {
+    pub(crate) fn new(first: I::Item, rest: I) -> Self {
+        Self {
+            first: Some(first),
+            rest,
+        }
+    }
+}
+
+impl<I: ExactSizeIterator> Iterator for PrependedIterator<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(first) = self.first.take() {
+            return Some(first);
+        }
+        self.rest.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<I: ExactSizeIterator> ExactSizeIterator for PrependedIterator<I> {
+    fn len(&self) -> usize {
+        self.rest.len() + usize::from(self.first.is_some())
+    }
+}
+
 /// Add submodule.
 ///
 /// This function is required,

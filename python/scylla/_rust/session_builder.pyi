@@ -5,6 +5,7 @@ from typing import Any, TypeAlias
 
 from .enums import Compression, PoolSize, SelfIdentity, WriteCoalescingDelay
 from .execution_profile import ExecutionProfile
+from .future import ResponseFuture
 from .policies import AddressTranslator, AuthenticatorProvider, HostFilter, TimestampGenerator
 from .session import Session
 
@@ -137,14 +138,14 @@ class SessionBuilder:
         SessionBuilder
         """
 
-    async def connect(self) -> Session:
+    def connect(self) -> ResponseFuture[Session]:
         """
         Establish a session using the current builder configuration.
 
         Returns
         -------
-        Session
-            A connected session ready to execute queries.
+        ResponseFuture[Session]
+            A future resolving to a connected session ready to execute queries.
         """
 
     def user(self, username: str, password: str) -> SessionBuilder:

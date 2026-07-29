@@ -1,5 +1,6 @@
 use crate::deserialize::value::{PyDeserializeValue, PyDeserializedValue};
 use crate::errors::{DriverDeserializationError, DriverExecuteError, DriverRowIterationError};
+use crate::future::PyResponseFuture;
 use crate::serialize::value_list::PyValueList;
 use crate::session::{ExecutableStatement, PySession};
 use pyo3::exceptions::{PyRuntimeError, PyStopAsyncIteration, PyStopIteration};
@@ -82,19 +83,21 @@ impl RequestResult {
     /// # Errors
     ///
     /// Returns an error if the fetch operation fails.
-    async fn fetch_next_page(&self) -> PyResult<Option<RequestResult>> {
+    fn fetch_next_page(&self, py: Python<'_>) -> PyResult<Py<PyResponseFuture>> {
         let mut query_pager = self.query_pager.clone();
         let row_factory = self.row_factory.clone();
 
-        if let Some(query_result) = query_pager.fetch_next_page().await {
-            return Ok(Some(RequestResult {
-                query_result: Arc::new(query_result?),
-                query_pager,
-                row_factory,
-            }));
-        }
-
-        Ok(None)
+        PyResponseFuture::spawn(py, async move {
+            if let Some(query_result) = query_pager.fetch_next_page().await {
+                Ok(Some(RequestResult {
+                    query_result: Arc::new(query_result?),
+                    query_pager,
+                    row_factory,
+                }))
+            } else {
+                Ok::<_, DriverExecuteError>(None)
+            }
+        })
     }
 
     /// Returns an iterator over rows in the current page.
@@ -139,16 +142,17 @@ impl RequestResult {
     /// # Errors
     ///
     /// Returns an error if fetching or deserialization fails.
-    pub async fn first_row(&self) -> PyResult<Py<PyAny>> {
+    pub fn first_row(&self, py: Python<'_>) -> PyResult<Py<PyResponseFuture>> {
         let mut query_pager_clone = self.query_pager.clone();
-        let mut rows_iterator = Python::attach(|py| {
-            RowsIteratorKind::new(py, self.query_result.clone(), self.row_factory.clone())
-        })?;
+        let mut rows_iterator =
+            RowsIteratorKind::new(py, self.query_result.clone(), self.row_factory.clone())?;
 
-        match next_row_with_paging(&mut rows_iterator, &mut query_pager_clone).await {
-            Some(res) => res.map_err(Into::into),
-            None => Ok(Python::attach(|py| py.None())),
-        }
+        PyResponseFuture::spawn(py, async move {
+            match next_row_with_paging(&mut rows_iterator, &mut query_pager_clone).await {
+                Some(res) => res.map(Some).map_err(Into::<PyErr>::into),
+                None => Ok(None::<Py<PyAny>>),
+            }
+        })
     }
 
     /// Returns all rows from all pages with automatic paging.
@@ -163,7 +167,7 @@ impl RequestResult {
     /// # Errors
     ///
     /// Returns an error if fetching or deserialization fails.
-    pub async fn all(&self) -> PyResult<Py<PyList>> {
+    pub fn all(&self, py: Python<'_>) -> PyResult<Py<PyResponseFuture>> {
         let mut query_pager_clone = self.query_pager.clone();
 
         let (mut rows_iterator, list) =
@@ -174,31 +178,32 @@ impl RequestResult {
                 ))
             })?;
 
-        // Drain all rows from the current page, then fetch the next page.
-        // This is done to hold the GIL for longer and avoid frequent reacquisition.
+        PyResponseFuture::spawn(py, async move {
+            // Drain all rows from the current page, then fetch the next page.
+            // This is done to hold the GIL for longer and avoid frequent reacquisition.
+            let mut next_page: Option<QueryResult> = None;
+            loop {
+                Python::attach(|py| -> PyResult<()> {
+                    if let Some(next_page) = next_page.take() {
+                        rows_iterator.update(py, Arc::new(next_page))?;
+                    }
 
-        let mut next_page: Option<QueryResult> = None;
-        loop {
-            Python::attach(|py| -> PyResult<()> {
-                if let Some(next_page) = next_page.take() {
-                    rows_iterator.update(py, Arc::new(next_page))?;
+                    while let Some(res_row) = rows_iterator.next(py) {
+                        list.bind(py).append(res_row?)?;
+                    }
+
+                    Ok(())
+                })?;
+
+                if let Some(res) = query_pager_clone.fetch_next_page().await {
+                    next_page = Some(res?);
+                } else {
+                    break;
                 }
-
-                while let Some(res_row) = rows_iterator.next(py) {
-                    list.bind(py).append(res_row?)?;
-                }
-
-                Ok(())
-            })?;
-
-            if let Some(res) = query_pager_clone.fetch_next_page().await {
-                next_page = Some(res?);
-            } else {
-                break;
             }
-        }
 
-        Ok(list)
+            Ok::<_, PyErr>(list)
+        })
     }
 }
 
@@ -324,12 +329,17 @@ impl AsyncRowsIterator {
 
 #[pymethods]
 impl AsyncRowsIterator {
-    pub fn __anext__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        // TODO: Add a "ready" awaitable for the fast path (row already buffered) to avoid `future_into_py` scheduling/allocation.
+    pub fn __anext__(&self, py: Python<'_>) -> PyResult<Py<PyResponseFuture>> {
+        if let Ok(state) = self.state.try_lock()
+            && let Some(row_result) = state.rows_iterator.next(py)
+        {
+            let result = row_result.map_err(Into::into);
+            return PyResponseFuture::ready(py, result);
+        }
 
         let state_clone = self.state.clone();
 
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        PyResponseFuture::spawn(py, async move {
             let mut state = state_clone.lock().await;
 
             let AsyncIteratorState {

@@ -2,6 +2,7 @@ use crate::RUNTIME;
 use crate::enums::{PyCompression, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay};
 use crate::errors::{DriverSessionConfigError, DriverSessionConnectionError};
 use crate::execution_profile::ExecutionProfile;
+use crate::future::PyResponseFuture;
 use crate::policies::{
     PyAddressTranslator, PyAuthenticatorProvider, PyHostFilter, PyTimestampGenerator,
 };
@@ -424,20 +425,22 @@ impl SessionBuilder {
         Py::new(py, inner.clone())
     }
 
-    async fn connect(&self) -> Result<PySession, DriverSessionConnectionError> {
-        let config = Python::attach(|py| {
+    fn connect(&self, py: Python<'_>) -> PyResult<Py<PyResponseFuture>> {
+        let config = {
             let inner = self.inner.lock_py_attached(py).unwrap();
             inner.config.clone()
-        });
+        };
 
-        let session_result = RUNTIME
-            .spawn(async move { scylla::client::session::Session::connect(config).await })
-            .await?;
-        match session_result {
-            Ok(session) => PySession::try_from(Arc::new(session))
-                .map_err(DriverSessionConnectionError::python_conversion_error),
-            Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
-        }
+        PyResponseFuture::spawn(py, async move {
+            let session_result = RUNTIME
+                .spawn(async move { scylla::client::session::Session::connect(config).await })
+                .await?;
+            match session_result {
+                Ok(session) => PySession::try_from(Arc::new(session))
+                    .map_err(DriverSessionConnectionError::python_conversion_error),
+                Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
+            }
+        })
     }
 }
 

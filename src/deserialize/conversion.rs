@@ -26,6 +26,16 @@ impl<'py> IntoPyObject<'py> for CqlVarintWrapper<'_> {
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         let bytes = self.val.as_signed_bytes_be_slice();
         unsafe {
+            // `PyLong_FromNativeBytes` was added in Python 3.13, but is excluded from
+            // the Limited API until 3.14. Fall back to `_PyLong_FromByteArray` on earlier setups.
+            #[cfg(any(Py_3_14, all(Py_3_13, not(Py_LIMITED_API))))]
+            let val = ffi::PyLong_FromNativeBytes(
+                bytes.as_ptr() as *const _,
+                bytes.len(),
+                ffi::Py_ASNATIVEBYTES_BIG_ENDIAN,
+            );
+
+            #[cfg(not(any(Py_3_14, all(Py_3_13, not(Py_LIMITED_API)))))]
             let val = ffi::_PyLong_FromByteArray(bytes.as_ptr(), bytes.len(), 0, 1);
 
             Ok(Bound::from_owned_ptr(py, val).cast_into()?)

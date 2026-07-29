@@ -8,6 +8,7 @@ use crate::errors::{
     DriverExecuteError, DriverPrepareError, DriverSchemaAgreementError,
     DriverStatementConversionError, DriverUseKeyspaceError,
 };
+use crate::future::PyResponseFuture;
 use crate::serialize::value_list::PyValueList;
 use crate::statement::PyPreparedStatement;
 use crate::statement::PyStatement;
@@ -45,100 +46,122 @@ impl TryFrom<Arc<Session>> for PySession {
 #[pymethods]
 impl PySession {
     #[pyo3(signature = (keyspace, case_sensitive=false))]
-    async fn use_keyspace(
+    fn use_keyspace(
         &self,
+        py: Python<'_>,
         keyspace: String,
         case_sensitive: bool,
-    ) -> Result<(), DriverUseKeyspaceError> {
-        self.session_spawn_on_runtime(async move |s| {
-            s.use_keyspace(keyspace, case_sensitive)
-                .await
-                .map_err(DriverUseKeyspaceError::from)
+    ) -> PyResult<Py<PyResponseFuture>> {
+        let session = self.clone();
+        PyResponseFuture::spawn(py, async move {
+            let result: Result<_, DriverUseKeyspaceError> = session
+                .session_spawn_on_runtime(async move |s| {
+                    s.use_keyspace(keyspace, case_sensitive)
+                        .await
+                        .map_err(DriverUseKeyspaceError::from)
+                })
+                .await;
+            result
         })
-        .await
     }
 
     #[pyo3(signature = (statement, values=None, /, *, factory=None, paging_state=None, paged=true))]
-    async fn execute(
+    fn execute(
         &self,
+        py: Python<'_>,
         statement: ExecutableStatement,
         values: Option<PyValueList>,
         factory: Option<Py<RowFactory>>,
         paging_state: Option<Py<PyPagingState>>,
         paged: bool,
-    ) -> Result<RequestResult, DriverExecuteError> {
+    ) -> PyResult<Py<PyResponseFuture>> {
         // Why not accept PyValueList instead of Option<PyValueList>?
         // It would require us to use `Default::default` as default value in
         // `pyo3(signature = ...)`, and thus use `text_signature` as well
         // to keep signature usable for Python users. I think it is cleaner
         // to `unwrap_or_default()` here.
         let values = values.unwrap_or_default();
+        let session = self.clone();
 
-        if paged {
-            self.execute_paged(statement, paging_state, values, factory)
-                .await
-        } else {
-            if paging_state.is_some() {
-                return Err(DriverExecuteError::paging_state_must_be_none_for_unpaged_execution());
+        PyResponseFuture::spawn(py, async move {
+            if paged {
+                session
+                    .execute_paged(statement, paging_state, values, factory)
+                    .await
+            } else {
+                if paging_state.is_some() {
+                    return Err(
+                        DriverExecuteError::paging_state_must_be_none_for_unpaged_execution(),
+                    );
+                }
+                session.execute_unpaged(statement, values, factory).await
             }
-
-            self.execute_unpaged(statement, values, factory).await
-        }
+        })
     }
 
-    async fn prepare(
+    fn prepare(
         &self,
+        py: Python<'_>,
         statement: ExecutableStatement,
-    ) -> Result<PyPreparedStatement, DriverPrepareError> {
-        match statement {
-            ExecutableStatement::Unprepared(s) => self.scylla_prepare(s).await,
-            ExecutableStatement::Prepared(_) => {
-                Err(DriverPrepareError::cannot_prepare_prepared_statement())
+    ) -> PyResult<Py<PyResponseFuture>> {
+        let session = self.clone();
+        PyResponseFuture::spawn(py, async move {
+            match statement {
+                ExecutableStatement::Unprepared(s) => session.scylla_prepare(s).await,
+                ExecutableStatement::Prepared(_) => {
+                    Err(DriverPrepareError::cannot_prepare_prepared_statement())
+                }
             }
-        }
+        })
     }
 
     #[pyo3(signature = (batch, /, *,  factory=None))]
-    async fn batch(
+    fn batch(
         &self,
+        py: Python<'_>,
         batch: PyBatch,
         factory: Option<Py<RowFactory>>,
-    ) -> Result<RequestResult, DriverExecuteError> {
-        let result = self
-            .session_spawn_on_runtime(async move |s| {
-                s.batch(&batch._inner, batch.values)
-                    .await
-                    .map_err(DriverExecuteError::rust_driver_execution_error)
-            })
-            .await?;
+    ) -> PyResult<Py<PyResponseFuture>> {
+        let session = self.clone();
+        PyResponseFuture::spawn(py, async move {
+            let result: Result<_, DriverExecuteError> = session
+                .session_spawn_on_runtime(async move |s| {
+                    s.batch(&batch._inner, batch.values)
+                        .await
+                        .map_err(DriverExecuteError::rust_driver_execution_error)
+                })
+                .await;
 
-        Ok(RequestResult::new(result, Pager::unpaged(), factory))
+            result.map(|r| RequestResult::new(r, Pager::unpaged(), factory))
+        })
     }
 
-    async fn await_schema_agreement(&self) -> Result<uuid::Uuid, DriverSchemaAgreementError> {
-        let schema_version = self
-            .session_spawn_on_runtime(async move |s| {
-                s.await_schema_agreement()
-                    .await
-                    .map_err(DriverSchemaAgreementError::rust_driver_schema_agreement_error)
-            })
-            .await?;
-
-        Ok(schema_version)
+    fn await_schema_agreement(&self, py: Python<'_>) -> PyResult<Py<PyResponseFuture>> {
+        let session = self.clone();
+        PyResponseFuture::spawn(py, async move {
+            let result: Result<_, DriverSchemaAgreementError> = session
+                .session_spawn_on_runtime(async move |s| {
+                    s.await_schema_agreement()
+                        .await
+                        .map_err(DriverSchemaAgreementError::rust_driver_schema_agreement_error)
+                })
+                .await;
+            result
+        })
     }
 
-    async fn check_schema_agreement(
-        &self,
-    ) -> Result<Option<uuid::Uuid>, DriverSchemaAgreementError> {
-        let schema_version = self
-            .session_spawn_on_runtime(async move |s| {
-                s.check_schema_agreement()
-                    .await
-                    .map_err(DriverSchemaAgreementError::rust_driver_schema_agreement_error)
-            })
-            .await?;
-
-        Ok(schema_version)
+    fn check_schema_agreement(&self, py: Python<'_>) -> PyResult<Py<PyResponseFuture>> {
+        let session = self.clone();
+        PyResponseFuture::spawn(py, async move {
+            let result: Result<_, DriverSchemaAgreementError> = session
+                .session_spawn_on_runtime(async move |s| {
+                    s.check_schema_agreement()
+                        .await
+                        .map_err(DriverSchemaAgreementError::rust_driver_schema_agreement_error)
+                })
+                .await;
+            result
+        })
     }
 
     #[getter]
