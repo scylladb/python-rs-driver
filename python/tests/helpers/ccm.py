@@ -60,6 +60,7 @@ def create_scylla_cluster(
     scylla_version: str,
     nodes: int = 1,
     config: dict[str, Any] | None = None,
+    ipprefix: str = "127.0.0.",
 ) -> _CCMCluster:
     CCM_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -79,7 +80,7 @@ def create_scylla_cluster(
         merged_config.update(config)
 
     cluster.set_configuration_options(merged_config)
-    cluster.populate([nodes])
+    cluster.populate([nodes], ipprefix=ipprefix)
 
     return cluster
 

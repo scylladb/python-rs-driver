@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     AddressTranslationError,
     BadKeyspaceNameError,
@@ -27,6 +25,7 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     SessionConnectionError,
     StatementConfigError,
     StatementConversionError,
+    TlsError,
     TypeMismatchSerializationError,
     UnsupportedTypeDeserializationError,
     UnsupportedTypeSerializationError,
@@ -61,6 +60,7 @@ __all__ = [
     "SessionConnectionError",
     "StatementConfigError",
     "StatementConversionError",
+    "TlsError",
     "TypeMismatchSerializationError",
     "UnsupportedTypeDeserializationError",
     "UnsupportedTypeSerializationError",

@@ -37,6 +37,9 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
 
+      - name: Install system dependencies
+        run: sudo apt-get install -y libssl-dev pkg-config
+
       - name: Install Python dependencies
         run: uv sync --dev
 
@@ -59,6 +62,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
 
+      - name: Install system dependencies
+        run: sudo apt-get install -y libssl-dev pkg-config
+
       - name: Start ScyllaDB cluster
         run: make up
 
@@ -70,7 +76,7 @@ jobs:
           { echo "All nodes ready"; break; }; done
 
       - name: Run native Rust tests
-        run: cargo test --no-default-features
+        run: cargo test --no-default-features --features rust-tests
 
       - name: Run tests with Python 3.10
         run: uv run --python 3.10 pytest -v

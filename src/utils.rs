@@ -9,6 +9,7 @@ use pyo3::{
 
 use crate::errors::AddressParseError;
 
+#[derive(Clone)]
 pub(crate) struct WithOriginalPyObject<T> {
     pub(crate) original: Py<PyAny>,
     pub(crate) extracted: T,

@@ -7,11 +7,12 @@ use crate::policies::authenticator_provider::PyAuthenticatorProvider;
 use crate::policies::host_filter::PyHostFilter;
 use crate::policies::timestamp_generator::PyTimestampGenerator;
 use crate::session::PySession;
+use crate::tls::{PyTlsConfig, PyTlsContext};
 use crate::utils::{ParsedAddress, ParsedAddressList, WithOriginalPyObject};
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
 use scylla::authentication::PlainTextAuthenticator;
-use scylla::client::session::SessionConfig;
+use scylla::client::session::{SessionConfig, TlsContext};
 use scylla::routing::ShardAwarePortRange;
 use std::net::IpAddr;
 use std::ops::RangeInclusive;
@@ -420,6 +421,32 @@ impl SessionBuilder {
         slf
     }
 
+    fn tls_context<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        tls_context: Option<Py<PyTlsContext>>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        {
+            let mut inner = slf.inner.lock_py_attached(py).unwrap();
+            match tls_context {
+                Some(ctx) => {
+                    let (context, snapshot) = ctx
+                        .get()
+                        .build_with_snapshot(py)
+                        .map_err(DriverSessionConfigError::from)?;
+
+                    inner.config.tls_context = Some(TlsContext::from(context));
+                    inner.tls_context = Some(Py::new(py, snapshot)?);
+                }
+                None => {
+                    inner.config.tls_context = None;
+                    inner.tls_context = None;
+                }
+            }
+        }
+        Ok(slf)
+    }
+
     fn get_config<'py>(&self, py: Python<'py>) -> PyResult<Py<PySessionBuilderConfig>> {
         let inner = self.inner.lock_py_attached(py).unwrap();
         Py::new(py, inner.clone())
@@ -460,6 +487,8 @@ struct PySessionBuilderConfig {
     pub timestamp_generator: Option<Py<PyAny>>,
     #[pyo3(get)]
     pub shard_aware_local_port_range: (u16, u16),
+    #[pyo3(get)]
+    pub tls_context: Option<Py<PyTlsConfig>>,
 }
 
 impl PySessionBuilderConfig {
@@ -484,6 +513,7 @@ impl PySessionBuilderConfig {
             authenticator: None,
             address_translator: None,
             timestamp_generator: None,
+            tls_context: None,
         })
     }
 }

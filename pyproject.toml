@@ -25,7 +25,14 @@ dev = [
     "ruff>=0.16.0",
     "basedpyright",
     "python-dateutil",
+    "cryptography>=42",
     "ccm @ git+https://git@github.com/scylladb/scylla-ccm.git@master",
+]
+
+
+tls-integration = [
+    "cryptography>=49.0.0",
+    "cffi>=2.0.0",
 ]
 
 [tool.uv]

@@ -8,6 +8,7 @@ use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 use scylla::errors::{ClusterStateTokenError as RustClusterStateTokenError, TranslationError};
 use std::error::Error;
 use std::fmt;
+use std::path::PathBuf;
 /* Python exception classes */
 
 create_exception!(errors, ScyllaError, PyException);
@@ -58,6 +59,7 @@ create_exception!(errors, RequestTimeoutError, UseKeyspaceError);
 create_exception!(errors, RuntimeTaskJoinFailedError, UseKeyspaceError);
 create_exception!(errors, AddressTranslationError, ScyllaError);
 create_exception!(errors, HostFilterError, ScyllaError);
+create_exception!(errors, TlsError, ScyllaError);
 
 create_exception!(errors, LoadBalancingPolicyError, ScyllaError);
 create_exception!(errors, RetryPolicyError, ScyllaError);
@@ -514,6 +516,50 @@ impl From<tokio::task::JoinError> for DriverSessionConnectionError {
 
 /* Session configuration errors */
 
+/* TLS config errors */
+
+/// Errors that can occur while building an [`openssl::ssl::SslContext`] from a TLS config.
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, thiserror::Error)]
+pub enum TlsConfigError {
+    #[error("failed to create SSL context builder: {0}")]
+    ContextCreationFailed(String),
+
+    #[error("failed to load default CA certificate locations: {0}")]
+    DefaultVerifyPathsLoadFailed(String),
+
+    #[error("failed to load CA locations (cafile: {cafile:?}, capath: {capath:?}): {cause}")]
+    CaLocationsLoadFailed {
+        cafile: Option<PathBuf>,
+        capath: Option<PathBuf>,
+        cause: String,
+    },
+
+    #[error("at least one of cafile, capath, or cadata must be specified")]
+    NoCaLocationsSpecified,
+
+    #[error("failed to load CA certificate data: {0}")]
+    CaDataLoadFailed(String),
+
+    #[error("failed to load certificate file '{path}': {cause}")]
+    CertFileLoadFailed { path: PathBuf, cause: String },
+
+    #[error("failed to load private key file '{path}': {cause}")]
+    KeyFileLoadFailed { path: PathBuf, cause: String },
+}
+
+impl From<TlsConfigError> for PyErr {
+    fn from(e: TlsConfigError) -> PyErr {
+        TlsError::new_err(e.to_string())
+    }
+}
+
+impl From<TlsConfigError> for DriverSessionConfigError {
+    fn from(e: TlsConfigError) -> Self {
+        DriverSessionConfigError::InvalidTlsConfig { source: e }
+    }
+}
+
 /* Address parsing errors */
 
 /// Error type for address parsing failures.
@@ -629,6 +675,11 @@ pub enum DriverSessionConfigError {
     InvalidHostFilter {
         type_name: String,
     },
+
+    /// An OpenSSL operation failed while building the TLS context.
+    InvalidTlsConfig {
+        source: TlsConfigError,
+    },
 }
 
 impl DriverSessionConfigError {
@@ -742,6 +793,11 @@ impl From<DriverSessionConfigError> for PyErr {
                 let message =
                     format!("Expected a class implementing HostFilter protocol, got {type_name}");
                 build_session_config_pyerr(py, message, None, None)
+            }
+
+            DriverSessionConfigError::InvalidTlsConfig { source } => {
+                let cause = TlsError::new_err(source.to_string());
+                build_session_config_pyerr(py, "TLS configuration error", Some(cause), None)
             }
         })
     }
@@ -1720,6 +1776,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<AddressTranslationError>(),
     )?;
     module.add("HostFilterError", py.get_type::<HostFilterError>())?;
+    module.add("TlsError", py.get_type::<TlsError>())?;
     module.add(
         "LoadBalancingPolicyError",
         py.get_type::<LoadBalancingPolicyError>(),

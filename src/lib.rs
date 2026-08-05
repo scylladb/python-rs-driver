@@ -23,6 +23,7 @@ mod serialize;
 mod session;
 mod session_builder;
 mod statement;
+mod tls;
 mod types;
 mod utils;
 
@@ -69,5 +70,6 @@ fn scylla(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     add_submodule(py, module, "policies", policies::policies)?;
     add_submodule(py, module, "cluster", cluster::cluster)?;
     add_submodule(py, module, "routing", routing::routing)?;
+    add_submodule(py, module, "tls", tls::tls)?;
     Ok(())
 }
