@@ -63,6 +63,7 @@ create_exception!(errors, TlsError, ScyllaError);
 
 create_exception!(errors, LoadBalancingPolicyError, ScyllaError);
 create_exception!(errors, RetryPolicyError, ScyllaError);
+create_exception!(errors, SpeculativeExecutionPolicyError, ScyllaError);
 
 // Policy: DriverError types are pure Rust and contain PyErr only as source
 // in cases where the error originated from Python code (e.g. during extraction or user callbacks).
@@ -104,6 +105,31 @@ impl From<DriverRetryPolicyError> for PyErr {
                 ))
             }
         }
+    }
+}
+
+/* Speculative execution policy errors */
+
+/// Errors that can occur while extracting a speculative execution policy from a Python object.
+#[derive(Debug, thiserror::Error)]
+pub enum DriverSpeculativeExecutionPolicyError {
+    #[error(
+        "invalid speculative execution policy '{type_name}': expected an instance of 'SimpleSpeculativeExecutionPolicy'"
+    )]
+    InvalidPolicy { type_name: String },
+}
+
+impl DriverSpeculativeExecutionPolicyError {
+    pub fn invalid_policy(obj: Borrowed<PyAny>) -> Self {
+        Self::InvalidPolicy {
+            type_name: get_type_name(obj),
+        }
+    }
+}
+
+impl From<DriverSpeculativeExecutionPolicyError> for PyErr {
+    fn from(e: DriverSpeculativeExecutionPolicyError) -> PyErr {
+        SpeculativeExecutionPolicyError::new_err(e.to_string())
     }
 }
 
@@ -1783,5 +1809,9 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<LoadBalancingPolicyError>(),
     )?;
     module.add("RetryPolicyError", py.get_type::<RetryPolicyError>())?;
+    module.add(
+        "SpeculativeExecutionPolicyError",
+        py.get_type::<SpeculativeExecutionPolicyError>(),
+    )?;
     Ok(())
 }

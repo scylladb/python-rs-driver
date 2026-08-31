@@ -2,6 +2,7 @@ use crate::enums::{PyConsistency, PySerialConsistency};
 use crate::errors::DriverStatementConfigError;
 use crate::policies::load_balancing::PyLoadBalancingPolicy;
 use crate::policies::retry::policies::PyRetryPolicy;
+use crate::policies::speculative_execution::PySpeculativeExecutionPolicy;
 use crate::utils::WithOriginalPyObject;
 use pyo3::prelude::*;
 use scylla::client::execution_profile::ExecutionProfile;
@@ -13,6 +14,7 @@ pub(crate) struct PyExecutionProfile {
     pub(crate) inner: ExecutionProfile,
     pub(crate) retry_policy: Option<Py<PyAny>>,
     pub(crate) load_balancing_policy: Option<Py<PyAny>>,
+    pub(crate) speculative_execution_policy: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -24,6 +26,7 @@ impl PyExecutionProfile {
         serial_consistency=PySerialConsistency::LocalSerial,
         load_balancing_policy=None,
         retry_policy=None,
+        speculative_execution_policy=None,
     ))]
     pub(crate) fn new(
         _py: Python<'_>,
@@ -32,6 +35,7 @@ impl PyExecutionProfile {
         serial_consistency: Option<PySerialConsistency>,
         load_balancing_policy: Option<WithOriginalPyObject<PyLoadBalancingPolicy>>,
         retry_policy: Option<WithOriginalPyObject<PyRetryPolicy>>,
+        speculative_execution_policy: Option<WithOriginalPyObject<PySpeculativeExecutionPolicy>>,
     ) -> Result<Self, DriverStatementConfigError> {
         let mut profile_builder = ExecutionProfile::builder();
 
@@ -61,10 +65,20 @@ impl PyExecutionProfile {
             None
         };
 
+        let original_speculative_execution_policy = if let Some(sep) = speculative_execution_policy
+        {
+            profile_builder =
+                profile_builder.speculative_execution_policy(Some(sep.extracted.into_inner()));
+            Some(sep.original)
+        } else {
+            None
+        };
+
         Ok(PyExecutionProfile {
             inner: profile_builder.build(),
             retry_policy: original_retry_policy,
             load_balancing_policy: original_lbp,
+            speculative_execution_policy: original_speculative_execution_policy,
         })
     }
 
@@ -93,6 +107,11 @@ impl PyExecutionProfile {
     #[getter]
     pub(crate) fn get_retry_policy(&self) -> Option<Py<PyAny>> {
         self.retry_policy.clone()
+    }
+
+    #[getter]
+    pub(crate) fn get_speculative_execution_policy(&self) -> Option<Py<PyAny>> {
+        self.speculative_execution_policy.clone()
     }
 }
 
