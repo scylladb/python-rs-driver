@@ -1,5 +1,5 @@
 use crate::errors::DriverSessionConfigError;
-use crate::session_builder::PyDuration;
+use crate::utils::PyDuration;
 use pyo3::prelude::{PyAnyMethods, PyModule, PyModuleMethods};
 use pyo3::{
     Borrowed, Bound, BoundObject, FromPyObject, Py, PyAny, PyResult, Python, intern, pyclass,

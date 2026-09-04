@@ -551,7 +551,7 @@ async def test_schema_agreement_interval_happy_path(valid_duration: Any):
 )
 def test_schema_agreement_interval_error_consistency(invalid_input: Any):
     builder = SessionBuilder()
-    with pytest.raises(SessionConfigError) as excinfo:
+    with pytest.raises(ValueError) as excinfo:
         builder.schema_agreement_interval(invalid_input)
 
     assert "Expected a datetime.timedelta or a non-negative finite float (seconds)" in str(excinfo.value)

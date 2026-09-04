@@ -54,6 +54,15 @@ This project is licensed under either of
 
 at your option.
 
+## Third-party code
+
+Portions of this project include code copied or adapted from the
+[PyO3 project](https://github.com/PyO3/pyo3) (version 0.28.x, git commit `8fcf8fc63`),
+specifically the coroutine implementation in `src/coroutine/`.
+
+PyO3 is licensed under either of Apache-2.0 or MIT at your option.
+Copyright (c) 2023-present PyO3 Project and Contributors.
+
 [ScyllaDB Slack]: http://slack.scylladb.com/
 [ScyllaDB Forum]: https://forum.scylladb.com/
 [Apache Cassandra®]: https://cassandra.apache.org/

@@ -110,18 +110,23 @@ impl PyDictAddressTranslator {
         })
     }
 
-    pub async fn translate(
+    //TODO
+    // Investigate how make AddressTranslator methods async for python users
+    pub fn translate(
         &self,
         peer: Py<PyUntranslatedPeer>,
     ) -> Result<(IpAddr, u16), DriverAddressTranslationError> {
         let untranslated_peer = peer.get();
-        let translated_address = self
-            .inner
-            .translate_address(&untranslated_peer.into())
-            .await
-            .map_err(DriverAddressTranslationError::from)?;
-
-        Ok((translated_address.ip(), translated_address.port()))
+        let addr = SocketAddr::new(
+            untranslated_peer.untranslated_address.0,
+            untranslated_peer.untranslated_address.1,
+        );
+        match self.inner.get(&addr) {
+            Some(&translated) => Ok((translated.ip(), translated.port())),
+            None => Err(DriverAddressTranslationError::from(
+                TranslationError::NoRuleForAddress(addr),
+            )),
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::errors::DriverSessionConfigError;
-use crate::session_builder::PyDuration;
+use crate::utils::PyDuration;
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyString;

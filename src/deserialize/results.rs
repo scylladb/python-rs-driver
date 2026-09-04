@@ -2,6 +2,7 @@ use crate::cluster::metadata::query_metadata::column_spec_tuple;
 use crate::core::results::{Pager, RequestResultCore, next_row_with_paging};
 use crate::deserialize::value::{PyDeserializeValue, PyDeserializedValue};
 use crate::errors::{DriverDeserializationError, DriverRowIterationError};
+use crate::future::{DriverFuture, boxed_py_future};
 use pyo3::exceptions::{PyRuntimeError, PyStopAsyncIteration, PyStopIteration};
 use pyo3::prelude::{PyDictMethods, PyModule, PyModuleMethods};
 use pyo3::sync::PyOnceLock;
@@ -84,13 +85,20 @@ impl RequestResult {
     /// # Errors
     ///
     /// Returns an error if the fetch operation fails.
-    async fn fetch_next_page(&self) -> PyResult<Option<RequestResult>> {
-        Ok(self
-            .core
-            .clone()
-            .fetch_next_page()
-            .await?
-            .map(RequestResult::from))
+    fn fetch_next_page(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<DriverFuture<Option<RequestResult>, PyErr>> {
+        let core = self.core.clone();
+
+        DriverFuture::spawn(
+            py,
+            boxed_py_future(async move {
+                core.fetch_next_page()
+                    .await
+                    .map(|next| next.map(RequestResult::from))
+            }),
+        )
     }
 
     /// Returns an iterator over rows in the current page.
@@ -139,8 +147,10 @@ impl RequestResult {
     /// # Errors
     ///
     /// Returns an error if fetching or deserialization fails.
-    pub async fn first_row(&self) -> PyResult<Py<PyAny>> {
-        self.core.clone().first_row().await
+    pub fn first_row(&self, py: Python<'_>) -> PyResult<DriverFuture<Py<PyAny>, PyErr>> {
+        let core = self.core.clone();
+
+        DriverFuture::spawn(py, boxed_py_future(async move { core.first_row().await }))
     }
 
     /// Returns all rows from all pages with automatic paging.
@@ -155,8 +165,10 @@ impl RequestResult {
     /// # Errors
     ///
     /// Returns an error if fetching or deserialization fails.
-    pub async fn all(&self) -> PyResult<Py<PyList>> {
-        self.core.clone().all().await
+    pub fn all(&self, py: Python<'_>) -> PyResult<DriverFuture<Py<PyList>, PyErr>> {
+        let core = self.core.clone();
+
+        DriverFuture::spawn(py, boxed_py_future(async move { core.all().await }))
     }
 
     /// Specifications of the columns in this result.
@@ -296,12 +308,17 @@ impl AsyncRowsIterator {
 
 #[pymethods]
 impl AsyncRowsIterator {
-    pub fn __anext__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        // TODO: Add a "ready" awaitable for the fast path (row already buffered) to avoid `future_into_py` scheduling/allocation.
+    pub(crate) fn __anext__(&self, py: Python<'_>) -> PyResult<DriverFuture<Py<PyAny>, PyErr>> {
+        if let Ok(state) = self.state.try_lock()
+            && let Some(row_result) = state.rows_iterator.next(py)
+        {
+            let result = row_result.map_err(Into::into);
+            return DriverFuture::ready(py, result);
+        }
 
         let state_clone = self.state.clone();
 
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let future = boxed_py_future(async move {
             let mut state = state_clone.lock().await;
 
             let AsyncIteratorState {
@@ -313,7 +330,9 @@ impl AsyncRowsIterator {
                 Some(res) => res.map_err(Into::into),
                 None => Err(PyErr::new::<PyStopAsyncIteration, _>("")),
             }
-        })
+        });
+
+        DriverFuture::spawn(py, future)
     }
 
     pub fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {

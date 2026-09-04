@@ -10,6 +10,7 @@ from scylla.policies.timestamp_generator import TimestampGenerator
 
 from .enums import Compression, PoolSize, SelfIdentity, WriteCoalescingDelay
 from .execution_profile import ExecutionProfile
+from .future import DriverFuture
 from .session import Session
 from .tls import TlsConfig, TlsContext
 
@@ -144,14 +145,14 @@ class SessionBuilder:
         SessionBuilder
         """
 
-    async def connect(self) -> Session:
+    def connect(self) -> DriverFuture[Session]:
         """
         Establish a session using the current builder configuration.
 
         Returns
         -------
-        Session
-            A connected session ready to execute queries.
+        DriverFuture[Session]
+            A future resolving to a connected session ready to execute queries.
         """
 
     def user(self, username: str, password: str) -> SessionBuilder:

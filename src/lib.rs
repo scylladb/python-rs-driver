@@ -18,6 +18,7 @@ mod deserialize;
 mod enums;
 mod errors;
 mod execution_profile;
+mod future;
 mod policies;
 mod routing;
 mod serialize;
@@ -72,5 +73,6 @@ fn scylla(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     add_submodule(py, module, "cluster", cluster::cluster)?;
     add_submodule(py, module, "routing", routing::routing)?;
     add_submodule(py, module, "tls", tls::tls)?;
+    add_submodule(py, module, "future", future::future)?;
     Ok(())
 }

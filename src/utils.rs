@@ -1,5 +1,6 @@
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
+use std::time::Duration;
 
 use pyo3::prelude::*;
 use pyo3::{
@@ -7,7 +8,7 @@ use pyo3::{
     types::{PyAnyMethods, PyModule, PyModuleMethods, PyString},
 };
 
-use crate::errors::AddressParseError;
+use crate::errors::{AddressParseError, DurationParseError};
 
 #[derive(Clone)]
 pub(crate) struct WithOriginalPyObject<T> {
@@ -135,6 +136,25 @@ impl<'py> FromPyObject<'_, 'py> for ParsedAddressList {
         }
 
         Err(AddressParseError::invalid_type(obj))
+    }
+}
+
+pub(crate) struct PyDuration(pub(crate) Duration);
+
+impl<'py> FromPyObject<'_, 'py> for PyDuration {
+    type Error = DurationParseError;
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(duration) = obj.extract::<Duration>() {
+            return Ok(PyDuration(duration));
+        }
+
+        if let Ok(secs) = obj.extract::<f64>() {
+            let duration = Duration::try_from_secs_f64(secs)
+                .map_err(|_| DurationParseError::invalid_type(obj))?;
+            return Ok(PyDuration(duration));
+        }
+
+        Err(DurationParseError::invalid_type(obj))
     }
 }
 

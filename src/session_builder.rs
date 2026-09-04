@@ -1,14 +1,14 @@
-use crate::RUNTIME;
 use crate::enums::{PyCompression, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay};
 use crate::errors::{DriverSessionConfigError, DriverSessionConnectionError};
 use crate::execution_profile::PyExecutionProfile;
+use crate::future::{DriverFuture, boxed_py_future};
 use crate::policies::address_translator::PyAddressTranslator;
 use crate::policies::authenticator_provider::PyAuthenticatorProvider;
 use crate::policies::host_filter::PyHostFilter;
 use crate::policies::timestamp_generator::PyTimestampGenerator;
 use crate::session::PySession;
 use crate::tls::{PyTlsConfig, PyTlsContext};
-use crate::utils::{ParsedAddress, ParsedAddressList, WithOriginalPyObject};
+use crate::utils::{ParsedAddress, ParsedAddressList, PyDuration, WithOriginalPyObject};
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
 use scylla::authentication::PlainTextAuthenticator;
@@ -452,20 +452,25 @@ impl SessionBuilder {
         Py::new(py, inner.clone())
     }
 
-    async fn connect(&self) -> Result<PySession, DriverSessionConnectionError> {
-        let config = Python::attach(|py| {
+    fn connect(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<DriverFuture<PySession, DriverSessionConnectionError>> {
+        let config = {
             let inner = self.inner.lock_py_attached(py).unwrap();
             inner.config.clone()
-        });
+        };
 
-        let session_result = RUNTIME
-            .spawn(async move { scylla::client::session::Session::connect(config).await })
-            .await?;
-        match session_result {
-            Ok(session) => PySession::try_from(Arc::new(session))
-                .map_err(DriverSessionConnectionError::python_conversion_error),
-            Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
-        }
+        DriverFuture::spawn_on_tokio(
+            py,
+            boxed_py_future(async move {
+                match scylla::client::session::Session::connect(config).await {
+                    Ok(session) => PySession::try_from(Arc::new(session))
+                        .map_err(DriverSessionConnectionError::python_conversion_error),
+                    Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
+                }
+            }),
+        )
     }
 }
 
@@ -643,25 +648,6 @@ impl PySessionBuilderConfig {
         PySelfIdentity {
             inner: self.config.identity.clone(),
         }
-    }
-}
-
-pub(crate) struct PyDuration(pub(crate) Duration);
-
-impl<'py> FromPyObject<'_, 'py> for PyDuration {
-    type Error = DriverSessionConfigError;
-    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        if let Ok(duration) = obj.extract::<Duration>() {
-            return Ok(PyDuration(duration));
-        }
-
-        if let Ok(secs) = obj.extract::<f64>() {
-            let duration = Duration::try_from_secs_f64(secs)
-                .map_err(|_| DriverSessionConfigError::invalid_duration(obj))?;
-            return Ok(PyDuration(duration));
-        }
-
-        Err(DriverSessionConfigError::invalid_duration(obj))
     }
 }
 
