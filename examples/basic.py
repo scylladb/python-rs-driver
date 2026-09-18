@@ -31,9 +31,9 @@ async def main():
     # Let's see how the table now looks
     result = await session.execute(f"SELECT * FROM {table_name}")
     async for row in result:
-        print(f"id: {row.get('id')}")
-        print(f"value: {row.get('value')}")
-        print(f"Rows are deserialized as dicts. Whole row:\n {row}\n")
+        print(f"id: {row.id}")
+        print(f"value: {row.value}")
+        print(f"Rows are deserialized as named tuple. Whole row:\n {row}\n")
 
     # That worked but I want to insert a lot of rows I better prepare the statement
     prepared_statement = await session.prepare(f"INSERT INTO {table_name} (id, value) VALUES (?, ?)")

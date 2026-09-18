@@ -4,14 +4,14 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
+from helpers.session import connect
 from scylla.results import PagingState
 from scylla.session import Session
-from scylla.session_builder import SessionBuilder
 from scylla.statement import Statement
 
 
 async def set_up() -> Session:
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
+    session = await connect()
 
     # 2. Create keyspace & table
     await ddl(

@@ -1,34 +1,43 @@
 use std::sync::Arc;
 
-use pyo3::prelude::{PyListMethods, Python};
+use pyo3::prelude::{IntoPyObject, PyListMethods, Python};
 use pyo3::types::PyList;
-use pyo3::{Py, PyAny, PyResult};
+use pyo3::{Bound, Py, PyAny, PyErr, PyResult};
 use scylla::response::query_result::QueryResult;
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 
 use crate::core::session::{BoundStatement, SessionCore};
-use crate::deserialize::results::{RowFactory, RowsIteratorKind};
+use crate::deserialize::results::{RequestResult, RowsIteratorKind};
+use crate::deserialize::row_factory::{PyRowFactory, RowBuilder};
 use crate::errors::{DriverExecuteError, DriverRowIterationError};
 
 /// Helper performing the core logic of handling query results.
 #[derive(Clone)]
 pub(crate) struct RequestResultCore {
-    pub(crate) row_factory: Option<Py<RowFactory>>,
+    /// `None` for a result that carries no rows, such as an `INSERT`.
+    pub(crate) row_builder: Option<RowBuilder>,
     pub(crate) query_pager: Pager,
     pub(crate) query_result: Arc<QueryResult>,
 }
 
 impl RequestResultCore {
     pub(crate) fn new(
+        py: Python<'_>,
         query_result: QueryResult,
         query_pager: Pager,
-        row_factory: Option<Py<RowFactory>>,
-    ) -> Self {
-        Self {
+        factory: PyRowFactory,
+    ) -> Result<Self, DriverExecuteError> {
+        let row_builder = query_result
+            .deserialized_metadata_and_rows()
+            .map(|rows| RowBuilder::resolve(py, &factory, rows.metadata().col_specs()))
+            .transpose()
+            .map_err(DriverExecuteError::row_factory_failed)?;
+
+        Ok(Self {
             query_pager,
             query_result: Arc::new(query_result),
-            row_factory,
-        }
+            row_builder,
+        })
     }
 
     /// Returns `true` if more pages are available.
@@ -45,7 +54,7 @@ impl RequestResultCore {
     /// Fetches the next page, or returns `None` if no more pages exist.
     pub(crate) async fn fetch_next_page(self) -> PyResult<Option<RequestResultCore>> {
         let Self {
-            row_factory,
+            row_builder,
             mut query_pager,
             ..
         } = self;
@@ -54,7 +63,7 @@ impl RequestResultCore {
             return Ok(Some(RequestResultCore {
                 query_result: Arc::new(query_result?),
                 query_pager,
-                row_factory,
+                row_builder,
             }));
         }
 
@@ -65,13 +74,12 @@ impl RequestResultCore {
     /// further pages as needed, or `None` if no more rows exist.
     pub(crate) async fn first_row(self) -> PyResult<Py<PyAny>> {
         let Self {
-            row_factory,
+            row_builder,
             mut query_pager,
             query_result,
         } = self;
 
-        let mut rows_iterator =
-            Python::attach(|py| RowsIteratorKind::new(py, query_result, row_factory))?;
+        let mut rows_iterator = RowsIteratorKind::new(query_result, row_builder);
 
         match next_row_with_paging(&mut rows_iterator, &mut query_pager).await {
             Some(res) => res.map_err(Into::into),
@@ -82,28 +90,18 @@ impl RequestResultCore {
     /// Returns every remaining row across every remaining page as a list.
     pub(crate) async fn all(self) -> PyResult<Py<PyList>> {
         let Self {
-            row_factory,
+            row_builder,
             mut query_pager,
             query_result,
         } = self;
 
-        let (mut rows_iterator, list) =
-            Python::attach(|py| -> PyResult<(RowsIteratorKind, Py<PyList>)> {
-                Ok((
-                    RowsIteratorKind::new(py, query_result, row_factory)?,
-                    PyList::empty(py).into(),
-                ))
-            })?;
+        let mut rows_iterator = RowsIteratorKind::new(query_result, row_builder);
+        let list: Py<PyList> = Python::attach(|py| PyList::empty(py).into());
 
         // Drain all rows from the current page, then fetch the next page.
         // This is done to hold the GIL for longer and avoid frequent reacquisition.
-        let mut next_page: Option<QueryResult> = None;
         loop {
             Python::attach(|py| -> PyResult<()> {
-                if let Some(next_page) = next_page.take() {
-                    rows_iterator.update(py, Arc::new(next_page))?;
-                }
-
                 while let Some(res_row) = rows_iterator.next(py) {
                     list.bind(py).append(res_row?)?;
                 }
@@ -111,14 +109,47 @@ impl RequestResultCore {
                 Ok(())
             })?;
 
-            if let Some(res) = query_pager.fetch_next_page().await {
-                next_page = Some(res?);
-            } else {
+            let Some(next_page) = query_pager.fetch_next_page().await else {
                 break;
-            }
+            };
+
+            rows_iterator.update(Arc::new(next_page?));
         }
 
         Ok(list)
+    }
+}
+
+/// A finished request whose rows are not bound to a row factory yet.
+pub(crate) struct PendingRequestResult {
+    query_result: QueryResult,
+    query_pager: Pager,
+    factory: PyRowFactory,
+}
+
+impl PendingRequestResult {
+    pub(crate) fn new(
+        query_result: QueryResult,
+        query_pager: Pager,
+        factory: PyRowFactory,
+    ) -> Self {
+        Self {
+            query_result,
+            query_pager,
+            factory,
+        }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for PendingRequestResult {
+    type Target = RequestResult;
+    type Output = Bound<'py, RequestResult>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let core = RequestResultCore::new(py, self.query_result, self.query_pager, self.factory)?;
+
+        Bound::new(py, RequestResult::from(core))
     }
 }
 
@@ -138,9 +169,7 @@ pub(crate) async fn next_row_with_paging(
             Err(e) => return Some(Err(DriverRowIterationError::FailedToFetchNextPage(e))),
         };
 
-        if let Err(err) = Python::attach(|py| rows_iterator.update(py, Arc::new(query_result))) {
-            return Some(Err(DriverRowIterationError::PythonError(err)));
-        }
+        rows_iterator.update(Arc::new(query_result));
     }
 }
 

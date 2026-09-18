@@ -3,12 +3,12 @@ import uuid
 import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
+from helpers.session import connect
 from scylla.session import Session
-from scylla.session_builder import SessionBuilder
 
 
 async def set_up() -> Session:
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
+    session = await connect()
 
     await ddl(
         session,

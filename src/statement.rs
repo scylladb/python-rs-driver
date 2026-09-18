@@ -1,3 +1,4 @@
+use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{PyConsistency, PySerialConsistency};
 use crate::errors::DriverStatementConfigError;
 use crate::execution_profile::PyExecutionProfile;
@@ -17,6 +18,64 @@ use crate::cluster::metadata::query_metadata::{column_spec_tuple, partition_key_
 use crate::policies::load_balancing::PyLoadBalancingPolicy;
 use crate::utils::WithOriginalPyObject;
 
+/// The Python-side settings a statement or a batch carries.
+#[derive(Clone, Default)]
+pub(crate) struct PyStatementSettings {
+    pub(crate) execution_profile: Option<Py<PyExecutionProfile>>,
+    pub(crate) load_balancing_policy: Option<Py<PyAny>>,
+    pub(crate) retry_policy: Option<Py<PyAny>>,
+    /// Row factory for requests running this statement, unless the call names
+    /// one itself. Falls back to the execution profile's when unset.
+    pub(crate) row_factory: Option<WithOriginalPyObject<PyRowFactory>>,
+}
+
+impl PyStatementSettings {
+    /// The row factory the request target asks for: its own, else the one on
+    /// its execution profile. `None` when it asks for neither.
+    pub(crate) fn row_factory(&self) -> Option<PyRowFactory> {
+        self.row_factory
+            .as_ref()
+            .or_else(|| self.execution_profile.as_ref()?.get().row_factory.as_ref())
+            .map(|f| f.extracted.clone())
+    }
+
+    /// The row factory object the user passed, for the Python getter.
+    pub(crate) fn py_row_factory(&self) -> Option<Py<PyAny>> {
+        self.row_factory.as_ref().map(|f| f.original.clone())
+    }
+
+    pub(crate) fn with_execution_profile(&self, profile: Option<Py<PyExecutionProfile>>) -> Self {
+        Self {
+            execution_profile: profile,
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn with_load_balancing_policy(&self, policy: Option<Py<PyAny>>) -> Self {
+        Self {
+            load_balancing_policy: policy,
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn with_retry_policy(&self, policy: Option<Py<PyAny>>) -> Self {
+        Self {
+            retry_policy: policy,
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn with_row_factory(
+        &self,
+        factory: Option<WithOriginalPyObject<PyRowFactory>>,
+    ) -> Self {
+        Self {
+            row_factory: factory,
+            ..self.clone()
+        }
+    }
+}
+
 #[pyclass(name = "PreparedStatement", frozen)]
 pub(crate) struct PyPreparedStatement {
     pub(crate) inner: PreparedStatement,
@@ -25,9 +84,8 @@ pub(crate) struct PyPreparedStatement {
     // between `Unset` and `None` in a different way. To preserve this distinction, an additional
     // flag `is_serial_consistency_set` is required.
     is_serial_consistency_set: bool,
-    pub(crate) execution_profile: Option<Py<PyExecutionProfile>>,
-    pub(crate) load_balancing_policy: Option<Py<PyAny>>,
-    pub(crate) retry_policy: Option<Py<PyAny>>,
+    /// Inherited from the statement this was prepared from.
+    pub(crate) settings: PyStatementSettings,
 
     /// Cached Python-side query id.
     query_id: PyOnceLock<Py<PyBytes>>,
@@ -45,16 +103,12 @@ impl PyPreparedStatement {
     pub(crate) fn new(
         inner: PreparedStatement,
         is_serial_consistency_set: bool,
-        execution_profile: Option<Py<PyExecutionProfile>>,
-        load_balancing_policy: Option<Py<PyAny>>,
-        retry_policy: Option<Py<PyAny>>,
+        settings: PyStatementSettings,
     ) -> Self {
         Self {
             inner,
             is_serial_consistency_set,
-            execution_profile,
-            load_balancing_policy,
-            retry_policy,
+            settings,
 
             query_id: PyOnceLock::new(),
             bind_columns: PyOnceLock::new(),
@@ -66,15 +120,34 @@ impl PyPreparedStatement {
 
 #[pymethods]
 impl PyPreparedStatement {
+    fn with_row_factory(&self, factory: WithOriginalPyObject<PyRowFactory>) -> Self {
+        Self::new(
+            self.inner.clone(),
+            self.is_serial_consistency_set,
+            self.settings.with_row_factory(Some(factory)),
+        )
+    }
+
+    fn without_row_factory(&self) -> Self {
+        Self::new(
+            self.inner.clone(),
+            self.is_serial_consistency_set,
+            self.settings.with_row_factory(None),
+        )
+    }
+
+    #[getter]
+    fn get_row_factory(&self) -> Option<Py<PyAny>> {
+        self.settings.py_row_factory()
+    }
+
     fn with_execution_profile(&self, profile: Py<PyExecutionProfile>) -> Self {
         let mut p = self.inner.clone();
         p.set_execution_profile_handle(Some(profile.get().inner.clone().into_handle()));
         Self::new(
             p,
             self.is_serial_consistency_set,
-            Some(profile),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
+            self.settings.with_execution_profile(Some(profile)),
         )
     }
 
@@ -84,15 +157,13 @@ impl PyPreparedStatement {
         Self::new(
             p,
             self.is_serial_consistency_set,
-            None,
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
+            self.settings.with_execution_profile(None),
         )
     }
 
     #[getter]
     fn get_execution_profile(&self) -> Option<Py<PyExecutionProfile>> {
-        self.execution_profile.clone()
+        self.settings.execution_profile.clone()
     }
 
     fn with_load_balancing_policy(
@@ -104,9 +175,8 @@ impl PyPreparedStatement {
         Ok(Self::new(
             p,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            Some(py_policy.original),
-            self.retry_policy.clone(),
+            self.settings
+                .with_load_balancing_policy(Some(py_policy.original)),
         ))
     }
 
@@ -116,39 +186,25 @@ impl PyPreparedStatement {
         Self::new(
             p,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            None,
-            self.retry_policy.clone(),
+            self.settings.with_load_balancing_policy(None),
         )
     }
 
     #[getter]
     fn get_load_balancing_policy(&self) -> Option<Py<PyAny>> {
-        self.load_balancing_policy.clone()
+        self.settings.load_balancing_policy.clone()
     }
 
     fn with_consistency(&self, c: PyConsistency) -> Self {
         let mut p = self.inner.clone();
         p.set_consistency(c.into());
-        Self::new(
-            p,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(p, self.is_serial_consistency_set, self.settings.clone())
     }
 
     fn without_consistency(&self) -> Self {
         let mut p = self.inner.clone();
         p.unset_consistency();
-        Self::new(
-            p,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(p, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]
@@ -160,26 +216,14 @@ impl PyPreparedStatement {
         let mut p = self.inner.clone();
         p.set_serial_consistency(sc.map(SerialConsistency::from));
 
-        Self::new(
-            p,
-            true,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(p, true, self.settings.clone())
     }
 
     fn without_serial_consistency(&self) -> Self {
         let mut p = self.inner.clone();
         p.unset_serial_consistency();
 
-        Self::new(
-            p,
-            false,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(p, false, self.settings.clone())
     }
 
     #[getter]
@@ -214,22 +258,14 @@ impl PyPreparedStatement {
         Ok(Self::new(
             p,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
+            self.settings.clone(),
         ))
     }
 
     fn without_request_timeout(&self) -> Self {
         let mut p = self.inner.clone();
         p.set_request_timeout(None);
-        Self::new(
-            p,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(p, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]
@@ -244,13 +280,7 @@ impl PyPreparedStatement {
     fn with_page_size(&self, page_size: i32) -> Self {
         let mut p = self.inner.clone();
         p.set_page_size(page_size);
-        Self::new(
-            p,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(p, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]
@@ -268,9 +298,7 @@ impl PyPreparedStatement {
         Ok(Self::new(
             p,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            Some(py_policy.original),
+            self.settings.with_retry_policy(Some(py_policy.original)),
         ))
     }
 
@@ -281,28 +309,23 @@ impl PyPreparedStatement {
         Self::new(
             p,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            None,
+            self.settings.with_retry_policy(None),
         )
     }
 
     #[getter]
     fn get_retry_policy(&self, py: Python<'_>) -> Option<Py<PyAny>> {
-        self.retry_policy.as_ref().map(|rp| rp.clone_ref(py))
+        self.settings
+            .retry_policy
+            .as_ref()
+            .map(|rp| rp.clone_ref(py))
     }
 
     fn set_is_idempotent(&self, is_idempotent: bool) -> Self {
         let mut p = self.inner.clone();
         p.set_is_idempotent(is_idempotent);
 
-        Self::new(
-            p,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(p, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]
@@ -373,26 +396,19 @@ pub(crate) struct PyStatement {
     // between `Unset` and `None` in a different way. To preserve this distinction, an additional
     // flag `is_serial_consistency_set` is required.
     is_serial_consistency_set: bool,
-    pub(crate) execution_profile: Option<Py<PyExecutionProfile>>,
-    pub(crate) load_balancing_policy: Option<Py<PyAny>>,
-    pub(crate) retry_policy: Option<Py<PyAny>>,
+    pub(crate) settings: PyStatementSettings,
 }
 
 impl PyStatement {
     pub(crate) fn new(
         inner: Statement,
         is_serial_consistency_set: bool,
-
-        execution_profile: Option<Py<PyExecutionProfile>>,
-        load_balancing_policy: Option<Py<PyAny>>,
-        retry_policy: Option<Py<PyAny>>,
+        settings: PyStatementSettings,
     ) -> Self {
         Self {
             inner,
             is_serial_consistency_set,
-            execution_profile,
-            load_balancing_policy,
-            retry_policy,
+            settings,
         }
     }
 }
@@ -402,12 +418,33 @@ impl PyStatement {
     #[new]
     fn py_new(query_str: String) -> Self {
         let s = Statement::from(query_str);
-        Self::new(s, false, None, None, None)
+        Self::new(s, false, PyStatementSettings::default())
     }
 
     #[getter]
     fn contents<'py>(&self, py: Python<'py>) -> Bound<'py, PyString> {
         PyString::new(py, &self.inner.contents)
+    }
+
+    fn with_row_factory(&self, factory: WithOriginalPyObject<PyRowFactory>) -> Self {
+        Self::new(
+            self.inner.clone(),
+            self.is_serial_consistency_set,
+            self.settings.with_row_factory(Some(factory)),
+        )
+    }
+
+    fn without_row_factory(&self) -> Self {
+        Self::new(
+            self.inner.clone(),
+            self.is_serial_consistency_set,
+            self.settings.with_row_factory(None),
+        )
+    }
+
+    #[getter]
+    fn get_row_factory(&self) -> Option<Py<PyAny>> {
+        self.settings.py_row_factory()
     }
 
     fn with_execution_profile(&self, profile: Py<PyExecutionProfile>) -> Self {
@@ -416,9 +453,7 @@ impl PyStatement {
         Self::new(
             s,
             self.is_serial_consistency_set,
-            Some(profile),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
+            self.settings.with_execution_profile(Some(profile)),
         )
     }
 
@@ -428,15 +463,13 @@ impl PyStatement {
         Self::new(
             s,
             self.is_serial_consistency_set,
-            None,
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
+            self.settings.with_execution_profile(None),
         )
     }
 
     #[getter]
     fn get_execution_profile(&self) -> Option<Py<PyExecutionProfile>> {
-        self.execution_profile.clone()
+        self.settings.execution_profile.clone()
     }
 
     fn with_load_balancing_policy(
@@ -448,9 +481,8 @@ impl PyStatement {
         Ok(Self::new(
             s,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            Some(py_policy.original),
-            self.retry_policy.clone(),
+            self.settings
+                .with_load_balancing_policy(Some(py_policy.original)),
         ))
     }
 
@@ -460,39 +492,25 @@ impl PyStatement {
         Self::new(
             s,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            None,
-            self.retry_policy.clone(),
+            self.settings.with_load_balancing_policy(None),
         )
     }
 
     #[getter]
     fn get_load_balancing_policy(&self) -> Option<Py<PyAny>> {
-        self.load_balancing_policy.clone()
+        self.settings.load_balancing_policy.clone()
     }
 
     fn with_consistency(&self, c: PyConsistency) -> Self {
         let mut s = self.inner.clone();
         s.set_consistency(c.into());
-        Self::new(
-            s,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(s, self.is_serial_consistency_set, self.settings.clone())
     }
 
     fn without_consistency(&self) -> Self {
         let mut s = self.inner.clone();
         s.unset_consistency();
-        Self::new(
-            s,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(s, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]
@@ -503,25 +521,13 @@ impl PyStatement {
     fn with_serial_consistency(&self, sc: Option<PySerialConsistency>) -> Self {
         let mut s = self.inner.clone();
         s.set_serial_consistency(sc.map(SerialConsistency::from));
-        Self::new(
-            s,
-            true,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(s, true, self.settings.clone())
     }
 
     fn without_serial_consistency(&self) -> Self {
         let mut s = self.inner.clone();
         s.unset_serial_consistency();
-        Self::new(
-            s,
-            false,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(s, false, self.settings.clone())
     }
 
     #[getter]
@@ -554,22 +560,14 @@ impl PyStatement {
         Ok(Self::new(
             s,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
+            self.settings.clone(),
         ))
     }
 
     fn without_request_timeout(&self) -> Self {
         let mut s = self.inner.clone();
         s.set_request_timeout(None);
-        Self::new(
-            s,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(s, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]
@@ -584,13 +582,7 @@ impl PyStatement {
     fn with_page_size(&self, page_size: i32) -> Self {
         let mut s = self.inner.clone();
         s.set_page_size(page_size);
-        Self::new(
-            s,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(s, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]
@@ -608,9 +600,7 @@ impl PyStatement {
         Ok(Self::new(
             s,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            Some(py_policy.original),
+            self.settings.with_retry_policy(Some(py_policy.original)),
         ))
     }
 
@@ -621,28 +611,23 @@ impl PyStatement {
         Self::new(
             s,
             self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            None,
+            self.settings.with_retry_policy(None),
         )
     }
 
     #[getter]
     fn get_retry_policy(&self, py: Python<'_>) -> Option<Py<PyAny>> {
-        self.retry_policy.as_ref().map(|rp| rp.clone_ref(py))
+        self.settings
+            .retry_policy
+            .as_ref()
+            .map(|rp| rp.clone_ref(py))
     }
 
     fn set_is_idempotent(&self, is_idempotent: bool) -> Self {
         let mut s = self.inner.clone();
         s.set_is_idempotent(is_idempotent);
 
-        Self::new(
-            s,
-            self.is_serial_consistency_set,
-            self.execution_profile.clone(),
-            self.load_balancing_policy.clone(),
-            self.retry_policy.clone(),
-        )
+        Self::new(s, self.is_serial_consistency_set, self.settings.clone())
     }
 
     #[getter]

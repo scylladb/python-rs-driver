@@ -63,6 +63,7 @@ create_exception!(errors, TlsError, ScyllaError);
 
 create_exception!(errors, LoadBalancingPolicyError, ScyllaError);
 create_exception!(errors, RetryPolicyError, ScyllaError);
+create_exception!(errors, RowFactoryError, ScyllaError);
 create_exception!(errors, FutureCancelledError, PyException);
 create_exception!(errors, SpeculativeExecutionPolicyError, ScyllaError);
 
@@ -136,6 +137,55 @@ impl From<DriverSpeculativeExecutionPolicyError> for PyErr {
     }
 }
 
+/* Row factory errors */
+
+/// Errors that can occur while accepting a row factory from Python.
+#[derive(Debug, thiserror::Error)]
+pub enum DriverRowFactoryError {
+    #[error(
+        "invalid row factory '{type_name}': expected a built-in row factory, a callable taking \
+         the row values, or an object with a 'prepare' method returning one"
+    )]
+    InvalidFactory { type_name: String },
+
+    #[error(
+        "invalid ClassRowFactory target '{type_name}': expected a callable accepting the column \
+         names as keyword arguments"
+    )]
+    InvalidClass { type_name: String },
+
+    #[error(
+        "'prepare' returned an invalid row builder '{type_name}': expected a callable taking the \
+         row values"
+    )]
+    UncallableBuilder { type_name: String },
+}
+
+impl DriverRowFactoryError {
+    /* Constructors */
+
+    pub fn invalid_factory(obj: Borrowed<PyAny>) -> Self {
+        let type_name = get_type_name(obj);
+        Self::InvalidFactory { type_name }
+    }
+
+    pub fn invalid_class(obj: Borrowed<PyAny>) -> Self {
+        let type_name = get_type_name(obj);
+        Self::InvalidClass { type_name }
+    }
+
+    pub fn uncallable_builder(obj: Borrowed<PyAny>) -> Self {
+        let type_name = get_type_name(obj);
+        Self::UncallableBuilder { type_name }
+    }
+}
+
+impl From<DriverRowFactoryError> for PyErr {
+    fn from(e: DriverRowFactoryError) -> PyErr {
+        RowFactoryError::new_err(e.to_string())
+    }
+}
+
 /* Row iteration errors */
 
 #[derive(Debug)]
@@ -146,6 +196,18 @@ pub enum DriverRowIterationError {
     FailedToFetchNextPage(DriverExecuteError),
     /// An error occurred in Python code during processing of a row.
     PythonError(PyErr),
+}
+
+impl From<PyErr> for DriverRowIterationError {
+    fn from(e: PyErr) -> Self {
+        DriverRowIterationError::PythonError(e)
+    }
+}
+
+impl From<DriverDeserializationError> for DriverRowIterationError {
+    fn from(e: DriverDeserializationError) -> Self {
+        DriverRowIterationError::Deserialization(e)
+    }
 }
 
 impl From<DriverRowIterationError> for PyErr {
@@ -972,6 +1034,8 @@ pub enum DriverStatementConversionError {
     InvalidStatementType { type_name: String },
     /// Failed to convert a Python string object into a Rust string when extracting a statement.
     StatementStringConversionFailed { source: Box<PyErr> },
+    /// Attempted to prepare an already prepared statement.
+    CannotPreparePreparedStatement,
 }
 
 impl DriverStatementConversionError {
@@ -980,6 +1044,10 @@ impl DriverStatementConversionError {
     pub fn invalid_statement_type(obj: Borrowed<PyAny>) -> Self {
         let type_name = get_type_name(obj);
         Self::InvalidStatementType { type_name }
+    }
+
+    pub fn cannot_prepare_prepared_statement() -> Self {
+        Self::CannotPreparePreparedStatement
     }
 
     pub fn statement_string_conversion_failed(source: PyErr) -> Self {
@@ -1006,6 +1074,14 @@ impl From<DriverStatementConversionError> for PyErr {
                 err.set_cause(py, Some(*source));
                 err
             }
+
+            // Raised as a `PrepareError` rather than a `StatementConversionError`:
+            // the type is a valid statement, it just cannot be prepared again.
+            DriverStatementConversionError::CannotPreparePreparedStatement => {
+                PrepareError::new_err(
+                    "Cannot prepare a PreparedStatement; expected a str or Statement",
+                )
+            }
         })
     }
 }
@@ -1027,6 +1103,8 @@ pub enum DriverExecuteError {
     },
     /// The Tokio runtime task responsible for executing the query failed to join.
     RuntimeTaskJoinFailed { message: Box<str> },
+    /// Resolving the row factory against the result metadata failed.
+    RowFactoryFailed { source: PyErr },
 }
 
 impl DriverExecuteError {
@@ -1051,6 +1129,10 @@ impl DriverExecuteError {
     pub fn serialization_failed(source: scylla::serialize::SerializationError) -> Self {
         Self::SerializationFailed { source }
     }
+
+    pub fn row_factory_failed(source: PyErr) -> Self {
+        Self::RowFactoryFailed { source }
+    }
 }
 
 impl From<DriverExecuteError> for PyErr {
@@ -1074,6 +1156,14 @@ impl From<DriverExecuteError> for PyErr {
                 let message = format!("Failed to serialize values: {source}");
                 ExecuteError::new_err(message)
             }
+
+            DriverExecuteError::RowFactoryFailed { source } => Python::attach(|py| {
+                let err = ExecuteError::new_err(
+                    "Failed to prepare the row factory for the result metadata",
+                );
+                err.set_cause(py, Some(source));
+                err
+            }),
         }
     }
 }
@@ -1096,8 +1186,6 @@ pub enum DriverPrepareError {
     RustDriverPrepareError {
         source: Box<scylla::errors::PrepareError>,
     },
-    /// Attempted to prepare an already prepared statement.
-    CannotPreparePreparedStatement,
 }
 
 impl DriverPrepareError {
@@ -1107,10 +1195,6 @@ impl DriverPrepareError {
         Self::RustDriverPrepareError {
             source: Box::new(source),
         }
-    }
-
-    pub fn cannot_prepare_prepared_statement() -> Self {
-        Self::CannotPreparePreparedStatement
     }
 }
 
@@ -1122,10 +1206,6 @@ impl From<DriverPrepareError> for PyErr {
 
                 PrepareError::new_err(message)
             }
-
-            DriverPrepareError::CannotPreparePreparedStatement => PrepareError::new_err(
-                "Cannot prepare a PreparedStatement; expected a str or Statement",
-            ),
         }
     }
 }
@@ -1845,6 +1925,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<SchemaAgreementError>(),
     )?;
     module.add("ExecuteError", py.get_type::<ExecuteError>())?;
+    module.add("RowFactoryError", py.get_type::<RowFactoryError>())?;
     module.add(
         "StatementConfigError",
         py.get_type::<StatementConfigError>(),

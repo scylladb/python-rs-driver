@@ -1,3 +1,4 @@
+use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{PyConsistency, PySerialConsistency};
 use crate::errors::DriverStatementConfigError;
 use crate::policies::load_balancing::PyLoadBalancingPolicy;
@@ -15,6 +16,11 @@ pub(crate) struct PyExecutionProfile {
     pub(crate) retry_policy: Option<Py<PyAny>>,
     pub(crate) load_balancing_policy: Option<Py<PyAny>>,
     pub(crate) speculative_execution_policy: Option<Py<PyAny>>,
+    /// Row factory for requests that do not name one themselves. Kept beside
+    /// `inner` rather than in it: the Rust profile cannot carry a Python object.
+    /// Kept with the object it came from, so the getter can hand back exactly
+    /// what the user passed. Same arrangement as the policies above.
+    pub(crate) row_factory: Option<WithOriginalPyObject<PyRowFactory>>,
 }
 
 #[pymethods]
@@ -27,7 +33,9 @@ impl PyExecutionProfile {
         load_balancing_policy=None,
         retry_policy=None,
         speculative_execution_policy=None,
+        row_factory=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         _py: Python<'_>,
         timeout: Option<f64>,
@@ -36,6 +44,7 @@ impl PyExecutionProfile {
         load_balancing_policy: Option<WithOriginalPyObject<PyLoadBalancingPolicy>>,
         retry_policy: Option<WithOriginalPyObject<PyRetryPolicy>>,
         speculative_execution_policy: Option<WithOriginalPyObject<PySpeculativeExecutionPolicy>>,
+        row_factory: Option<WithOriginalPyObject<PyRowFactory>>,
     ) -> Result<Self, DriverStatementConfigError> {
         let mut profile_builder = ExecutionProfile::builder();
 
@@ -79,6 +88,7 @@ impl PyExecutionProfile {
             retry_policy: original_retry_policy,
             load_balancing_policy: original_lbp,
             speculative_execution_policy: original_speculative_execution_policy,
+            row_factory,
         })
     }
 
@@ -112,6 +122,11 @@ impl PyExecutionProfile {
     #[getter]
     pub(crate) fn get_speculative_execution_policy(&self) -> Option<Py<PyAny>> {
         self.speculative_execution_policy.clone()
+    }
+
+    #[getter]
+    pub(crate) fn get_row_factory(&self) -> Option<Py<PyAny>> {
+        self.row_factory.as_ref().map(|f| f.original.clone())
     }
 }
 

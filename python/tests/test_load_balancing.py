@@ -7,18 +7,18 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
+from helpers.session import connect
 from pytest import LogCaptureFixture
 from scylla.cluster import ClusterState, Node
 from scylla.enums import Consistency, SerialConsistency
 from scylla.errors import ExecuteError
 from scylla.policies.load_balancing import DefaultPolicy, LoadBalancingPolicy, NodeLocationPreference, RoutingInfo
 from scylla.session import Session
-from scylla.session_builder import SessionBuilder
 from scylla.statement import Statement
 
 
 async def set_up() -> Session:
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
+    session = await connect()
     await ddl(
         session,
         """

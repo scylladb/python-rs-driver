@@ -6,13 +6,13 @@ from collections.abc import AsyncGenerator, Iterable
 import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
+from helpers.session import connect
 from scylla.batch import Batch
 from scylla.cluster import ClusterState, Node
 from scylla.errors import ExecuteError
 from scylla.policies.load_balancing import RoutingInfo
 from scylla.routing import Shard
 from scylla.session import Session
-from scylla.session_builder import SessionBuilder
 from scylla.statement import Statement
 
 KEYSPACE = "test_pinning_ks"
@@ -22,7 +22,7 @@ COORDINATOR_QUERY = "SELECT host_id FROM system.local"
 
 
 async def set_up() -> Session:
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
+    session = await connect()
     await ddl(
         session,
         f"""
