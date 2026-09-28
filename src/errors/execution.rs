@@ -1,12 +1,11 @@
 use pyo3::prelude::*;
 use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 
-use crate::errors::request::execution_error_to_pyerr;
+use crate::errors::request::{execution_error_to_pyerr, use_keyspace_error_to_pyerr};
 use crate::errors::{
-    BadKeyspaceNameError, InternalDriverError, KeyspaceNameMismatchError, MetadataRefreshError,
-    PagingStateNotAllowed, PrepareError, RequestError, RequestTimeoutError, RowFactoryError,
-    RuntimeTaskJoinFailedError, SchemaAgreementError, SessionConnectionError,
-    StatementConversionError, TraceUnavailable, get_type_name, with_cause,
+    InternalDriverError, MetadataRefreshError, PagingStateNotAllowed, PrepareError,
+    RowFactoryError, SchemaAgreementError, SessionConnectionError, StatementConversionError,
+    TraceUnavailable, get_type_name, with_cause,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -310,27 +309,13 @@ pub(crate) enum DriverUseKeyspaceError {
 impl From<DriverUseKeyspaceError> for PyErr {
     fn from(e: DriverUseKeyspaceError) -> Self {
         let message = e.to_string();
-        match e {
-            DriverUseKeyspaceError::RustDriverUseKeyspaceError(source) =>
-            {
-                #[deny(clippy::wildcard_enum_match_arm)]
-                match source {
-                    RustUseKeyspaceError::BadKeyspaceName(_) => {
-                        BadKeyspaceNameError::new_err(message)
-                    }
-                    RustUseKeyspaceError::RequestError(_) => RequestError::new_err(message),
-                    RustUseKeyspaceError::KeyspaceNameMismatch { .. } => {
-                        KeyspaceNameMismatchError::new_err(message)
-                    }
-                    RustUseKeyspaceError::RequestTimeout(_) => {
-                        RequestTimeoutError::new_err(message)
-                    }
-                    _ => unreachable!("clippy testifies that the match is exhaustive"),
-                }
+        Python::attach(|py| match e {
+            DriverUseKeyspaceError::RustDriverUseKeyspaceError(source) => {
+                use_keyspace_error_to_pyerr(py, &source, message)
             }
             DriverUseKeyspaceError::RuntimeTaskJoinFailed(_) => {
-                RuntimeTaskJoinFailedError::new_err(message)
+                py_err!(InternalDriverError, message)
             }
-        }
+        })
     }
 }
