@@ -112,6 +112,7 @@ create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
 create_exception!(scylla.errors, RequestFailedError, ExecutionError);
 
 create_exception!(scylla.errors, PrepareError, ExecutionError);
+create_exception!(scylla.errors, PreparedStatementIdsMismatch, PrepareError);
 create_exception_multi!(
     scylla.errors,
     RepreparedIdChanged,
@@ -269,6 +270,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<NodeDisabledByHostFilter>(),
     )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
+    module.add(
+        "PreparedStatementIdsMismatch",
+        py.get_type::<PreparedStatementIdsMismatch>(),
+    )?;
     module.add("RepreparedIdChanged", py.get_type::<RepreparedIdChanged>())?;
     module.add(
         "RepreparedIdMissingInBatch",
