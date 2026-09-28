@@ -87,6 +87,14 @@ create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
 create_exception!(scylla.errors, MetadataError, ExecutionError);
 create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
 
+create_exception!(scylla.errors, UseKeyspaceError, ExecutionError);
+create_exception_multi!(
+    scylla.errors,
+    BadKeyspaceName,
+    (UseKeyspaceError, PyValueError)
+);
+create_exception!(scylla.errors, KeyspaceNameMismatch, UseKeyspaceError);
+
 create_exception!(scylla.errors, ConnectionPoolError, ExecutionError);
 create_exception!(scylla.errors, ConnectionPoolBroken, ConnectionPoolError);
 create_exception!(
@@ -142,12 +150,6 @@ create_exception!(scylla.errors, StatementConfigError, ScyllaError);
 create_exception!(scylla.errors, BatchError, ScyllaError);
 
 create_exception!(scylla.errors, ClusterStateTokenError, ScyllaError);
-create_exception!(scylla.errors, UseKeyspaceError, ScyllaError);
-create_exception!(scylla.errors, BadKeyspaceNameError, UseKeyspaceError);
-create_exception!(scylla.errors, RequestError, UseKeyspaceError);
-create_exception!(scylla.errors, KeyspaceNameMismatchError, UseKeyspaceError);
-create_exception!(scylla.errors, RequestTimeoutError, UseKeyspaceError);
-create_exception!(scylla.errors, RuntimeTaskJoinFailedError, UseKeyspaceError);
 create_exception!(scylla.errors, AddressTranslationError, ScyllaError);
 create_exception!(scylla.errors, HostFilterError, ScyllaError);
 create_exception!(scylla.errors, TlsError, ScyllaError);
@@ -340,19 +342,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<ClusterStateTokenError>(),
     )?;
     module.add("UseKeyspaceError", py.get_type::<UseKeyspaceError>())?;
+    module.add("BadKeyspaceName", py.get_type::<BadKeyspaceName>())?;
     module.add(
-        "BadKeyspaceNameError",
-        py.get_type::<BadKeyspaceNameError>(),
-    )?;
-    module.add("RequestError", py.get_type::<RequestError>())?;
-    module.add(
-        "KeyspaceNameMismatchError",
-        py.get_type::<KeyspaceNameMismatchError>(),
-    )?;
-    module.add("RequestTimeoutError", py.get_type::<RequestTimeoutError>())?;
-    module.add(
-        "RuntimeTaskJoinFailedError",
-        py.get_type::<RuntimeTaskJoinFailedError>(),
+        "KeyspaceNameMismatch",
+        py.get_type::<KeyspaceNameMismatch>(),
     )?;
     module.add(
         "AddressTranslationError",
