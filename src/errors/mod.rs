@@ -3,6 +3,9 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
+#[macro_use]
+mod macros;
+
 pub(crate) mod config;
 pub(crate) mod execution;
 
