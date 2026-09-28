@@ -1,7 +1,9 @@
 use pyo3::prelude::*;
 use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 
-use crate::errors::request::{execution_error_to_pyerr, use_keyspace_error_to_pyerr};
+use crate::errors::request::{
+    execution_error_to_pyerr, prepare_error_to_pyerr, use_keyspace_error_to_pyerr,
+};
 use crate::errors::{
     InternalDriverError, MetadataRefreshError, PagingStateNotAllowed, PrepareError,
     RowFactoryError, SchemaAgreementError, SessionConnectionError, StatementConversionError,
@@ -189,7 +191,8 @@ impl From<scylla::errors::PrepareError> for DriverPrepareError {
 
 impl From<DriverPrepareError> for PyErr {
     fn from(e: DriverPrepareError) -> PyErr {
-        PrepareError::new_err(e.to_string())
+        let message = e.to_string();
+        Python::attach(|py| prepare_error_to_pyerr(py, &e.0, message))
     }
 }
 

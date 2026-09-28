@@ -6,7 +6,13 @@ import pytest
 from helpers.ddl import ddl
 from helpers.session import connect
 from scylla.cql_types import CqlColumnType, CqlTextType
-from scylla.errors import LoadBalancingPolicyError, PrepareError, StatementConfigError, StatementConversionError
+from scylla.errors import (
+    CqlSyntaxError,
+    LoadBalancingPolicyError,
+    PrepareError,
+    StatementConfigError,
+    StatementConversionError,
+)
 from scylla.policies.load_balancing import DefaultPolicy
 from scylla.policies.retry import DefaultRetryPolicy
 from scylla.results import TupleRowFactory
@@ -236,10 +242,8 @@ async def test_prepare_prepared_statement_raises_session_query_error():
 async def test_prepare_invalid_query_raises_session_query_error():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
 
-    with pytest.raises(PrepareError) as exc_info:
+    with pytest.raises(CqlSyntaxError):
         await session.prepare("THIS IS NOT CQL")
-
-    assert "failed to prepare statement" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
