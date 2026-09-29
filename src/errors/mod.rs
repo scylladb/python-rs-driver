@@ -35,8 +35,6 @@ create_exception!(scylla.errors, NoKnownNodes, ContactPointError);
 
 create_exception!(scylla.errors, SessionConfigError, ScyllaError);
 
-create_exception!(scylla.errors, StatementConversionError, ScyllaError);
-
 create_exception!(scylla.errors, InternalDriverError, ScyllaError);
 
 /* Invalid input, rejected before sending - retrying won't help */
@@ -48,6 +46,18 @@ create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
 create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
 create_exception!(scylla.errors, WrongNumberOfValues, BadQuery);
 create_exception!(scylla.errors, MissingValue, BadQuery);
+
+create_exception!(scylla.errors, StatementConversionError, BadQuery);
+create_exception_multi!(
+    scylla.errors,
+    InvalidStatementType,
+    (StatementConversionError, PyTypeError)
+);
+create_exception_multi!(
+    scylla.errors,
+    AlreadyPrepared,
+    (StatementConversionError, PyTypeError)
+);
 
 create_exception!(scylla.errors, SerializationError, BadQuery);
 create_exception!(
@@ -230,6 +240,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "StatementConversionError",
         py.get_type::<StatementConversionError>(),
     )?;
+    module.add(
+        "InvalidStatementType",
+        py.get_type::<InvalidStatementType>(),
+    )?;
     module.add("InternalDriverError", py.get_type::<InternalDriverError>())?;
     module.add("BadQuery", py.get_type::<BadQuery>())?;
     module.add("ValuesTooLongForKey", py.get_type::<ValuesTooLongForKey>())?;
@@ -279,6 +293,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<NodeDisabledByHostFilter>(),
     )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
+    module.add("AlreadyPrepared", py.get_type::<AlreadyPrepared>())?;
     module.add(
         "PreparedStatementIdsMismatch",
         py.get_type::<PreparedStatementIdsMismatch>(),

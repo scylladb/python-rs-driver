@@ -1,6 +1,7 @@
 from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     AddressTranslationError,
     AlreadyExists,
+    AlreadyPrepared,
     AuthenticationFailed,
     BadKeyspaceName,
     BadQuery,
@@ -24,6 +25,7 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     InternalDriverError,
     InvalidClusterMetadata,
     InvalidRequest,
+    InvalidStatementType,
     InvalidValueSerializationError,
     IsBootstrapping,
     KeyspaceNameMismatch,
@@ -92,6 +94,7 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
 __all__ = [
     "AddressTranslationError",
     "AlreadyExists",
+    "AlreadyPrepared",
     "AuthenticationFailed",
     "BadKeyspaceName",
     "BadQuery",
@@ -115,6 +118,7 @@ __all__ = [
     "InternalDriverError",
     "InvalidClusterMetadata",
     "InvalidRequest",
+    "InvalidStatementType",
     "InvalidValueSerializationError",
     "IsBootstrapping",
     "KeyspaceNameMismatch",
