@@ -201,7 +201,14 @@ class OperationTimedOut(ExecutionError, TimeoutError):
     timeout: timedelta
 
 class NoHostAvailable(ExecutionError): ...
-class MetadataError(ExecutionError): ...
+
+class MetadataError(ExecutionError):
+    """Failures specific to cluster metadata. Request failures raise their own class."""
+
+class MetadataFetchFailed(MetadataError):
+    table: str
+
+class InvalidClusterMetadata(MetadataError): ...
 
 class SchemaAgreementError(ExecutionError):
     """Failures specific to schema agreement. Request failures raise their own class."""
@@ -312,7 +319,6 @@ class UnknownDatabaseError(DatabaseError):
     code: int
 
 # Other errors
-class MetadataRefreshError(ScyllaError): ...
 class StatementConfigError(ScyllaError): ...
 class BatchError(ScyllaError): ...
 class ClusterStateTokenError(ScyllaError): ...

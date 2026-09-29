@@ -90,6 +90,8 @@ create_exception_multi!(
 );
 create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
 create_exception!(scylla.errors, MetadataError, ExecutionError);
+create_exception!(scylla.errors, MetadataFetchFailed, MetadataError);
+create_exception!(scylla.errors, InvalidClusterMetadata, MetadataError);
 create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
 create_exception_multi!(
     scylla.errors,
@@ -165,7 +167,6 @@ create_exception!(scylla.errors, UnknownDatabaseError, DatabaseError);
 
 /* Other errors */
 
-create_exception!(scylla.errors, MetadataRefreshError, ScyllaError);
 create_exception!(scylla.errors, StatementConfigError, ScyllaError);
 
 create_exception!(scylla.errors, BatchError, ScyllaError);
@@ -258,6 +259,11 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add("OperationTimedOut", py.get_type::<OperationTimedOut>())?;
     module.add("NoHostAvailable", py.get_type::<NoHostAvailable>())?;
     module.add("MetadataError", py.get_type::<MetadataError>())?;
+    module.add("MetadataFetchFailed", py.get_type::<MetadataFetchFailed>())?;
+    module.add(
+        "InvalidClusterMetadata",
+        py.get_type::<InvalidClusterMetadata>(),
+    )?;
     module.add(
         "SchemaAgreementError",
         py.get_type::<SchemaAgreementError>(),
@@ -330,10 +336,6 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add(
         "UnknownDatabaseError",
         py.get_type::<UnknownDatabaseError>(),
-    )?;
-    module.add(
-        "MetadataRefreshError",
-        py.get_type::<MetadataRefreshError>(),
     )?;
     module.add(
         "StatementConfigError",
