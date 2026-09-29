@@ -91,6 +91,12 @@ create_exception_multi!(
 create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
 create_exception!(scylla.errors, MetadataError, ExecutionError);
 create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
+create_exception_multi!(
+    scylla.errors,
+    SchemaAgreementTimeout,
+    (SchemaAgreementError, OperationTimedOut)
+);
+create_exception!(scylla.errors, RequiredHostAbsent, SchemaAgreementError);
 
 create_exception!(scylla.errors, UseKeyspaceError, ExecutionError);
 create_exception_multi!(
@@ -256,6 +262,11 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "SchemaAgreementError",
         py.get_type::<SchemaAgreementError>(),
     )?;
+    module.add(
+        "SchemaAgreementTimeout",
+        py.get_type::<SchemaAgreementTimeout>(),
+    )?;
+    module.add("RequiredHostAbsent", py.get_type::<RequiredHostAbsent>())?;
     module.add("ConnectionPoolError", py.get_type::<ConnectionPoolError>())?;
     module.add(
         "ConnectionPoolBroken",

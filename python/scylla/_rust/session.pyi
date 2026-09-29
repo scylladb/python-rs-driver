@@ -221,8 +221,14 @@ class Session:
 
         Raises
         ------
-        RuntimeError
-            If the schema agreement could not be reached.
+        SchemaAgreementTimeout
+            If the nodes did not agree before the schema agreement timeout.
+        RequiredHostAbsent
+            If a host required for schema agreement is not in the connection pool.
+        ConnectionPoolError
+            If the driver could not get a connection to a node.
+        RequestFailedError
+            If a schema version request failed or the driver could not read its response.
         """
 
     def check_schema_agreement(self) -> DriverFuture[uuid.UUID | None]:
@@ -239,8 +245,12 @@ class Session:
 
         Raises
         ------
-        RuntimeError
-            If the schema agreement check failed.
+        RequiredHostAbsent
+            If a host required for schema agreement is not in the connection pool.
+        ConnectionPoolError
+            If the driver could not get a connection to a node.
+        RequestFailedError
+            If a schema version request failed or the driver could not read its response.
         """
 
     def refresh_metadata(self) -> DriverFuture[None]:
