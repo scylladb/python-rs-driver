@@ -6,8 +6,11 @@ use pyo3::types::PyModule;
 #[macro_use]
 mod macros;
 
+mod attrs;
 pub(crate) mod config;
 pub(crate) mod execution;
+
+pub(crate) use attrs::{ToPyAttr, with_attrs};
 
 /* Python exception classes */
 

@@ -90,3 +90,22 @@ macro_rules! create_exception_multi {
         }
     };
 }
+
+/// Creates the exception `$exc` with `$message` and sets each listed binding, converted
+/// through `ToPyAttr`, as the attribute of the same name.
+///
+/// ```ignore
+/// py_err!(py, Unavailable, message; consistency, required, alive)
+/// ```
+macro_rules! py_err {
+    ($exc: ty, $message: expr) => {
+        <$exc>::new_err($message)
+    };
+    ($py: expr, $exc: ty, $message: expr; $($attr: ident),+ $(,)?) => {
+        $crate::errors::with_attrs(
+            $py,
+            <$exc>::new_err($message),
+            &[$((stringify!($attr), &$attr as &dyn $crate::errors::ToPyAttr)),+],
+        )
+    };
+}
