@@ -7,23 +7,24 @@ use pyo3::prelude::*;
 use scylla::errors::{
     BadQuery as RustBadQuery, ConnectionPoolError as RustConnectionPoolError, DbError,
     ExecutionError as RustExecutionError, MetadataError as RustMetadataError,
-    MetadataFetchError as RustMetadataFetchError, MetadataFetchErrorKind, NextPageError,
-    NextRowError, PrepareError as RustPrepareError, RequestAttemptError,
-    RequestError as RustRequestError, SchemaAgreementError as RustSchemaAgreementError,
-    UseKeyspaceError as RustUseKeyspaceError,
+    MetadataFetchError as RustMetadataFetchError, MetadataFetchErrorKind,
+    NewSessionError as RustNewSessionError, NextPageError, NextRowError,
+    PrepareError as RustPrepareError, RequestAttemptError, RequestError as RustRequestError,
+    SchemaAgreementError as RustSchemaAgreementError, UseKeyspaceError as RustUseKeyspaceError,
 };
 
 use crate::errors::{
     AlreadyExists, AuthenticationFailed, BadKeyspaceName, BrokenConnection, ConnectionBusy,
     ConnectionPoolBroken, ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure,
-    InvalidClusterMetadata, InvalidRequest, IsBootstrapping, KeyspaceNameMismatch,
-    MetadataFetchFailed, NoHostAvailable, NodeDisabledByHostFilter, NonfinishedPagingState,
-    OperationTimedOut, Overloaded, PartitionKeyExtractionFailed, PreparedStatementIdsMismatch,
-    RateLimitReached, ReadFailure, ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch,
-    RequestSerializationError, RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout,
-    ServerConfigError, ServerError, ServerProtocolError, TooManyStatementsInBatch, TruncateError,
-    Unauthorized, Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared,
-    ValuesTooLongForKey, WriteFailure, WriteTimeout, with_attrs,
+    HostnameResolutionFailed, InvalidClusterMetadata, InvalidRequest, IsBootstrapping,
+    KeyspaceNameMismatch, MetadataFetchFailed, NoHostAvailable, NoKnownNodes,
+    NodeDisabledByHostFilter, NonfinishedPagingState, OperationTimedOut, Overloaded,
+    PartitionKeyExtractionFailed, PreparedStatementIdsMismatch, RateLimitReached, ReadFailure,
+    ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestSerializationError,
+    RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout, ServerConfigError, ServerError,
+    ServerProtocolError, SessionConfigError, TooManyStatementsInBatch, TruncateError, Unauthorized,
+    Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey,
+    WriteFailure, WriteTimeout, with_attrs,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -48,6 +49,25 @@ pub(crate) fn execution_error_to_pyerr(
             schema_agreement_error_to_pyerr(py, e, message)
         }
         RustExecutionError::MetadataError(e) => metadata_error_to_pyerr(py, e, message),
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+/// Maps a failure to create a session; failures of the initial metadata fetch or `USE` keep their own class.
+#[deny(clippy::wildcard_enum_match_arm)]
+pub(crate) fn new_session_error_to_pyerr(
+    py: Python<'_>,
+    err: &RustNewSessionError,
+    message: String,
+) -> PyErr {
+    match err {
+        RustNewSessionError::FailedToResolveAnyHostname(hostnames) => {
+            py_err!(py, HostnameResolutionFailed, message; hostnames)
+        }
+        RustNewSessionError::EmptyKnownNodesList => py_err!(NoKnownNodes, message),
+        RustNewSessionError::MetadataError(e) => metadata_error_to_pyerr(py, e, message),
+        RustNewSessionError::UseKeyspaceError(e) => use_keyspace_error_to_pyerr(py, e, message),
+        RustNewSessionError::IllegalConfig(_) => py_err!(SessionConfigError, message),
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }

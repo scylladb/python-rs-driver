@@ -30,7 +30,9 @@ create_exception!(
 create_exception!(scylla.errors, DecodeFailedError, DeserializationError);
 create_exception!(scylla.errors, PyConversionFailedError, DeserializationError);
 
-create_exception!(scylla.errors, SessionConnectionError, ScyllaError);
+create_exception!(scylla.errors, ContactPointError, ScyllaError);
+create_exception!(scylla.errors, HostnameResolutionFailed, ContactPointError);
+create_exception!(scylla.errors, NoKnownNodes, ContactPointError);
 
 create_exception!(scylla.errors, SessionConfigError, ScyllaError);
 
@@ -231,10 +233,12 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "PyConversionFailedError",
         py.get_type::<PyConversionFailedError>(),
     )?;
+    module.add("ContactPointError", py.get_type::<ContactPointError>())?;
     module.add(
-        "SessionConnectionError",
-        py.get_type::<SessionConnectionError>(),
+        "HostnameResolutionFailed",
+        py.get_type::<HostnameResolutionFailed>(),
     )?;
+    module.add("NoKnownNodes", py.get_type::<NoKnownNodes>())?;
     module.add("SessionConfigError", py.get_type::<SessionConfigError>())?;
     module.add(
         "StatementConversionError",

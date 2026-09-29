@@ -2,12 +2,12 @@ use pyo3::prelude::*;
 use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 
 use crate::errors::request::{
-    execution_error_to_pyerr, metadata_error_to_pyerr, prepare_error_to_pyerr,
-    schema_agreement_error_to_pyerr, use_keyspace_error_to_pyerr,
+    execution_error_to_pyerr, metadata_error_to_pyerr, new_session_error_to_pyerr,
+    prepare_error_to_pyerr, schema_agreement_error_to_pyerr, use_keyspace_error_to_pyerr,
 };
 use crate::errors::{
     InternalDriverError, PagingStateNotAllowed, PrepareError, RowFactoryError,
-    SessionConnectionError, StatementConversionError, TraceUnavailable, get_type_name, with_cause,
+    StatementConversionError, TraceUnavailable, get_type_name, with_cause,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -46,10 +46,16 @@ impl DriverSessionConnectionError {
 
 impl From<DriverSessionConnectionError> for PyErr {
     fn from(e: DriverSessionConnectionError) -> PyErr {
-        match e {
+        let message = e.to_string();
+        Python::attach(|py| match e {
+            DriverSessionConnectionError::RuntimeTaskJoinFailed(_) => {
+                py_err!(InternalDriverError, message)
+            }
+            DriverSessionConnectionError::NewSessionError { source } => {
+                new_session_error_to_pyerr(py, &source, message)
+            }
             DriverSessionConnectionError::PythonConversionError { source } => source,
-            _ => SessionConnectionError::new_err(e.to_string()),
-        }
+        })
     }
 }
 
