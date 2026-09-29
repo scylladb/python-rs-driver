@@ -1,4 +1,5 @@
 from datetime import timedelta
+from uuid import UUID
 
 from scylla.policies.retry import CqlResponseKind, OperationType, WriteType
 from scylla.statement import Consistency
@@ -57,7 +58,14 @@ class OperationTimedOut(ExecutionError, TimeoutError):
 
 class NoHostAvailable(ExecutionError): ...
 class MetadataError(ExecutionError): ...
-class SchemaAgreementError(ExecutionError): ...
+
+class SchemaAgreementError(ExecutionError):
+    """Failures specific to schema agreement. Request failures raise their own class."""
+
+class SchemaAgreementTimeout(SchemaAgreementError, OperationTimedOut): ...
+
+class RequiredHostAbsent(SchemaAgreementError):
+    host_id: UUID
 
 class UseKeyspaceError(ExecutionError):
     """Failures specific to `use_keyspace`. Request failures raise their own class."""
