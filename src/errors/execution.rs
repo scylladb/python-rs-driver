@@ -6,8 +6,8 @@ use crate::errors::request::{
     prepare_error_to_pyerr, schema_agreement_error_to_pyerr, use_keyspace_error_to_pyerr,
 };
 use crate::errors::{
-    InternalDriverError, PagingStateNotAllowed, PrepareError, RowFactoryError,
-    StatementConversionError, TraceUnavailable, get_type_name, with_cause,
+    AlreadyPrepared, InternalDriverError, InvalidStatementType, PagingStateNotAllowed,
+    RowFactoryError, StatementConversionError, TraceUnavailable, get_type_name, with_cause,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -100,15 +100,13 @@ impl From<DriverStatementConversionError> for PyErr {
         let message = e.to_string();
         match e {
             DriverStatementConversionError::InvalidStatementType { .. } => {
-                StatementConversionError::new_err(message)
+                py_err!(InvalidStatementType, message)
             }
             DriverStatementConversionError::StatementStringConversionFailed { source } => {
-                with_cause(StatementConversionError::new_err(message), *source)
+                with_cause(py_err!(StatementConversionError, message), *source)
             }
-            // Raised as a `PrepareError` rather than a `StatementConversionError`:
-            // the type is a valid statement, it just cannot be prepared again.
             DriverStatementConversionError::CannotPreparePreparedStatement => {
-                PrepareError::new_err(message)
+                py_err!(AlreadyPrepared, message)
             }
         }
     }
