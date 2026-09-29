@@ -6,21 +6,24 @@
 use pyo3::prelude::*;
 use scylla::errors::{
     BadQuery as RustBadQuery, ConnectionPoolError as RustConnectionPoolError, DbError,
-    ExecutionError as RustExecutionError, PrepareError as RustPrepareError, RequestAttemptError,
-    SchemaAgreementError as RustSchemaAgreementError, UseKeyspaceError as RustUseKeyspaceError,
+    ExecutionError as RustExecutionError, MetadataError as RustMetadataError,
+    MetadataFetchError as RustMetadataFetchError, MetadataFetchErrorKind, NextPageError,
+    NextRowError, PrepareError as RustPrepareError, RequestAttemptError,
+    RequestError as RustRequestError, SchemaAgreementError as RustSchemaAgreementError,
+    UseKeyspaceError as RustUseKeyspaceError,
 };
 
 use crate::errors::{
     AlreadyExists, AuthenticationFailed, BadKeyspaceName, BrokenConnection, ConnectionBusy,
     ConnectionPoolBroken, ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure,
-    InvalidRequest, IsBootstrapping, KeyspaceNameMismatch, MetadataError, NoHostAvailable,
-    NodeDisabledByHostFilter, NonfinishedPagingState, OperationTimedOut, Overloaded,
-    PartitionKeyExtractionFailed, PreparedStatementIdsMismatch, RateLimitReached, ReadFailure,
-    ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestSerializationError,
-    RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout, ServerConfigError, ServerError,
-    ServerProtocolError, TooManyStatementsInBatch, TruncateError, Unauthorized, Unavailable,
-    UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey, WriteFailure,
-    WriteTimeout, with_attrs,
+    InvalidClusterMetadata, InvalidRequest, IsBootstrapping, KeyspaceNameMismatch,
+    MetadataFetchFailed, NoHostAvailable, NodeDisabledByHostFilter, NonfinishedPagingState,
+    OperationTimedOut, Overloaded, PartitionKeyExtractionFailed, PreparedStatementIdsMismatch,
+    RateLimitReached, ReadFailure, ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch,
+    RequestSerializationError, RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout,
+    ServerConfigError, ServerError, ServerProtocolError, TooManyStatementsInBatch, TruncateError,
+    Unauthorized, Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared,
+    ValuesTooLongForKey, WriteFailure, WriteTimeout, with_attrs,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -44,7 +47,62 @@ pub(crate) fn execution_error_to_pyerr(
         RustExecutionError::SchemaAgreementError(e) => {
             schema_agreement_error_to_pyerr(py, e, message)
         }
-        RustExecutionError::MetadataError(_) => py_err!(MetadataError, message),
+        RustExecutionError::MetadataError(e) => metadata_error_to_pyerr(py, e, message),
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+/// Maps a cluster metadata fetch error; request failures inside the fetch keep their own class.
+#[deny(clippy::wildcard_enum_match_arm)]
+pub(crate) fn metadata_error_to_pyerr(
+    py: Python<'_>,
+    err: &RustMetadataError,
+    message: String,
+) -> PyErr {
+    match err {
+        RustMetadataError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustMetadataError::FetchError(e) => metadata_fetch_error_to_pyerr(py, e, message),
+        RustMetadataError::Peers(_)
+        | RustMetadataError::Keyspaces(_)
+        | RustMetadataError::Udts(_)
+        | RustMetadataError::Tables(_)
+        | RustMetadataError::ClientRoutes(_) => py_err!(InvalidClusterMetadata, message),
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn metadata_fetch_error_to_pyerr(
+    py: Python<'_>,
+    err: &RustMetadataFetchError,
+    message: String,
+) -> PyErr {
+    let table = err.table;
+    match &err.error {
+        MetadataFetchErrorKind::PrepareError(e) => request_attempt_error_to_pyerr(py, e, message),
+        MetadataFetchErrorKind::SerializationError(e) => {
+            serialization_error_to_pyerr(py, e, message)
+        }
+        MetadataFetchErrorKind::NextRowError(NextRowError::NextPageError(
+            NextPageError::RequestFailure(e),
+        )) => request_error_to_pyerr(py, e, message),
+        MetadataFetchErrorKind::NextRowError(_) | MetadataFetchErrorKind::InvalidColumnType(_) => {
+            py_err!(py, MetadataFetchFailed, message; table)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+/// Maps a `RequestError`, the failure of a single request sent through the pager.
+#[deny(clippy::wildcard_enum_match_arm)]
+fn request_error_to_pyerr(py: Python<'_>, err: &RustRequestError, message: String) -> PyErr {
+    match err {
+        RustRequestError::EmptyPlan => py_err!(NoHostAvailable, message),
+        RustRequestError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustRequestError::RequestTimeout(timeout) => {
+            py_err!(py, OperationTimedOut, message; timeout)
+        }
+        RustRequestError::LastAttemptError(e) => request_attempt_error_to_pyerr(py, e, message),
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }

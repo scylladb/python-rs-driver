@@ -2,13 +2,12 @@ use pyo3::prelude::*;
 use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 
 use crate::errors::request::{
-    execution_error_to_pyerr, prepare_error_to_pyerr, schema_agreement_error_to_pyerr,
-    use_keyspace_error_to_pyerr,
+    execution_error_to_pyerr, metadata_error_to_pyerr, prepare_error_to_pyerr,
+    schema_agreement_error_to_pyerr, use_keyspace_error_to_pyerr,
 };
 use crate::errors::{
-    InternalDriverError, MetadataRefreshError, PagingStateNotAllowed, PrepareError,
-    RowFactoryError, SessionConnectionError, StatementConversionError, TraceUnavailable,
-    get_type_name, with_cause,
+    InternalDriverError, PagingStateNotAllowed, PrepareError, RowFactoryError,
+    SessionConnectionError, StatementConversionError, TraceUnavailable, get_type_name, with_cause,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -263,7 +262,15 @@ impl DriverMetadataRefreshError {
 
 impl From<DriverMetadataRefreshError> for PyErr {
     fn from(e: DriverMetadataRefreshError) -> PyErr {
-        MetadataRefreshError::new_err(e.to_string())
+        let message = e.to_string();
+        Python::attach(|py| match e {
+            DriverMetadataRefreshError::RustDriverMetadataError { source } => {
+                metadata_error_to_pyerr(py, &source, message)
+            }
+            DriverMetadataRefreshError::RuntimeTaskJoinFailed(_) => {
+                py_err!(InternalDriverError, message)
+            }
+        })
     }
 }
 

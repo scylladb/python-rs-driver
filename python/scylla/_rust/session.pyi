@@ -230,6 +230,10 @@ class Session:
 
         Raises
         ------
-        MetadataRefreshError
-            If the metadata refresh failed.
+        MetadataError
+            If a system table could not be read or returned invalid data.
+        ConnectionPoolError
+            If the driver could not get a connection to a node.
+        RequestFailedError
+            If a metadata request failed.
         """
