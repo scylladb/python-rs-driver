@@ -15,7 +15,7 @@ use crate::errors::{
 #[must_use]
 pub enum DriverSessionConnectionError {
     /// The Tokio task running session creation failed to join.
-    #[error("Internal driver error: runtime error while creating session: {0}")]
+    #[error("runtime error while creating session: {0}")]
     RuntimeTaskJoinFailed(#[from] tokio::task::JoinError),
     /// The Rust driver failed to establish a new session.
     #[error("failed to establish session: {source}")]
@@ -124,7 +124,7 @@ pub enum DriverExecuteError {
         source: scylla::serialize::SerializationError,
     },
     /// The Tokio runtime task responsible for executing the query failed to join.
-    #[error("Internal driver error: runtime error while executing query: {0}")]
+    #[error("runtime error while executing query: {0}")]
     RuntimeTaskJoinFailed(#[from] tokio::task::JoinError),
     /// Resolving the row factory against the result metadata failed.
     #[error("Failed to prepare the row factory for the result metadata")]
@@ -201,7 +201,7 @@ pub enum DriverSchemaAgreementError {
         source: Box<scylla::errors::SchemaAgreementError>,
     },
     /// The Tokio runtime task responsible for checking schema agreement failed to join.
-    #[error("Internal driver error: runtime error while checking schema agreement: {0}")]
+    #[error("runtime error while checking schema agreement: {0}")]
     RuntimeTaskJoinFailed(#[from] tokio::task::JoinError),
 }
 
@@ -233,7 +233,7 @@ pub enum DriverMetadataRefreshError {
         source: Box<scylla::errors::MetadataError>,
     },
     /// The Tokio runtime task responsible for refreshing the metadata failed to join.
-    #[error("Internal driver error: runtime error while refreshing metadata: {0}")]
+    #[error("runtime error while refreshing metadata: {0}")]
     RuntimeTaskJoinFailed(#[from] tokio::task::JoinError),
 }
 
@@ -263,7 +263,7 @@ pub enum DriverTraceError {
         source: Box<scylla::errors::TracingError>,
     },
     /// The Tokio runtime task fetching the trace failed to join.
-    #[error("Internal driver error: runtime error while fetching a query trace: {0}")]
+    #[error("runtime error while fetching a query trace: {0}")]
     RuntimeTaskJoinFailed(#[from] tokio::task::JoinError),
 }
 
@@ -290,7 +290,7 @@ pub(crate) enum DriverUseKeyspaceError {
     #[error(transparent)]
     RustDriverUseKeyspaceError(#[from] RustUseKeyspaceError),
     /// The Tokio runtime task responsible for switching the keyspace failed to join.
-    #[error("Internal driver error: runtime error while using keyspace: {0}")]
+    #[error("runtime error while using keyspace: {0}")]
     RuntimeTaskJoinFailed(#[from] tokio::task::JoinError),
 }
 
