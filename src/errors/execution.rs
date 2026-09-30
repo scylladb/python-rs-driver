@@ -178,22 +178,12 @@ impl From<DriverExecuteError> for PyErr {
 /// Errors that can occur during preparation of a statement.
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub(crate) enum DriverPrepareError {
-    /// The Rust driver failed while preparing a statement.
-    #[allow(clippy::enum_variant_names)]
-    #[error("Failed to prepare statement: {source}")]
-    RustDriverPrepareError {
-        source: Box<scylla::errors::PrepareError>,
-    },
-}
+#[error("Failed to prepare statement: {0}")]
+pub(crate) struct DriverPrepareError(Box<scylla::errors::PrepareError>);
 
-impl DriverPrepareError {
-    /* Constructors */
-
-    pub(crate) fn rust_driver_prepare_error(source: scylla::errors::PrepareError) -> Self {
-        Self::RustDriverPrepareError {
-            source: Box::new(source),
-        }
+impl From<scylla::errors::PrepareError> for DriverPrepareError {
+    fn from(source: scylla::errors::PrepareError) -> Self {
+        Self(Box::new(source))
     }
 }
 
