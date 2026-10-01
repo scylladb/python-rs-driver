@@ -14,18 +14,19 @@ use scylla::errors::{
     UseKeyspaceError as RustUseKeyspaceError,
 };
 
+use crate::errors::connection::pool_broken_to_pyerr;
 use crate::errors::{
     AlreadyExists, AuthenticationFailed, BadKeyspaceName, BrokenConnection, ConnectionBusy,
-    ConnectionPoolBroken, ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure,
-    HostnameResolutionFailed, InvalidClusterMetadata, InvalidRequest, IsBootstrapping,
-    KeyspaceNameMismatch, MetadataFetchFailed, NoHostAvailable, NoKnownNodes,
-    NodeDisabledByHostFilter, NonfinishedPagingState, OperationTimedOut, Overloaded,
-    PartitionKeyExtractionFailed, PreparedStatementIdsMismatch, RateLimitReached, ReadFailure,
-    ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestSerializationError,
-    RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout, ServerConfigError, ServerError,
-    ServerProtocolError, SessionConfigError, TooManyStatementsInBatch, TraceUnavailable,
-    TruncateError, Unauthorized, Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared,
-    ValuesTooLongForKey, WriteFailure, WriteTimeout, with_attrs,
+    ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure, HostnameResolutionFailed,
+    InvalidClusterMetadata, InvalidRequest, IsBootstrapping, KeyspaceNameMismatch,
+    MetadataFetchFailed, NoHostAvailable, NoKnownNodes, NodeDisabledByHostFilter,
+    NonfinishedPagingState, OperationTimedOut, Overloaded, PartitionKeyExtractionFailed,
+    PreparedStatementIdsMismatch, RateLimitReached, ReadFailure, ReadTimeout, RepreparedIdChanged,
+    RepreparedIdMissingInBatch, RequestSerializationError, RequiredHostAbsent, ResponseParseError,
+    SchemaAgreementTimeout, ServerConfigError, ServerError, ServerProtocolError,
+    SessionConfigError, TooManyStatementsInBatch, TraceUnavailable, TruncateError, Unauthorized,
+    Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey,
+    WriteFailure, WriteTimeout, with_attrs,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -40,7 +41,9 @@ pub(crate) fn execution_error_to_pyerr(
         RustExecutionError::BadQuery(e) => bad_query_to_pyerr(py, e, message),
         RustExecutionError::EmptyPlan => py_err!(NoHostAvailable, message),
         RustExecutionError::PrepareError(e) => prepare_error_to_pyerr(py, e, message),
-        RustExecutionError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustExecutionError::ConnectionPoolError(e) => {
+            connection_pool_error_to_pyerr(py, e, message)
+        }
         RustExecutionError::LastAttemptError(e) => request_attempt_error_to_pyerr(py, e, message),
         RustExecutionError::RequestTimeout(timeout) => {
             py_err!(py, OperationTimedOut, message; timeout)
@@ -104,7 +107,7 @@ pub(crate) fn metadata_error_to_pyerr(
     message: String,
 ) -> PyErr {
     match err {
-        RustMetadataError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustMetadataError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(py, e, message),
         RustMetadataError::FetchError(e) => metadata_fetch_error_to_pyerr(py, e, message),
         RustMetadataError::Peers(_)
         | RustMetadataError::Keyspaces(_)
@@ -142,7 +145,7 @@ fn metadata_fetch_error_to_pyerr(
 fn request_error_to_pyerr(py: Python<'_>, err: &RustRequestError, message: String) -> PyErr {
     match err {
         RustRequestError::EmptyPlan => py_err!(NoHostAvailable, message),
-        RustRequestError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustRequestError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(py, e, message),
         RustRequestError::RequestTimeout(timeout) => {
             py_err!(py, OperationTimedOut, message; timeout)
         }
@@ -159,7 +162,7 @@ pub(crate) fn schema_agreement_error_to_pyerr(
 ) -> PyErr {
     match err {
         RustSchemaAgreementError::ConnectionPoolError(e) => {
-            connection_pool_error_to_pyerr(e, message)
+            connection_pool_error_to_pyerr(py, e, message)
         }
         RustSchemaAgreementError::PrepareError(e) => prepare_error_to_pyerr(py, e, message),
         RustSchemaAgreementError::RequestError(e) => request_attempt_error_to_pyerr(py, e, message),
@@ -182,7 +185,7 @@ pub(crate) fn prepare_error_to_pyerr(
     message: String,
 ) -> PyErr {
     match err {
-        RustPrepareError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustPrepareError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(py, e, message),
         RustPrepareError::AllAttemptsFailed { first_attempt } => {
             request_attempt_error_to_pyerr(py, first_attempt, message)
         }
@@ -229,9 +232,15 @@ fn bad_query_to_pyerr(py: Python<'_>, err: &RustBadQuery, message: String) -> Py
 }
 
 #[deny(clippy::wildcard_enum_match_arm)]
-fn connection_pool_error_to_pyerr(err: &RustConnectionPoolError, message: String) -> PyErr {
+fn connection_pool_error_to_pyerr(
+    py: Python<'_>,
+    err: &RustConnectionPoolError,
+    message: String,
+) -> PyErr {
     match err {
-        RustConnectionPoolError::Broken { .. } => py_err!(ConnectionPoolBroken, message),
+        RustConnectionPoolError::Broken {
+            last_connection_error,
+        } => pool_broken_to_pyerr(py, last_connection_error, message),
         RustConnectionPoolError::Initializing => py_err!(ConnectionPoolInitializing, message),
         RustConnectionPoolError::NodeDisabledByHostFilter => {
             py_err!(NodeDisabledByHostFilter, message)
