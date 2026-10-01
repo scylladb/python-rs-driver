@@ -8,6 +8,7 @@ mod macros;
 
 mod attrs;
 pub(crate) mod config;
+mod connection;
 pub(crate) mod execution;
 pub(crate) mod request;
 pub(crate) mod types;
@@ -129,6 +130,23 @@ create_exception!(
     ConnectionPoolError
 );
 create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
+create_exception_multi!(
+    scylla.errors,
+    ConnectTimeout,
+    (ConnectionPoolBroken, PyTimeoutError)
+);
+create_exception_multi!(
+    scylla.errors,
+    AddressTranslationFailed,
+    (ConnectionPoolBroken, AddressTranslationError)
+);
+create_exception!(scylla.errors, ConnectionLost, ConnectionPoolBroken);
+create_exception!(scylla.errors, ConnectionSetupFailed, ConnectionPoolBroken);
+create_exception!(
+    scylla.errors,
+    ConnectionAuthenticationFailed,
+    ConnectionSetupFailed
+);
 
 create_exception!(scylla.errors, RequestFailedError, ExecutionError);
 
@@ -302,6 +320,20 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add(
         "NodeDisabledByHostFilter",
         py.get_type::<NodeDisabledByHostFilter>(),
+    )?;
+    module.add("ConnectTimeout", py.get_type::<ConnectTimeout>())?;
+    module.add(
+        "AddressTranslationFailed",
+        py.get_type::<AddressTranslationFailed>(),
+    )?;
+    module.add("ConnectionLost", py.get_type::<ConnectionLost>())?;
+    module.add(
+        "ConnectionSetupFailed",
+        py.get_type::<ConnectionSetupFailed>(),
+    )?;
+    module.add(
+        "ConnectionAuthenticationFailed",
+        py.get_type::<ConnectionAuthenticationFailed>(),
     )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
     module.add("AlreadyPrepared", py.get_type::<AlreadyPrepared>())?;

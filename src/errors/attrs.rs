@@ -1,15 +1,16 @@
+use std::net::IpAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
 use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use scylla::errors::{CqlResponseKind, OperationType, WriteType};
+use scylla::errors::{CqlRequestKind, CqlResponseKind, OperationType, WriteType};
 use scylla::statement::Consistency;
 use uuid::Uuid;
 
 use crate::enums::PyConsistency;
-use crate::errors::types::{PyCqlResponseKind, PyOperationType, PyWriteType};
+use crate::errors::types::{PyCqlRequestKind, PyCqlResponseKind, PyOperationType, PyWriteType};
 
 /// Sets each `(name, value)` pair as an attribute of the exception instance; a failing attribute is logged and skipped.
 pub(crate) fn with_attrs(py: Python<'_>, err: PyErr, attrs: &[(&str, &dyn ToPyAttr)]) -> PyErr {
@@ -57,6 +58,13 @@ impl_to_py_attr_by_value!(Duration);
 impl_to_py_attr_by_value!([u8]);
 impl_to_py_attr_by_value!(Vec<u8>);
 impl_to_py_attr_by_value!(Uuid);
+impl_to_py_attr_by_value!(IpAddr);
+
+impl ToPyAttr for CqlRequestKind {
+    fn to_py_attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        PyCqlRequestKind::from(*self).into_bound_py_any(py)
+    }
+}
 
 impl<T: ToPyAttr> ToPyAttr for Option<T> {
     fn to_py_attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
