@@ -1,7 +1,11 @@
 // TODO: drop once PyO3 ships PyO3/pyo3#6309 (from_py_object clones Copy types)
 #![allow(clippy::clone_on_copy)]
 
+// TODO: these types are not specific to retry policies (errors use them too); move them out of
+// `policies::retry` to a shared module and import them from there in both places.
+
 use pyo3::prelude::*;
+use scylla::errors::CqlRequestKind;
 use scylla::errors::OperationType;
 use scylla::errors::WriteType;
 use scylla_cql::frame::response::CqlResponseKind;
@@ -141,6 +145,44 @@ impl From<PyCqlResponseKind> for CqlResponseKind {
             PyCqlResponseKind::Event => CqlResponseKind::Event,
             PyCqlResponseKind::AuthChallenge => CqlResponseKind::AuthChallenge,
             PyCqlResponseKind::AuthSuccess => CqlResponseKind::AuthSuccess,
+        }
+    }
+}
+
+#[pyclass(
+    module = "scylla.policies.retry",
+    name = "CqlRequestKind",
+    frozen,
+    from_py_object,
+    eq,
+    eq_int
+)]
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum PyCqlRequestKind {
+    Startup,
+    AuthResponse,
+    Options,
+    Query,
+    Prepare,
+    Execute,
+    Batch,
+    Register,
+}
+
+impl From<CqlRequestKind> for PyCqlRequestKind {
+    #[deny(clippy::wildcard_enum_match_arm)]
+    fn from(value: CqlRequestKind) -> Self {
+        match value {
+            CqlRequestKind::Startup => PyCqlRequestKind::Startup,
+            CqlRequestKind::AuthResponse => PyCqlRequestKind::AuthResponse,
+            CqlRequestKind::Options => PyCqlRequestKind::Options,
+            CqlRequestKind::Query => PyCqlRequestKind::Query,
+            CqlRequestKind::Prepare => PyCqlRequestKind::Prepare,
+            CqlRequestKind::Execute => PyCqlRequestKind::Execute,
+            CqlRequestKind::Batch => PyCqlRequestKind::Batch,
+            CqlRequestKind::Register => PyCqlRequestKind::Register,
+            _ => unreachable!("clippy testifies that the match is exhaustive"),
         }
     }
 }

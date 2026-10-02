@@ -1,5 +1,5 @@
 import pytest
-from scylla.errors import ExecuteError, StatementConfigError
+from scylla.errors import StatementConfigError, Unavailable
 from scylla.policies.load_balancing import DefaultPolicy
 from scylla.policies.retry import DefaultRetryPolicy
 from scylla.session import ExecutionProfile, SessionBuilder
@@ -74,9 +74,9 @@ async def test_create_session_with_profile():
 async def test_invalid_consistency_for_query():
     profile = ExecutionProfile(consistency=Consistency.Three)
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).execution_profile(profile).connect()
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(Unavailable) as exc_info:
         _ = await session.execute("SELECT * FROM system.local")
-    assert "failed to execute statement" in str(exc_info.value).lower()
+    assert exc_info.value.consistency == Consistency.Three
 
 
 @pytest.mark.asyncio
@@ -85,9 +85,9 @@ async def test_invalid_consistency_for_prepared_statement():
     profile = ExecutionProfile(consistency=Consistency.Three)
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).execution_profile(profile).connect()
     prepared = await session.prepare("SELECT * FROM system.local")
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(Unavailable) as exc_info:
         _ = await session.execute(prepared)
-    assert "failed to execute statement" in str(exc_info.value).lower()
+    assert exc_info.value.consistency == Consistency.Three
 
 
 def test_statement_creation():
@@ -223,9 +223,9 @@ def test_statement_chaining():
 async def test_invalid_consistency_for_statement():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     stmt = Statement("SELECT * FROM system.local").with_consistency(Consistency.Three)
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(Unavailable) as exc_info:
         _ = await session.execute(stmt)
-    assert "failed to execute statement" in str(exc_info.value).lower()
+    assert exc_info.value.consistency == Consistency.Three
 
 
 @pytest.mark.asyncio

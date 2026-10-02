@@ -322,7 +322,7 @@ impl<'py> FromPyObject<'_, 'py> for PyRetryPolicy {
 
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum DriverRetryPolicyError {
+pub(crate) enum DriverRetryPolicyError {
     #[error(
         "Invalid retry policy '{type_name}': Object does not implement the \
          RetryPolicy protocol (missing required 'new_session' method)."

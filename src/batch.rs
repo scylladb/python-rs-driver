@@ -336,7 +336,7 @@ pub(crate) fn batch(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
 /// Errors related to batch execution and batch statement configuration.
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum DriverBatchError {
+pub(crate) enum DriverBatchError {
     /// The provided request timeout is not a non-negative finite number of seconds.
     #[error("timeout must be a non-negative, finite number (in seconds), got {value}")]
     InvalidRequestTimeout { value: f64 },

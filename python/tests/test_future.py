@@ -9,7 +9,7 @@ from typing import Generic, TypeVar
 import pytest
 import pytest_asyncio
 from helpers.exit_scenarios import SCENARIO_READY
-from scylla.errors import ExecuteError, FutureCancelledError, ScyllaError
+from scylla.errors import ExecutionError, FutureCancelledError, ScyllaError
 from scylla.future import DriverFuture
 from scylla.results import RequestResult
 from scylla.session import Session, SessionBuilder
@@ -182,7 +182,7 @@ async def test_on_success_not_called_on_error(session: Session, table_factory: T
 
     future.on_success(on_success_cb)
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await future
 
     assert calls == []
@@ -195,7 +195,7 @@ async def test_on_error_called_on_failed_future(session: Session) -> None:
     future = session.execute("SELECT * FROM nonexistent_table_xyz")
     future.on_error(errors.append)
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await future
 
     assert len(errors) == 1
@@ -206,7 +206,7 @@ async def test_on_error_called_on_failed_future(session: Session) -> None:
 async def test_on_error_called_immediately_if_already_failed(session: Session) -> None:
     future = session.execute("SELECT * FROM nonexistent_table_xyz")
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await future
 
     errors: list[Exception] = []
@@ -284,11 +284,11 @@ async def test_on_done_called_on_error(session: Session) -> None:
 
     future.on_done(on_done)
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await future
 
     assert len(errors) == 1
-    assert isinstance(errors[0], ExecuteError)
+    assert isinstance(errors[0], ExecutionError)
 
 
 @pytest.mark.asyncio
@@ -309,14 +309,14 @@ async def test_on_done_called_immediately_if_already_resolved(session: Session) 
 async def test_on_done_called_immediately_if_already_failed(session: Session) -> None:
     future = session.execute("SELECT * FROM nonexistent_table_xyz")
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await future
 
     received: list[DriverFuture[RequestResult]] = []
     future.on_done(received.append)  # register after failure
 
     assert len(received) == 1
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         received[0].result()
 
 
@@ -364,7 +364,7 @@ async def test_on_done_fires_alongside_on_error(session: Session) -> None:
     future.on_done(lambda _f: calls.append("done"))
     future.on_error(on_error)
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await future
 
     assert calls == ["done", "error"]
@@ -394,7 +394,7 @@ async def test_on_done_fires_without_await_on_error(session: Session) -> None:
     fired = await received.awaited()
 
     assert len(fired) == 1
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         fired[0].result()
 
 
@@ -816,10 +816,10 @@ async def test_result_on_failed_future_raises(session: Session) -> None:
     """result() on a failed future should raise the exception."""
     future = session.execute("SELECT * FROM nonexistent_table_xyz")
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await future
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         future.result()
 
 

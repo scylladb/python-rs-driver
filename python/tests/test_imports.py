@@ -65,7 +65,7 @@ def test_root_has_the_everyday_names() -> None:
 def test_classes_report_their_public_module() -> None:
     from scylla.cluster import Keyspace
     from scylla.cql_types import CqlInt
-    from scylla.errors import RequestTimeoutError
+    from scylla.errors import OperationTimedOut
     from scylla.session import PoolSize, SessionBuilder
     from scylla.statement import Consistency
 
@@ -74,4 +74,4 @@ def test_classes_report_their_public_module() -> None:
     assert Consistency.__module__ == "scylla.statement"
     assert CqlInt.__module__ == "scylla.cql_types"
     assert Keyspace.__module__ == "scylla.cluster"
-    assert RequestTimeoutError.__module__ == "scylla.errors"
+    assert OperationTimedOut.__module__ == "scylla.errors"

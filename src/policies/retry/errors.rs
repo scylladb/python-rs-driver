@@ -1,3 +1,6 @@
+// TODO: `PyDbError` and `PyRequestAttemptError` duplicate the exception classes in `crate::errors`;
+// pass those to retry policies instead and remove these.
+
 use crate::enums::PyConsistency;
 use crate::policies::retry::types::{PyCqlResponseKind, PyOperationType, PyWriteType};
 use pyo3::prelude::*;

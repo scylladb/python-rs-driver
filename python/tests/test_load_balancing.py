@@ -9,7 +9,7 @@ import pytest_asyncio
 from helpers.ddl import ddl
 from pytest import LogCaptureFixture
 from scylla.cluster import ClusterState, Node
-from scylla.errors import ExecuteError
+from scylla.errors import ExecutionError
 from scylla.policies.load_balancing import DefaultPolicy, LoadBalancingPolicy, NodeLocationPreference, RoutingInfo
 from scylla.session import Session, SessionBuilder
 from scylla.statement import Consistency, SerialConsistency, Statement
@@ -216,7 +216,7 @@ async def test_exploding_policy_logs_error_and_fails(
     await session.execute(f"INSERT INTO {table} (id, x) VALUES (1, 10)")
 
     stmt = Statement(f"SELECT * FROM {table}").with_load_balancing_policy(ExplodingPolicy())
-    with caplog.at_level(logging.ERROR), pytest.raises(ExecuteError):
+    with caplog.at_level(logging.ERROR), pytest.raises(ExecutionError):
         await session.execute(stmt)
 
     assert "Failed to call 'pick_targets' method on LoadBalancing Policy" in caplog.text
@@ -234,7 +234,7 @@ async def test_non_iterable_policy_logs_error_and_fails(
     await session.execute(f"INSERT INTO {table} (id, x) VALUES (1, 10)")
 
     stmt = Statement(f"SELECT * FROM {table}").with_load_balancing_policy(NonIterablePolicy())
-    with caplog.at_level(logging.ERROR), pytest.raises(ExecuteError):
+    with caplog.at_level(logging.ERROR), pytest.raises(ExecutionError):
         await session.execute(stmt)
 
     assert "The value returned by 'pick_targets' is not iterable" in caplog.text

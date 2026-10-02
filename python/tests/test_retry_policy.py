@@ -1,5 +1,5 @@
 import pytest
-from scylla.errors import ExecuteError
+from scylla.errors import CqlSyntaxError
 from scylla.policies.retry import (
     DbError,
     DefaultRetryPolicy,
@@ -175,7 +175,7 @@ async def test_custom_retry_policy_decide_should_retry_called_on_invalid_request
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     statement = Statement("THIS IS NOT VALID CQL").with_retry_policy(policy)
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(CqlSyntaxError):
         await session.execute(statement)
 
     assert policy.session.decide_should_retry_called is True
@@ -210,7 +210,7 @@ async def test_custom_retry_policy_retry_decision_is_used_by_driver():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     statement = Statement("THIS IS NOT VALID CQL").with_retry_policy(policy)
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(CqlSyntaxError):
         await session.execute(statement)
 
     assert policy.session.calls == 2
@@ -245,7 +245,7 @@ async def test_custom_retry_policy_receives_request_info_fields_from_driver():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     statement = Statement("THIS IS NOT VALID CQL").with_retry_policy(policy)
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(CqlSyntaxError):
         await session.execute(statement)
 
     assert policy.session.error is not None

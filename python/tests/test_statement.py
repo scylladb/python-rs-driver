@@ -3,7 +3,15 @@ from typing import Any, cast
 import pytest
 from helpers.ddl import ddl
 from scylla.cql_types import CqlColumnType, CqlText
-from scylla.errors import LoadBalancingPolicyError, PrepareError, StatementConfigError, StatementConversionError
+from scylla.errors import (
+    AlreadyPrepared,
+    CqlSyntaxError,
+    InvalidStatementType,
+    LoadBalancingPolicyError,
+    PrepareError,
+    StatementConfigError,
+    StatementConversionError,
+)
 from scylla.policies.load_balancing import DefaultPolicy
 from scylla.policies.retry import DefaultRetryPolicy
 from scylla.session import ExecutionProfile, SessionBuilder
@@ -211,10 +219,10 @@ async def test_prepare_prepared_statement_raises_session_query_error():
 
     prepared = await session.prepare("SELECT * FROM system.local")
 
-    with pytest.raises(PrepareError) as exc_info:
+    with pytest.raises(AlreadyPrepared) as exc_info:
         await session.prepare(cast(Any, prepared))
 
-    assert "cannot prepare a preparedstatement" in str(exc_info.value).lower()
+    assert isinstance(exc_info.value, PrepareError)
 
 
 @pytest.mark.asyncio
@@ -222,10 +230,8 @@ async def test_prepare_prepared_statement_raises_session_query_error():
 async def test_prepare_invalid_query_raises_session_query_error():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
 
-    with pytest.raises(PrepareError) as exc_info:
+    with pytest.raises(CqlSyntaxError):
         await session.prepare("THIS IS NOT CQL")
-
-    assert "failed to prepare statement" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -233,11 +239,11 @@ async def test_prepare_invalid_query_raises_session_query_error():
 async def test_prepare_invalid_statement_type_raises_statement_conversion_error():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
 
-    with pytest.raises(StatementConversionError) as exc_info:
+    with pytest.raises(InvalidStatementType) as exc_info:
         await session.prepare(123)  # type: ignore[arg-type]
 
-    assert "invalid statement type" in str(exc_info.value).lower()
-    assert "expected a str, statement, or preparedstatement" in str(exc_info.value).lower()
+    assert isinstance(exc_info.value, StatementConversionError)
+    assert isinstance(exc_info.value, TypeError)
 
 
 @pytest.mark.asyncio
@@ -245,10 +251,8 @@ async def test_prepare_invalid_statement_type_raises_statement_conversion_error(
 async def test_execute_invalid_statement_type_raises_statement_conversion_error():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
 
-    with pytest.raises(StatementConversionError) as exc_info:
+    with pytest.raises(InvalidStatementType):
         await session.execute(cast(Any, 123))
-
-    assert "invalid statement type" in str(exc_info.value).lower()
 
 
 def test_statement_timeout_too_large():

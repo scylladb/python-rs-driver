@@ -1,4 +1,4 @@
-use crate::serialize::error::DriverSerializationError;
+use crate::serialize::error::{DriverSerializationError, ParameterReference};
 
 use std::any::Any;
 
@@ -142,7 +142,7 @@ fn serialize_sequence<'py>(
     for (index, (col, val)) in ctx.columns().iter().zip(iter).enumerate() {
         let val = val.map_err(DriverSerializationError::python_interop_failed)?;
         serialize_element(col, &val, row_writer).map_err(|err| {
-            DriverSerializationError::scylla_serialize_failed(err).at_parameter_index(index)
+            DriverSerializationError::locate(err, ParameterReference::Index(index))
         })?;
     }
 
@@ -173,7 +173,7 @@ fn serialize_mapping<'py>(
             }
         })?;
         serialize_element(col, &item, row_writer).map_err(|err| {
-            DriverSerializationError::scylla_serialize_failed(err).at_parameter_name(col.name())
+            DriverSerializationError::locate(err, ParameterReference::Name(col.name().into()))
         })?;
     }
 

@@ -117,7 +117,7 @@ impl SessionCore {
                         py_statement.settings,
                     ))
                 }
-                Err(err) => Err(DriverPrepareError::rust_driver_prepare_error(err)),
+                Err(err) => Err(DriverPrepareError::from(err)),
             }
         })
     }

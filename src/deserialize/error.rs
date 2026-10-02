@@ -12,7 +12,7 @@ use crate::errors::{
 /* Row iteration errors */
 
 #[derive(Debug, thiserror::Error)]
-pub enum DriverRowIterationError {
+pub(crate) enum DriverRowIterationError {
     /// An error occurred during deserialization of a CQL value into a Python object.
     #[error(transparent)]
     Deserialization(DriverDeserializationError),
@@ -44,7 +44,7 @@ impl From<DriverRowIterationError> for PyErr {
 /// Errors that can occur during deserialization of CQL values into Python objects.
 #[derive(Debug)]
 #[must_use]
-pub struct DriverDeserializationError {
+pub(crate) struct DriverDeserializationError {
     pub kind: DeserializationErrorKind,
     pub location: DeserializationErrorLocation,
 }
@@ -52,7 +52,7 @@ pub struct DriverDeserializationError {
 /// Structured information about where in the data the deserialization error occurred,
 /// to provide better context in error messages and for debugging.
 #[derive(Debug, Clone, Default)]
-pub struct DeserializationErrorLocation {
+pub(crate) struct DeserializationErrorLocation {
     pub column_name: Option<Box<str>>,
     pub column_index: Option<usize>,
     pub inner: Box<[InnerSegment]>,
@@ -60,7 +60,7 @@ pub struct DeserializationErrorLocation {
 
 /// Represents a segment in the path to the value that failed to deserialize, for nested structures.
 #[derive(Debug, Clone, thiserror::Error)]
-pub enum InnerSegment {
+pub(crate) enum InnerSegment {
     /// An index into a sequence (list/set) where the error occurred.
     #[error("sequence[{0}]")]
     SequenceIndex(usize),
@@ -79,7 +79,7 @@ pub enum InnerSegment {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum DeserializationErrorKind {
+pub(crate) enum DeserializationErrorKind {
     /// The CQL type is not supported by the deserializer
     /// (e.g. an unknown custom type, or a new type added in Scylla that we haven't implemented yet).
     #[error("Unsupported CQL type: {cql}")]

@@ -18,7 +18,22 @@ from helpers.ccm import (  # pyright: ignore[reportMissingTypeStubs]
 )
 from helpers.ddl import ddl
 from scylla.auth import Authenticator, AuthenticatorProvider
-from scylla.errors import AddressTranslationError, HostFilterError, SessionConfigError
+from scylla.errors import (
+    AddressTranslationError,
+    AddressTranslationFailed,
+    AuthenticationFailed,
+    ConnectionAuthenticationFailed,
+    ConnectionLost,
+    ConnectionPoolBroken,
+    ConnectionSetupFailed,
+    ConnectTimeout,
+    HostFilterError,
+    HostnameResolutionFailed,
+    KeepaliveTimeout,
+    NoKnownNodes,
+    SessionConfigError,
+    SessionConnectionError,
+)
 from scylla.policies.address_translator import AddressTranslator, DictAddressTranslator, UntranslatedPeer
 from scylla.policies.host_filter import AcceptAllHostFilter, AllowListHostFilter, DcHostFilter, HostFilter, Peer
 from scylla.policies.timestamp_generator import (
@@ -758,3 +773,50 @@ async def test_host_filter_list_with_garbage_string_fails() -> None:
         _ = AllowListHostFilter(garbage_list)
 
     assert "invalid socket address" in str(excinfo.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_connect_without_contact_points_fails():
+    with pytest.raises(NoKnownNodes):
+        await SessionBuilder().contact_points([]).connect()
+
+
+@pytest.mark.asyncio
+async def test_connect_to_unresolvable_hostname_fails():
+    with pytest.raises(HostnameResolutionFailed) as excinfo:
+        await SessionBuilder().contact_points([("nonexistent.invalid", 9042)]).connect()
+
+    assert excinfo.value.hostnames == ["nonexistent.invalid:9042"]
+
+
+@pytest.mark.asyncio
+async def test_connect_to_closed_port_fails():
+    with pytest.raises(ConnectionPoolBroken) as excinfo:
+        await SessionBuilder().contact_points([("127.0.0.1", 1)]).connect()
+
+    # A pool failure raises the same class at connect as later, not a SessionConnectionError.
+    assert not isinstance(excinfo.value, SessionConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_connect_to_unreachable_address_times_out():
+    # 10.255.255.1 is not routable, so the TCP connect never completes.
+    with pytest.raises(ConnectTimeout) as excinfo:
+        await SessionBuilder().contact_points([("10.255.255.1", 9042)]).connection_timeout(0.5).connect()
+
+    assert isinstance(excinfo.value, TimeoutError)
+
+
+@pytest.mark.parametrize(
+    "pool_class",
+    [ConnectTimeout, AddressTranslationFailed, ConnectionLost, KeepaliveTimeout, ConnectionSetupFailed],
+)
+def test_pool_failures_are_broken_pool_errors(pool_class: type):
+    assert issubclass(pool_class, ConnectionPoolBroken)
+
+
+def test_connection_class_bases():
+    assert issubclass(ConnectionAuthenticationFailed, ConnectionSetupFailed)
+    # Covers client-side failures too, so it is not the server's AuthenticationFailed.
+    assert not issubclass(ConnectionAuthenticationFailed, AuthenticationFailed)
+    assert issubclass(AddressTranslationFailed, AddressTranslationError)

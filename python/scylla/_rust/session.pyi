@@ -29,7 +29,11 @@ class Session:
         Raises
         ------
         UseKeyspaceError
-            If an error occurred when trying to use the provided keyspace.
+            If the keyspace name is invalid or the server switched to a different keyspace.
+        RequestFailedError
+            If the request failed, e.g. `InvalidRequest` for a keyspace that doesn't exist.
+        OperationTimedOut
+            If the request timed out.
         """
 
     def prepare(self, statement: Statement | str) -> DriverFuture[PreparedStatement]:

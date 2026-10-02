@@ -13,6 +13,7 @@ use crate::{
     cluster::node::PyNode,
     errors::ClusterStateTokenError,
     routing::{PyReplicaLocator, PyToken},
+    serialize::error::serialization_error_to_pyerr,
     serialize::value_list::PyValueList,
 };
 
@@ -186,9 +187,13 @@ impl DriverClusterStateTokenError {
 
 impl From<DriverClusterStateTokenError> for PyErr {
     fn from(e: DriverClusterStateTokenError) -> PyErr {
+        let message = e.to_string();
         match e {
             DriverClusterStateTokenError::PythonConversionFailed(err) => err,
-            _ => ClusterStateTokenError::new_err(e.to_string()),
+            DriverClusterStateTokenError::RustDriverTokenError(
+                RustClusterStateTokenError::Serialization(err),
+            ) => serialization_error_to_pyerr(&err, message),
+            _ => ClusterStateTokenError::new_err(message),
         }
     }
 }

@@ -19,6 +19,7 @@ pub(crate) fn retry(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add_class::<policies::PyDowngradingConsistencyRetryPolicy>()?;
     module.add_class::<policies::PyFallthroughRetryPolicy>()?;
     module.add_class::<types::PyCqlResponseKind>()?;
+    module.add_class::<types::PyCqlRequestKind>()?;
     module.add_class::<types::PyOperationType>()?;
     module.add_class::<types::PyWriteType>()?;
 

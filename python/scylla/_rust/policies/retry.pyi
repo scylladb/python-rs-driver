@@ -124,6 +124,33 @@ class CqlResponseKind(IntEnum):
     AuthSuccess = ...
     """Indicates the success of the authentication phase."""
 
+class CqlRequestKind(IntEnum):
+    """Possible CQL requests sent by the driver to the server."""
+
+    Startup = ...
+    """Initializes the connection; the first request sent on it."""
+
+    AuthResponse = ...
+    """Answers a server authentication challenge."""
+
+    Options = ...
+    """Asks the server which options it supports."""
+
+    Query = ...
+    """Executes an unprepared statement."""
+
+    Prepare = ...
+    """Prepares a statement."""
+
+    Execute = ...
+    """Executes a prepared statement."""
+
+    Batch = ...
+    """Executes a batch of statements."""
+
+    Register = ...
+    """Registers the connection to receive server events."""
+
 class RetryDecision:
     """
     Returned by the `decide_should_retry()` method of `RetryPolicy`. Instructs the driver on what

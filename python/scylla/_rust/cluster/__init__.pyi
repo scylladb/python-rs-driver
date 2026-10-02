@@ -79,7 +79,8 @@ class ClusterState:
         Computes the token for a given keyspace, table and partition key.
 
         Raises:
-            ClusterStateTokenError: If the token calculation fails.
+            SerializationError: If a partition key value can't be serialized.
+            ClusterStateTokenError: If the token calculation fails otherwise.
 
         `partition_key` must be a `Sequence` of partition key values or a
         `Mapping` of column names to partition key values.
@@ -94,7 +95,8 @@ class ClusterState:
         Returns a list of `[Node, Shard]` tuples that are replicas owning the partition key.
 
         Raises:
-            ClusterStateTokenError: If the token calculation fails.
+            SerializationError: If a partition key value can't be serialized.
+            ClusterStateTokenError: If the token calculation fails otherwise.
 
         `partition_key` must be a `Sequence` of partition key values or a
         `Mapping` of column names to partition key values.

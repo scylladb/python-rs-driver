@@ -483,7 +483,7 @@ pub struct Column {
 ///
 /// Users may subclass this type to implement custom row mappings.
 #[pyclass(module = "scylla.results", subclass, frozen)]
-pub struct RowFactory {}
+pub(crate) struct RowFactory {}
 
 #[pymethods]
 impl RowFactory {
@@ -524,7 +524,7 @@ impl RowFactory {
     ///     If any column cannot be deserialized into a Python object.
     /// RowIterationError
     ///     If building the Python row object fails (with original error attached).
-    pub fn build<'py>(
+    pub(crate) fn build<'py>(
         &self,
         py: Python<'py>,
         column_iterator: &Bound<'py, RowColumnCursor>,
