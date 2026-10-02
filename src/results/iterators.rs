@@ -70,8 +70,10 @@ impl AsyncRowsIterator {
         if let Ok(mut state) = self.state.try_lock()
             && let Some(row_result) = state.rows_iterator.next(py)
         {
-            let result = row_result.map_err(Into::into);
-            return DriverFuture::ready(py, result);
+            if row_result.is_err() {
+                state.finish();
+            }
+            return DriverFuture::ready(py, row_result.map_err(Into::into));
         }
 
         let state_clone = self.state.clone();
@@ -86,7 +88,11 @@ impl AsyncRowsIterator {
             } = &mut *state;
 
             match next_row_with_paging(rows_iterator, query_pager, factory).await {
-                Some(res) => res.map_err(Into::into),
+                Some(Ok(row)) => Ok(row),
+                Some(Err(err)) => {
+                    state.finish();
+                    Err(err.into())
+                }
                 None => Err(PyErr::new::<PyStopAsyncIteration, _>("")),
             }
         });
@@ -106,4 +112,12 @@ struct AsyncIteratorState {
     rows_iterator: RowsIteratorKind,
     query_pager: Pager,
     factory: PyRowFactory,
+}
+
+impl AsyncIteratorState {
+    /// Ends the iteration, like a Python generator that raised.
+    fn finish(&mut self) {
+        self.rows_iterator = RowsIteratorKind::NonRows;
+        self.query_pager = Pager::exhausted();
+    }
 }

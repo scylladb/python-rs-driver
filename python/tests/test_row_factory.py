@@ -370,6 +370,45 @@ async def test_all_wraps_prepare_errors_of_later_pages(session: Session, paged_t
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+async def test_async_iteration_ends_after_error_on_later_page(session: Session, paged_table: str):
+    statement = Statement(f"SELECT id, ck FROM {paged_table}")
+    statement.page_size = 2
+    rows = aiter(await session.execute(statement, factory=FailsOnSecondPage()))
+
+    assert await anext(rows) == "id=0|ck=0"
+    assert await anext(rows) == "id=0|ck=1"
+    with pytest.raises(RowIterationError):
+        await anext(rows)
+    with pytest.raises(StopAsyncIteration):
+        await anext(rows)
+
+
+class FailsOnSecondRow(RowFactory):
+    def prepare(self, columns: tuple[ColumnSpec, ...]) -> RowBuilder:
+        def build(values: tuple[Any, ...]) -> Any:
+            if values[1] == 1:
+                raise ValueError("build failed")
+            return values
+
+        return build
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_async_iteration_ends_after_error_within_page(session: Session, paged_table: str):
+    statement = Statement(f"SELECT id, ck FROM {paged_table}")
+    statement.page_size = 10
+    rows = aiter(await session.execute(statement, factory=FailsOnSecondRow()))
+
+    assert await anext(rows) == (0, 0)
+    with pytest.raises(RowIterationError):
+        await anext(rows)
+    with pytest.raises(StopAsyncIteration):
+        await anext(rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_fetch_next_page_follows_columns_added_between_pages(session: Session, paged_table: str):
     statement = Statement(f"SELECT * FROM {paged_table}")
     statement.page_size = 2

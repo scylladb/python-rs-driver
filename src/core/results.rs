@@ -220,6 +220,11 @@ impl Pager {
         Pager::Unpaged
     }
 
+    /// A pager with no pages left to fetch.
+    pub(crate) fn exhausted() -> Self {
+        Pager::Unpaged
+    }
+
     pub(crate) fn paged(
         paging_response: PagingStateResponse,
         session: Arc<Session>,
