@@ -41,7 +41,8 @@ async def main():
     # - increase request timeout for query
     # - demand consistency ALL so state is consistent after insertion
 
-    prepared_statement = prepared_statement.with_request_timeout(10.0).with_consistency(Consistency.All)
+    prepared_statement.request_timeout = 10.0
+    prepared_statement.consistency = Consistency.All
 
     # Now we are ready for inserting rows
 
@@ -66,7 +67,7 @@ async def main():
     complex_prepared = await session.prepare(
         f"INSERT INTO {complex_table_name} (student_id, subject_marks) VALUES (?, ?)"
     )
-    complex_prepared = complex_prepared.with_execution_profile(execution_profile)
+    complex_prepared.execution_profile = execution_profile
 
     # Insert some rows
     complex_coroutines = [

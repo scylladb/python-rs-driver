@@ -64,7 +64,7 @@ profile (of the statement or, if absent, the `Session`).
 For statements, the default state is `UNSET`.
 
 ```python
-from scylla.statement import Batch, PreparedStatement, SerialConsistency, Statement
+from scylla.statement import UNSET, Batch, PreparedStatement, SerialConsistency, Statement
 
 query_str = "INSERT INTO tab (a, b) VALUES (1, 2) IF NOT EXISTS"
 
@@ -72,17 +72,18 @@ query_str = "INSERT INTO tab (a, b) VALUES (1, 2) IF NOT EXISTS"
 statement = Statement(query_str)
 
 # Setting serial consistency to LocalSerial for Statement.
-statement = statement.with_serial_consistency(SerialConsistency.LocalSerial)
+statement.serial_consistency = SerialConsistency.LocalSerial
 
 # Setting serial consistency to None for Prepared.
 prepared = await session.prepare(query_str)
-prepared = prepared.with_serial_consistency(None)
+prepared.serial_consistency = None
 
 # Setting serial consistency to Serial for Batch.
-batch = Batch().with_serial_consistency(SerialConsistency.Serial)
+batch = Batch()
+batch.serial_consistency = SerialConsistency.Serial
 
 # Unsetting serial consistency for Batch.
-batch = batch.without_serial_consistency()
+batch.serial_consistency = UNSET
 # Now serial consistency for batch is UNSET.
 ```
 

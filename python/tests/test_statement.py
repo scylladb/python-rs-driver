@@ -71,17 +71,27 @@ async def test_prepare_and_str():
     assert cluster_name_str == row_statement["cluster_name"]
 
 
-def test_statement_with_page_size():
+def test_statement_set_and_get_page_size():
     query_str = "SELECT cluster_name FROM system.local;"
     statement = Statement(query_str)
 
     expected_page_size = 500
-    statement = statement.with_page_size(expected_page_size)
+    statement.page_size = expected_page_size
 
     actual_page_size = statement.page_size
 
     assert isinstance(actual_page_size, int)
     assert actual_page_size == expected_page_size
+
+
+@pytest.mark.parametrize("page_size", [0, -1])
+def test_statement_non_positive_page_size_raises(page_size: int):
+    statement = Statement("SELECT cluster_name FROM system.local;")
+
+    with pytest.raises(StatementConfigError) as exc_info:
+        statement.page_size = page_size
+
+    assert "page size must be positive" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -256,7 +266,7 @@ def test_statement_timeout_too_large():
     statement = Statement(query_str)
 
     with pytest.raises(StatementConfigError) as exc_info:
-        statement.with_request_timeout(1e30)
+        statement.request_timeout = 1e30
 
     assert "timeout must be a non-negative, finite number" in str(exc_info.value).lower()
 
@@ -266,17 +276,17 @@ def test_statement__negative_timeout():
     statement = Statement(query_str)
 
     with pytest.raises(StatementConfigError) as exc_info:
-        statement.with_request_timeout(-1)
+        statement.request_timeout = -1
 
     assert "timeout must be a non-negative, finite number" in str(exc_info.value).lower()
 
 
-def test_statement_with_request_timeout_not_finite():
+def test_statement_set_request_timeout_not_finite():
     query_str = "SELECT cluster_name FROM system.local;"
     statement = Statement(query_str)
 
     with pytest.raises(StatementConfigError) as exc_info:
-        statement.with_request_timeout(float("inf"))
+        statement.request_timeout = float("inf")
 
     assert "timeout must be a non-negative, finite number" in str(exc_info.value).lower()
 
@@ -291,7 +301,7 @@ async def test_prepared_timeout_too_large():
     prepared = await session.prepare(query_str)
 
     with pytest.raises(StatementConfigError) as exc_info:
-        prepared.with_request_timeout(1e30)
+        prepared.request_timeout = 1e30
 
     assert "timeout must be a non-negative, finite number" in str(exc_info.value).lower()
 
@@ -302,14 +312,41 @@ def test_statement_serial_consistency():
 
     assert statement.serial_consistency is UNSET
 
-    statement = statement.with_serial_consistency(None)
+    statement.serial_consistency = None
     assert statement.serial_consistency is None
 
-    statement = statement.with_serial_consistency(SerialConsistency.LocalSerial)
+    statement.serial_consistency = SerialConsistency.LocalSerial
     assert isinstance(statement.serial_consistency, SerialConsistency)
 
-    statement = statement.without_serial_consistency()
+    statement.serial_consistency = UNSET
     assert statement.serial_consistency is UNSET
+
+
+def test_statement_consistency():
+    statement = Statement("SELECT cluster_name FROM system.local;")
+
+    assert statement.consistency is UNSET
+
+    statement.consistency = Consistency.Quorum
+    assert statement.consistency == Consistency.Quorum
+
+    statement.consistency = UNSET
+    assert statement.consistency is UNSET
+
+
+def test_statement_request_timeout():
+    statement = Statement("SELECT cluster_name FROM system.local;")
+
+    assert statement.request_timeout is UNSET
+
+    statement.request_timeout = None
+    assert statement.request_timeout is None
+
+    statement.request_timeout = 2.5
+    assert statement.request_timeout == 2.5
+
+    statement.request_timeout = UNSET
+    assert statement.request_timeout is UNSET
 
 
 @pytest.mark.asyncio
@@ -323,13 +360,13 @@ async def test_prepared_serial_consistency():
 
     assert prepared.serial_consistency is UNSET
 
-    prepared = prepared.with_serial_consistency(None)
+    prepared.serial_consistency = None
     assert prepared.serial_consistency is None
 
-    prepared = prepared.with_serial_consistency(SerialConsistency.LocalSerial)
+    prepared.serial_consistency = SerialConsistency.LocalSerial
     assert isinstance(prepared.serial_consistency, SerialConsistency)
 
-    prepared = prepared.without_serial_consistency()
+    prepared.serial_consistency = UNSET
     assert prepared.serial_consistency is UNSET
 
 
@@ -339,9 +376,8 @@ async def test_statement_preserves_execution_profile_after_prepare():
     builder = SessionBuilder().contact_points(("127.0.0.2", 9042))
     session = await builder.connect()
 
-    query_stmt = Statement("SELECT cluster_name FROM system.local").with_execution_profile(
-        ExecutionProfile(timeout=12.234)
-    )
+    query_stmt = Statement("SELECT cluster_name FROM system.local")
+    query_stmt.execution_profile = ExecutionProfile(timeout=12.234)
     prepared = await session.prepare(query_stmt)
 
     prepared_ep = prepared.execution_profile
@@ -356,9 +392,9 @@ async def test_statement_preserves_settings_after_prepare():
     builder = SessionBuilder().contact_points(("127.0.0.2", 9042))
     session = await builder.connect()
 
-    query_stmt = (
-        Statement("SELECT cluster_name FROM system.local").with_page_size(500).with_consistency(Consistency.EachQuorum)
-    )
+    query_stmt = Statement("SELECT cluster_name FROM system.local")
+    query_stmt.page_size = 500
+    query_stmt.consistency = Consistency.EachQuorum
     prepared = await session.prepare(query_stmt)
 
     prepared_ps = prepared.page_size
@@ -370,9 +406,22 @@ async def test_statement_preserves_settings_after_prepare():
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_statement_with_lb_policy_executes() -> None:
+async def test_statement_preserves_explicit_none_serial_consistency_after_prepare():
+    session = await SessionBuilder().contact_points(("127.0.0.2", 9042)).connect()
+
+    query_stmt = Statement("SELECT cluster_name FROM system.local")
+    query_stmt.serial_consistency = None
+    prepared = await session.prepare(query_stmt)
+
+    assert prepared.serial_consistency is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_statement_set_lb_policy_executes() -> None:
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
-    stmt = Statement("SELECT * FROM system.local").with_load_balancing_policy(DefaultPolicy())
+    stmt = Statement("SELECT * FROM system.local")
+    stmt.load_balancing_policy = DefaultPolicy()
     row = await (await session.execute(stmt)).first_row()
     assert row is not None
 
@@ -383,31 +432,22 @@ def test_statement_retry_policy_default():
     assert statement.retry_policy is None
 
 
-def test_statement_with_retry_policy():
+def test_statement_set_retry_policy():
     statement = Statement("SELECT * FROM system.local")
     policy = DefaultRetryPolicy()
 
-    new_statement = statement.with_retry_policy(policy)
+    statement.retry_policy = policy
+
+    assert statement.retry_policy is policy
+
+
+def test_statement_clear_retry_policy():
+    statement = Statement("SELECT * FROM system.local")
+    statement.retry_policy = DefaultRetryPolicy()
+
+    statement.retry_policy = None
 
     assert statement.retry_policy is None
-    assert new_statement.retry_policy is policy
-
-
-def test_statement_without_retry_policy():
-    policy = DefaultRetryPolicy()
-
-    statement = Statement("SELECT * FROM system.local").with_retry_policy(policy)
-    new_statement = statement.without_retry_policy()
-
-    assert statement.retry_policy is policy
-    assert new_statement.retry_policy is None
-
-
-def test_statement_retry_policy_returns_same_object():
-    policy = DefaultRetryPolicy()
-    statement = Statement("SELECT * FROM system.local").with_retry_policy(policy)
-
-    assert statement.retry_policy is policy
 
 
 def test_statement_is_idempotent_default():
@@ -419,26 +459,18 @@ def test_statement_is_idempotent_default():
 def test_statement_set_is_idempotent_true():
     statement = Statement("SELECT * FROM system.local")
 
-    new_statement = statement.set_is_idempotent(True)
+    statement.is_idempotent = True
 
-    assert statement.is_idempotent is False
-    assert new_statement.is_idempotent is True
+    assert statement.is_idempotent is True
 
 
 def test_statement_set_is_idempotent_false():
-    statement = Statement("SELECT * FROM system.local").set_is_idempotent(True)
-
-    new_statement = statement.set_is_idempotent(False)
-
-    assert statement.is_idempotent is True
-    assert new_statement.is_idempotent is False
-
-
-def test_statement_set_is_idempotent_returns_new_instance():
     statement = Statement("SELECT * FROM system.local")
-    new_statement = statement.set_is_idempotent(True)
+    statement.is_idempotent = True
 
-    assert statement is not new_statement
+    statement.is_idempotent = False
+
+    assert statement.is_idempotent is False
 
 
 @pytest.mark.asyncio
@@ -452,83 +484,72 @@ async def test_prepared_statement_retry_policy_default():
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_prepared_with_lb_policy_executes() -> None:
+async def test_prepared_set_lb_policy_executes() -> None:
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
-    prepared = (await session.prepare("SELECT * FROM system.local")).with_load_balancing_policy(DefaultPolicy())
+    prepared = await session.prepare("SELECT * FROM system.local")
+    prepared.load_balancing_policy = DefaultPolicy()
     row = await (await session.execute(prepared)).first_row()
     assert row is not None
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_prepared_statement_with_retry_policy():
+async def test_prepared_statement_set_retry_policy():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     prepared = await session.prepare("SELECT * FROM system.local")
     policy = DefaultRetryPolicy()
 
-    new_prepared = prepared.with_retry_policy(policy)
+    prepared.retry_policy = policy
 
-    assert prepared.retry_policy is None
-    assert new_prepared.retry_policy is policy
+    assert prepared.retry_policy is policy
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_statement_without_lb_policy() -> None:
+async def test_statement_clear_lb_policy() -> None:
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
-    stmt = Statement("SELECT * FROM system.local").with_load_balancing_policy(DefaultPolicy())
+    stmt = Statement("SELECT * FROM system.local")
+    stmt.load_balancing_policy = DefaultPolicy()
     assert stmt.load_balancing_policy is not None
-    stmt2 = stmt.without_load_balancing_policy()
-    assert stmt2.load_balancing_policy is None
-    assert await session.execute(stmt2) is not None
+    stmt.load_balancing_policy = None
+    assert stmt.load_balancing_policy is None
+    assert await session.execute(stmt) is not None
 
 
 def test_statement_get_lb_policy_returns_original() -> None:
-    stmt = Statement("SELECT * FROM system.local").with_load_balancing_policy(DefaultPolicy())
+    stmt = Statement("SELECT * FROM system.local")
+    stmt.load_balancing_policy = DefaultPolicy()
     assert stmt.load_balancing_policy is not None
     assert isinstance(stmt.load_balancing_policy, DefaultPolicy)
 
 
-def test_statement_is_immutable_after_with_lb_policy() -> None:
+def test_statement_lb_policy_set_in_place() -> None:
     stmt = Statement("SELECT * FROM system.local")
-    stmt2 = stmt.with_load_balancing_policy(DefaultPolicy())
     assert stmt.load_balancing_policy is None
-    assert stmt2.load_balancing_policy is not None
+    stmt.load_balancing_policy = DefaultPolicy()
+    assert stmt.load_balancing_policy is not None
 
 
 def test_policy_without_pick_targets_raises_on_set() -> None:
     class NoPickTargets:
         pass
 
+    stmt = Statement("SELECT * FROM system.local")
     with pytest.raises(LoadBalancingPolicyError):
-        Statement("SELECT * FROM system.local").with_load_balancing_policy(NoPickTargets())  # type: ignore[arg-type]
+        stmt.load_balancing_policy = NoPickTargets()  # type: ignore[assignment]
+    assert stmt.load_balancing_policy is None
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_prepared_statement_without_retry_policy():
-    policy = DefaultRetryPolicy()
-
+async def test_prepared_statement_clear_retry_policy():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     prepared = await session.prepare("SELECT * FROM system.local")
+    prepared.retry_policy = DefaultRetryPolicy()
 
-    prepared = prepared.with_retry_policy(policy)
-    new_prepared = prepared.without_retry_policy()
+    prepared.retry_policy = None
 
-    assert prepared.retry_policy is policy
-    assert new_prepared.retry_policy is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_db
-async def test_prepared_statement_retry_policy_returns_same_object():
-    policy = DefaultRetryPolicy()
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
-    prepared = await session.prepare("SELECT * FROM system.local")
-
-    prepared = prepared.with_retry_policy(policy)
-
-    assert prepared.retry_policy is policy
+    assert prepared.retry_policy is None
 
 
 @pytest.mark.asyncio
@@ -546,10 +567,9 @@ async def test_prepared_statement_set_is_idempotent_true():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     prepared = await session.prepare("SELECT * FROM system.local")
 
-    new_prepared = prepared.set_is_idempotent(True)
+    prepared.is_idempotent = True
 
-    assert prepared.is_idempotent is False
-    assert new_prepared.is_idempotent is True
+    assert prepared.is_idempotent is True
 
 
 @pytest.mark.asyncio
@@ -557,21 +577,8 @@ async def test_prepared_statement_set_is_idempotent_true():
 async def test_prepared_statement_set_is_idempotent_false():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
     prepared = await session.prepare("SELECT * FROM system.local")
+    prepared.is_idempotent = True
 
-    prepared = prepared.set_is_idempotent(True)
+    prepared.is_idempotent = False
 
-    new_prepared = prepared.set_is_idempotent(False)
-
-    assert prepared.is_idempotent is True
-    assert new_prepared.is_idempotent is False
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_db
-async def test_prepared_statement_set_is_idempotent_returns_new_instance():
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
-    prepared = await session.prepare("SELECT * FROM system.local")
-
-    new_prepared = prepared.set_is_idempotent(True)
-
-    assert prepared is not new_prepared
+    assert prepared.is_idempotent is False

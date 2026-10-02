@@ -96,7 +96,7 @@ async def test_default_policy_basic(session: Session, table_factory: TableFactor
         await session.execute(f"INSERT INTO {table} (id, x) VALUES ({i}, {i * 10})")
 
     prepared = await session.prepare(f"SELECT * FROM {table}")
-    prepared = prepared.with_load_balancing_policy(DefaultPolicy())
+    prepared.load_balancing_policy = DefaultPolicy()
     result = await session.execute(prepared)
     rows = await result.all()
     assert len(rows) == 5
@@ -112,7 +112,8 @@ async def test_default_policy_with_options(session: Session, table_factory: Tabl
         permit_dc_failover=True,
         enable_shuffling_replicas=False,
     )
-    stmt = Statement(f"SELECT * FROM {table}").with_load_balancing_policy(policy)
+    stmt = Statement(f"SELECT * FROM {table}")
+    stmt.load_balancing_policy = policy
     assert await session.execute(stmt) is not None
 
 
@@ -185,7 +186,8 @@ async def test_custom_policy_is_called(session: Session, table_factory: TableFac
     await session.execute(f"INSERT INTO {table} (id, x) VALUES (1, 10)")
 
     policy = TrackingPolicy()
-    stmt = Statement(f"SELECT * FROM {table}").with_load_balancing_policy(policy)
+    stmt = Statement(f"SELECT * FROM {table}")
+    stmt.load_balancing_policy = policy
     await session.execute(stmt)
     assert policy.call_count >= 1
 
@@ -197,7 +199,8 @@ async def test_custom_policy_receives_cluster_state(session: Session, table_fact
     await session.execute(f"INSERT INTO {table} (id, x) VALUES (1, 10)")
 
     policy = TrackingPolicy()
-    stmt = Statement(f"SELECT * FROM {table}").with_load_balancing_policy(policy)
+    stmt = Statement(f"SELECT * FROM {table}")
+    stmt.load_balancing_policy = policy
     await session.execute(stmt)
     assert len(policy.nodes_seen) > 0
     assert "host_id" in policy.nodes_seen[0]
@@ -215,7 +218,8 @@ async def test_exploding_policy_logs_error_and_fails(
     table = await table_factory("id int PRIMARY KEY, x int", "lb_exploding")
     await session.execute(f"INSERT INTO {table} (id, x) VALUES (1, 10)")
 
-    stmt = Statement(f"SELECT * FROM {table}").with_load_balancing_policy(ExplodingPolicy())
+    stmt = Statement(f"SELECT * FROM {table}")
+    stmt.load_balancing_policy = ExplodingPolicy()
     with caplog.at_level(logging.ERROR), pytest.raises(ExecuteError):
         await session.execute(stmt)
 
@@ -233,7 +237,8 @@ async def test_non_iterable_policy_logs_error_and_fails(
     table = await table_factory("id int PRIMARY KEY, x int", "lb_non_iterable")
     await session.execute(f"INSERT INTO {table} (id, x) VALUES (1, 10)")
 
-    stmt = Statement(f"SELECT * FROM {table}").with_load_balancing_policy(NonIterablePolicy())
+    stmt = Statement(f"SELECT * FROM {table}")
+    stmt.load_balancing_policy = NonIterablePolicy()
     with caplog.at_level(logging.ERROR), pytest.raises(ExecuteError):
         await session.execute(stmt)
 
@@ -281,11 +286,9 @@ async def test_routing_info_fields_on_prepared_lwt(session: Session, table_facto
     prepared = await session.prepare(f"UPDATE {table} SET v = ? WHERE id = ? IF v = ?")
 
     policy = RoutingInfoCapturingPolicy()
-    prepared = (
-        prepared.with_consistency(Consistency.Quorum)
-        .with_serial_consistency(SerialConsistency.Serial)
-        .with_load_balancing_policy(policy)
-    )
+    prepared.consistency = Consistency.Quorum
+    prepared.serial_consistency = SerialConsistency.Serial
+    prepared.load_balancing_policy = policy
     await session.execute(prepared, [42, 1, 10])
 
     ri = policy.captured

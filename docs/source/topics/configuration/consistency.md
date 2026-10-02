@@ -98,20 +98,28 @@ Setting Consistency Level for `Statement`, `PreparedStatement`
 and `Batch`:
 
 ```python
-from scylla.statement import Batch, Consistency, PreparedStatement, Statement
+from scylla.statement import UNSET, Batch, Consistency, PreparedStatement, Statement
 
 query_str = "INSERT INTO tab (a, b) VALUES (1, 2)"
 
 # Setting consistency to Two for Statement.
-statement = Statement(query_str).with_consistency(Consistency.Two)
+statement = Statement(query_str)
+statement.consistency = Consistency.Two
 
 # Setting consistency to Three for Prepared.
 prepared = await session.prepare(query_str)
-prepared = prepared.with_consistency(Consistency.Three)
+prepared.consistency = Consistency.Three
 
 # Setting consistency to All for Batch.
-batch = Batch().with_consistency(Consistency.All)
+batch = Batch()
+batch.consistency = Consistency.All
+
+# Unsetting consistency, so it is taken from the execution profile again.
+batch.consistency = UNSET
 ```
+
+The property is modified in place. When consistency is not set on the
+statement, reading it returns `UNSET`.
 
 ## Consistency Hierarchy
 

@@ -141,14 +141,17 @@ await asyncio.gather(*coroutines)
 
 ## Statement Configuration
 
-Both `Statement` (for unprepared statements) and `PreparedStatement` use an **immutable builder pattern** - every `with_*` method returns a new object with the updated configuration, leaving the original unchanged.
+Both `Statement` (for unprepared statements) and `PreparedStatement` are configured through **mutable properties** that change the object in place. Changing a `PreparedStatement` affects every later execution of it; requests already in flight keep the settings they started with.
+
+`consistency`, `serial_consistency` and `request_timeout` read as `UNSET` (`from scylla.statement import UNSET`) when not set on the statement, meaning the value comes from the execution profile. Whatever you read from a property can be assigned back, so assigning `UNSET` reverts to the profile's value.
 
 ### Consistency level
 
 ```python
 from scylla.statement import Consistency, Statement
 
-statement = Statement("INSERT INTO users (id, name) VALUES (?, ?)").with_consistency(Consistency.Quorum)
+statement = Statement("INSERT INTO users (id, name) VALUES (?, ?)")
+statement.consistency = Consistency.Quorum
 await session.execute(statement, [4, "Dave"])
 ```
 
@@ -156,15 +159,15 @@ To set consistency on a prepared statement:
 
 ```python
 prepared = await session.prepare("INSERT INTO users (id, name) VALUES (?, ?)")
-prepared = prepared.with_consistency(Consistency.Quorum)
+prepared.consistency = Consistency.Quorum
 ```
 
 ### Request timeout
 
-Set a per-statement timeout in seconds. If the timeout elapses the execution fails immediately. This is true for all retry attempts for this request:
+Set a per-statement timeout in seconds. If the timeout elapses the execution fails immediately. This is true for all retry attempts for this request. `None` disables the timeout:
 
 ```python
-prepared = prepared.with_request_timeout(5.0)  # 5-second timeout
+prepared.request_timeout = 5.0  # 5-second timeout
 ```
 
 ### Page size
@@ -172,7 +175,8 @@ prepared = prepared.with_request_timeout(5.0)  # 5-second timeout
 Control how many rows are fetched per page (default: 5000):
 
 ```python
-statement = Statement("SELECT * FROM users").with_page_size(50)
+statement = Statement("SELECT * FROM users")
+statement.page_size = 50
 ```
 
 ### Configuration preservation
@@ -180,7 +184,9 @@ statement = Statement("SELECT * FROM users").with_page_size(50)
 All configuration options are preserved when preparing a `Statement`:
  
 ```python
-statement = Statement("SELECT * FROM users").with_page_size(10).with_request_timeout(2.0)
+statement = Statement("SELECT * FROM users")
+statement.page_size = 10
+statement.request_timeout = 2.0
 prepared = await session.prepare(statement)
 assert prepared.page_size == 10
 assert prepared.request_timeout == 2.0
@@ -212,11 +218,11 @@ session = await builder.connect()
 
 ```python
 insert_statement = await session.prepare("INSERT INTO users (id, name) VALUES (?, ?)")
-insert_statement = insert_statement.with_execution_profile(profile)
+insert_statement.execution_profile = profile
 await session.execute(insert_statement, [5, "Eve"])
 ```
 
-Statement-level settings (e.g. `with_consistency`) take precedence over the execution profile, which in turn takes precedence over the session default.
+Statement-level settings (e.g. `consistency`) take precedence over the execution profile, which in turn takes precedence over the session default.
 
 ## Working with Results
 
@@ -258,7 +264,8 @@ Use `iter_current_page()` and `fetch_next_page()` to consume one page at a time:
 ```python
 from scylla.statement import Statement
 
-statement = Statement("SELECT id, name FROM users").with_page_size(100)
+statement = Statement("SELECT id, name FROM users")
+statement.page_size = 100
 page_result = await session.execute(statement)
 
 while page_result:
@@ -274,7 +281,8 @@ while page_result:
 ```python
 from scylla.statement import Statement
 
-statement = Statement("SELECT id, name FROM users").with_page_size(10)
+statement = Statement("SELECT id, name FROM users")
+statement.page_size = 10
 
 # --- First request ---
 result = await session.execute(statement)
@@ -302,10 +310,10 @@ batch.add(insert, [11, "Grace", 28])
 batch.add(insert, [12, "Heidi", 33])
 
 # Optionally configure consistency on the batch itself.
-batch = batch.with_consistency(Consistency.LocalQuorum)
+batch.consistency = Consistency.LocalQuorum
 
 # Or add an ExecutionProfile.
-batch = batch.with_execution_profile(ExecutionProfile(timeout=120.0))
+batch.execution_profile = ExecutionProfile(timeout=120.0)
 
 await session.batch(batch)
 ```

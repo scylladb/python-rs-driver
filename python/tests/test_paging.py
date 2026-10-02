@@ -72,7 +72,7 @@ async def test_execute_paged_basic_flow(session: Session, table_factory: TableFa
     await insert_rows(session, table, total_rows)
 
     prepared = await session.prepare(f"SELECT * FROM {table}")
-    prepared = prepared.with_page_size(page_size)
+    prepared.page_size = page_size
 
     paging_result = await session.execute(prepared)
 
@@ -108,7 +108,7 @@ async def test_execute_paged_basic_flow_for_unprepared_statements(
     await insert_rows(session, table, total_rows)
 
     statement = Statement(f"SELECT * FROM {table}")
-    statement = statement.with_page_size(page_size)
+    statement.page_size = page_size
 
     paging_result = await session.execute(statement)
 
@@ -151,7 +151,7 @@ async def test_execute_async_paged_basic_flow(
     await insert_rows(session, table, total_rows)
 
     prepared = await session.prepare(f"SELECT * FROM {table}")
-    prepared = prepared.with_page_size(page_size)
+    prepared.page_size = page_size
 
     rows_iter = await session.execute(prepared)
 
@@ -186,7 +186,7 @@ async def test_execute_async_paged_for_string_query(
     await insert_rows(session, table, total_rows)
 
     statement = Statement(f"SELECT * FROM {table}")
-    statement = statement.with_page_size(page_size)
+    statement.page_size = page_size
 
     rows_iter = await session.execute(statement)
 
@@ -215,7 +215,7 @@ async def test_paging_state_resume(
     await insert_rows(session, table, 20)
 
     prepared = await session.prepare(f"SELECT * FROM {table}")
-    prepared = prepared.with_page_size(10)
+    prepared.page_size = 10
 
     result1 = await session.execute(prepared)
 
@@ -255,7 +255,7 @@ async def test_paging_all_returns_all_rows(
     await insert_rows(session, table, total_rows)
 
     prepared = await session.prepare(f"SELECT * FROM {table}")
-    prepared = prepared.with_page_size(page_size)
+    prepared.page_size = page_size
 
     result = await session.execute(prepared)
 
@@ -301,7 +301,7 @@ async def test_paging_one_returns_first_row(
     await insert_rows(session, table, 1)
 
     prepared = await session.prepare(f"SELECT * FROM {table}")
-    prepared = prepared.with_page_size(2)
+    prepared.page_size = 2
 
     result = await session.execute(prepared)
 

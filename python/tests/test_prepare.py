@@ -34,13 +34,13 @@ async def test_prepare_and_str():
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_prepared_with_and_get_page_size():
+async def test_prepared_set_and_get_page_size():
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
 
     prepared = await session.prepare("SELECT * FROM system.local")
 
     expected_page_size = 500
-    prepared = prepared.with_page_size(expected_page_size)
+    prepared.page_size = expected_page_size
 
     actual_page_size = prepared.page_size
 

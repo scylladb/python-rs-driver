@@ -106,13 +106,11 @@ await session.batch(batch)
 
 
 ## Batch options
-You can create batch statement with various options by using `with_*` methods
-on the `Batch` object.\
-**Note:** Calling a `with_*` method **does not modify the existing batch**; instead,
-it returns a **new `Batch` instance**.\
-This new instance inherits all existing options, statements and values from the original
-batch, applying only the specific change introduced by the `with_*` method. Any option
-not explicitly targeted by the method remains completely unchanged.
+You can configure a batch statement by assigning to its properties, such as
+`consistency`, `serial_consistency`, `request_timeout`, `execution_profile`,
+`load_balancing_policy`, `retry_policy` or `is_idempotent`.\
+**Note:** Assigning a property **modifies the batch in place**. Assigning `UNSET`
+(`from scylla.statement import UNSET`) makes the option fall back to the execution profile.
 
 Example:
 ```python
@@ -122,8 +120,8 @@ from scylla.statement import Batch, Consistency
 batch = Batch()
 batch.add("INSERT INTO tab (a) VALUES (16)")
 
-# Create a batch statement with consistency set to One.
-batch = batch.with_consistency(Consistency.One)
+# Set consistency of the batch to One.
+batch.consistency = Consistency.One
 
 # Run the batch.
 await session.batch(batch)

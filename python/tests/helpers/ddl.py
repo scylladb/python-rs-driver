@@ -96,9 +96,11 @@ _SCHEMA_QUERIES_RETRY_POLICY = SchemaQueriesRetryPolicy()
 
 
 async def ddl(session: Session, query: Statement | str) -> None:
-    """Execute a DDL statement, guarded against group 0 conflicts."""
+    """Execute a DDL statement, guarded against group 0 conflicts.
+
+    A passed `Statement` gets its load balancing and retry policies overwritten in place.
+    """
     statement = Statement(query) if isinstance(query, str) else query
-    statement = statement.with_load_balancing_policy(_SCHEMA_QUERIES_LBP).with_retry_policy(
-        _SCHEMA_QUERIES_RETRY_POLICY
-    )
+    statement.load_balancing_policy = _SCHEMA_QUERIES_LBP
+    statement.retry_policy = _SCHEMA_QUERIES_RETRY_POLICY
     await session.execute(statement)

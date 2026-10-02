@@ -74,7 +74,8 @@ async def example_async_for(session: Session) -> None:
 async def example_manual_paging_unprepared(session: Session) -> None:
     print("\n=== 2) Manual paging (unprepared Statement) ===")
 
-    stmt = Statement("SELECT a, b, c FROM select_paging").with_page_size(6)
+    stmt = Statement("SELECT a, b, c FROM select_paging")
+    stmt.page_size = 6
     result = await session.execute(stmt)
 
     page_no = 1
@@ -104,7 +105,7 @@ async def example_manual_paging_prepared(session: Session) -> None:
 
     prepared = await session.prepare("SELECT a, b, c FROM select_paging")
     # Setting page size on the prepared statement applies to all executions of it
-    prepared = prepared.with_page_size(7)
+    prepared.page_size = 7
 
     result = await session.execute(prepared)
 
@@ -136,7 +137,7 @@ async def example_paging_state_resume(session: Session) -> None:
     print("\n=== 4) PagingState resume ===")
 
     prepared = await session.prepare("SELECT a, b, c FROM select_paging")
-    prepared = prepared.with_page_size(5)
+    prepared.page_size = 5
 
     # Fetch first page
     result = await session.execute(prepared)
@@ -168,7 +169,7 @@ async def example_first_row_and_all(session: Session) -> None:
     print("\n=== 5) Convenience helpers: first_row() and all() ===")
 
     prepared = await session.prepare("SELECT a, b, c FROM select_paging")
-    prepared = prepared.with_page_size(4)
+    prepared.page_size = 4
 
     result = await session.execute(prepared)
 
@@ -212,7 +213,8 @@ class UppercaseKeysDictFactory(RowFactory):
 async def example_custom_row_factory(session: Session) -> None:
     print("\n=== 5) Custom row factories ===")
 
-    stmt = Statement("SELECT a, b, c FROM select_paging").with_page_size(20)
+    stmt = Statement("SELECT a, b, c FROM select_paging")
+    stmt.page_size = 20
     result = await session.execute(stmt, factory=UppercaseKeysDictFactory())
 
     res = await result.all()

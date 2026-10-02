@@ -284,7 +284,8 @@ def test_loop_that_cannot_be_weakly_referenced_panics(session: Session) -> None:
     pages, and a network round-trip winning that race on every one is so unlikely that
     the test is not flaky in practice.
     """
-    paged = Statement("SELECT * FROM system_schema.columns").with_page_size(1)
+    paged = Statement("SELECT * FROM system_schema.columns")
+    paged.page_size = 1
     first_page = _run_on_new_loop(lambda: session.execute(paged))
     assert first_page.has_more_pages()
 

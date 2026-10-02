@@ -1,7 +1,6 @@
 use pyo3::prelude::*;
 
 use crate::errors::{SessionConfigError, StatementConfigError, get_type_name, with_cause};
-use crate::policies::retry::policies::DriverRetryPolicyError;
 use crate::tls::TlsConfigError;
 use crate::utils::AddressParseError;
 
@@ -87,12 +86,9 @@ pub enum DriverStatementConfigError {
     /// The provided request timeout is not a non-negative finite number of seconds.
     #[error("timeout must be a non-negative, finite number (in seconds), got {value}")]
     InvalidRequestTimeout { value: f64 },
-    /// An error occurred in Python code while handling a statement value.
-    #[error("Python conversion failed while handling batch value")]
-    PythonConversionFailed { source: Box<PyErr> },
-    /// The provided retry policy is invalid.
-    #[error("Invalid retry policy")]
-    InvalidRetryPolicy { source: Box<DriverRetryPolicyError> },
+    /// The provided page size is not a positive number.
+    #[error("page size must be positive, got {value}")]
+    NonPositivePageSize { value: i32 },
 }
 
 impl DriverStatementConfigError {
@@ -102,36 +98,13 @@ impl DriverStatementConfigError {
         Self::InvalidRequestTimeout { value }
     }
 
-    pub(crate) fn python_conversion_failed(source: PyErr) -> Self {
-        Self::PythonConversionFailed {
-            source: Box::new(source),
-        }
-    }
-
-    pub(crate) fn invalid_retry_policy(source: DriverRetryPolicyError) -> Self {
-        Self::InvalidRetryPolicy {
-            source: Box::new(source),
-        }
-    }
-}
-
-impl From<DriverRetryPolicyError> for DriverStatementConfigError {
-    fn from(e: DriverRetryPolicyError) -> Self {
-        Self::invalid_retry_policy(e)
+    pub(crate) fn non_positive_page_size(value: i32) -> Self {
+        Self::NonPositivePageSize { value }
     }
 }
 
 impl From<DriverStatementConfigError> for PyErr {
     fn from(e: DriverStatementConfigError) -> PyErr {
-        let err = StatementConfigError::new_err(e.to_string());
-        match e {
-            DriverStatementConfigError::InvalidRequestTimeout { .. } => err,
-            DriverStatementConfigError::PythonConversionFailed { source } => {
-                with_cause(err, *source)
-            }
-            DriverStatementConfigError::InvalidRetryPolicy { source } => {
-                with_cause(err, (*source).into())
-            }
-        }
+        StatementConfigError::new_err(e.to_string())
     }
 }

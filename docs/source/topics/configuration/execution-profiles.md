@@ -107,7 +107,7 @@ session = await builder.connect()
 stmt = Statement("SELECT * FROM users")
 profile = ExecutionProfile(timeout=2.5)
 
-stmt = stmt.with_execution_profile(profile)
+stmt.execution_profile = profile
 
 # Access the assigned profile
 assigned_profile = stmt.execution_profile
@@ -115,7 +115,7 @@ assigned_profile = stmt.execution_profile
 prepared = await session.prepare("SELECT * FROM users")
 profile = ExecutionProfile(timeout=1.5)
 
-prepared = prepared.with_execution_profile(profile)
+prepared.execution_profile = profile
 
 # Access the assigned profile
 assigned_profile = prepared.execution_profile
@@ -124,5 +124,5 @@ assigned_profile = prepared.execution_profile
 To remove a previously assigned profile:
 
 ```python
-stmt = stmt.without_execution_profile()
+stmt.execution_profile = None
 ```
