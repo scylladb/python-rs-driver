@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 mod tests;
 
 use crate::deserialize::value;
-use deserialize::results;
 use pyo3::prelude::*;
 use pyo3::sync::OnceExt;
 use pyo3::wrap_pyfunction;
@@ -24,6 +23,7 @@ mod errors;
 mod execution_profile;
 mod future;
 mod policies;
+mod results;
 mod routing;
 mod serialize;
 mod session;

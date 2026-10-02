@@ -11,9 +11,10 @@ use scylla_cql::frame::response::result::ColumnSpec;
 use crate::TaskExecutionMode;
 use crate::core::session::{BoundStatement, fetch_page};
 use crate::deserialize::error::DriverRowIterationError;
-use crate::deserialize::results::{RequestResult, ResolvedPage, RowsIteratorKind};
 use crate::deserialize::row_factory::PyRowFactory;
+use crate::deserialize::rows::{ResolvedPage, RowsIteratorKind};
 use crate::errors::execution::DriverExecuteError;
+use crate::results::RequestResult;
 
 /// One page of a query result, together with the pager positioned after it.
 #[derive(Clone)]

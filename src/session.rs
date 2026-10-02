@@ -9,13 +9,13 @@ use crate::batch::PyBatch;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::PendingRequestResult;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
-use crate::deserialize::results::PyPagingState;
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::{
     DriverExecuteError, DriverPrepareError, DriverSchemaAgreementError, DriverUseKeyspaceError,
 };
 use crate::future::DriverFuture;
 use crate::policies::load_balancing::PyTargetPolicy;
+use crate::results::PyPagingState;
 use crate::serialize::value_list::PyValueList;
 use crate::statement::PyPreparedStatement;
 
