@@ -23,6 +23,7 @@ mod enums;
 mod errors;
 mod execution_profile;
 mod future;
+mod legacy;
 mod policies;
 mod routing;
 mod serialize;
@@ -72,6 +73,15 @@ impl DriverRuntime {
         R: Send + 'static,
     {
         self.handle.spawn_blocking(f)
+    }
+
+    /// Runs `future` to completion on the calling thread, with the GIL released.
+    pub(crate) fn block_on<F>(&self, py: Python<'_>, future: F) -> F::Output
+    where
+        F: Future + Send,
+        F::Output: Send,
+    {
+        py.detach(|| self.handle.block_on(future))
     }
 
     /// Drain the runtime. Called from the atexit hook on the main thread,
@@ -148,5 +158,6 @@ fn scylla(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     add_submodule(py, module, "routing", routing::routing)?;
     add_submodule(py, module, "tls", tls::tls)?;
     add_submodule(py, module, "future", future::future)?;
+    add_submodule(py, module, "legacy", legacy::legacy)?;
     Ok(())
 }

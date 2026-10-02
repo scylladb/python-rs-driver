@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use pyo3::prelude::{PyListMethods, Python};
 use pyo3::types::PyList;
-use pyo3::{Py, PyAny, PyResult};
+use pyo3::{Bound, Py, PyAny, PyResult};
+use scylla::frame::response::result::ColumnSpec;
 use scylla::response::query_result::QueryResult;
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 
@@ -41,6 +42,14 @@ impl RequestResultCore {
     /// available.
     pub(crate) fn paging_state(&self) -> Option<PagingState> {
         self.query_pager.paging_state()
+    }
+
+    /// Returns the specifications of the result columns, or `None` for a result
+    /// that carries no rows, such as an `INSERT`.
+    pub(crate) fn col_specs(&self) -> Option<&[ColumnSpec<'_>]> {
+        let rows = self.query_result.deserialized_metadata_and_rows()?;
+
+        Some(rows.metadata().col_specs())
     }
 
     /// Fetches the next page, or returns `None` if no more pages exist.
@@ -105,11 +114,7 @@ impl RequestResultCore {
                     rows_iterator.update(py, Arc::new(next_page))?;
                 }
 
-                while let Some(res_row) = rows_iterator.next(py) {
-                    list.bind(py).append(res_row?)?;
-                }
-
-                Ok(())
+                drain_page(py, &rows_iterator, list.bind(py))
             })?;
 
             if let Some(res) = query_pager.fetch_next_page().await {
@@ -121,6 +126,37 @@ impl RequestResultCore {
 
         Ok(list)
     }
+}
+
+/// Returns the rows of one page as a list, or `None` for a result without rows.
+pub(crate) fn page_rows(
+    py: Python<'_>,
+    query_result: &Arc<QueryResult>,
+    row_factory: Option<&Py<RowFactory>>,
+) -> PyResult<Option<Py<PyList>>> {
+    if !query_result.is_rows() {
+        return Ok(None);
+    }
+
+    let row_factory = row_factory.map(|f| f.clone_ref(py));
+    let rows_iterator = RowsIteratorKind::new(py, Arc::clone(query_result), row_factory)?;
+    let list = PyList::empty(py);
+    drain_page(py, &rows_iterator, &list)?;
+
+    Ok(Some(list.unbind()))
+}
+
+/// Appends every remaining row of the current page to `list`.
+fn drain_page(
+    py: Python<'_>,
+    rows_iterator: &RowsIteratorKind,
+    list: &Bound<'_, PyList>,
+) -> PyResult<()> {
+    while let Some(res_row) = rows_iterator.next(py) {
+        list.append(res_row?)?;
+    }
+
+    Ok(())
 }
 
 /// Loop until a row is produced, all pages are exhausted,

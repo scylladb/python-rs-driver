@@ -11,6 +11,7 @@ from scylla.policies.timestamp_generator import TimestampGenerator
 from .enums import Compression, PoolSize, SelfIdentity, WriteCoalescingDelay
 from .execution_profile import ExecutionProfile
 from .future import DriverFuture
+from .legacy import LegacySession
 from .session import Session
 from .tls import TlsConfig, TlsContext
 
@@ -153,6 +154,12 @@ class SessionBuilder:
         -------
         DriverFuture[Session]
             A future resolving to a connected session ready to execute queries.
+        """
+
+    def connect_legacy(self) -> LegacySession:
+        """
+        Block until connected and return the legacy (``cassandra-driver``
+        compatible) session.
         """
 
     def user(self, username: str, password: str) -> SessionBuilder:

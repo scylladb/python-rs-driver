@@ -7,8 +7,9 @@ use uuid::Uuid;
 
 use crate::batch::PyBatch;
 use crate::cluster::state::PyClusterState;
+use crate::core::results::RequestResultCore;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
-use crate::deserialize::results::{PyPagingState, RequestResult, RowFactory};
+use crate::deserialize::results::{PyPagingState, RowFactory};
 use crate::errors::execution::{
     DriverExecuteError, DriverPrepareError, DriverSchemaAgreementError, DriverUseKeyspaceError,
 };
@@ -21,7 +22,8 @@ use crate::statement::PyPreparedStatement;
 ///
 /// A thin facade over [`SessionCore`]: every method here converts its Python
 /// arguments, hands the work to the core, and returns a [`DriverFuture`]
-/// driving the resulting future on the tokio runtime.
+/// driving the resulting future on the tokio runtime. A request resolves to a
+/// [`RequestResultCore`], which reaches Python as a `RequestResult`.
 #[pyclass(name = "Session", frozen)]
 pub(crate) struct PySession {
     pub(crate) core: SessionCore,
@@ -60,7 +62,7 @@ impl PySession {
         paging_state: Option<Py<PyPagingState>>,
         paged: bool,
         target: Option<PyTargetPolicy>,
-    ) -> PyResult<DriverFuture<RequestResult, DriverExecuteError>> {
+    ) -> PyResult<DriverFuture<RequestResultCore, DriverExecuteError>> {
         // Why not accept PyValueList instead of Option<PyValueList>?
         // It would require us to use `Default::default` as default value in
         // `pyo3(signature = ...)`, and thus use `text_signature` as well
@@ -97,7 +99,7 @@ impl PySession {
         mut batch: PyBatch,
         factory: Option<Py<RowFactory>>,
         target: Option<PyTargetPolicy>,
-    ) -> PyResult<DriverFuture<RequestResult, DriverExecuteError>> {
+    ) -> PyResult<DriverFuture<RequestResultCore, DriverExecuteError>> {
         if let Some(target) = target {
             batch.set_target(target);
         }

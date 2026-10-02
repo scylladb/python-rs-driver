@@ -1,7 +1,52 @@
+use std::sync::Arc;
+
 use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyTuple};
 use pyo3::{Py, PyAny, PyResult};
 
 use super::PyDriverFuture;
+use crate::utils::Prepended;
+
+/// A legacy-driver callback, invoked as `fn(value, *args, **kwargs)`.
+pub(super) struct LegacyCallback {
+    callable: Py<PyAny>,
+    args: Py<PyTuple>,
+    kwargs: Option<Py<PyDict>>,
+}
+
+impl LegacyCallback {
+    pub(super) fn new(callable: Py<PyAny>, args: Py<PyTuple>, kwargs: Option<Py<PyDict>>) -> Self {
+        Self {
+            callable,
+            args,
+            kwargs,
+        }
+    }
+
+    /// Invoke this callback with `value` prepended to its arguments.
+    /// Errors are logged and swallowed, as the legacy driver did.
+    pub(super) fn invoke(&self, py: Python<'_>, value: &Bound<'_, PyAny>) {
+        let extra = self.args.bind(py);
+        let kwargs = self.kwargs.as_ref().map(|kwargs| kwargs.bind(py));
+
+        let args = Prepended::new(value.as_borrowed(), extra.iter_borrowed());
+        let called = match PyTuple::new(py, args) {
+            Ok(args) => self.callable.call(py, args, kwargs),
+            Err(err) => Err(err),
+        };
+
+        if let Err(err) = called {
+            log::error!("ResponseFuture callback raised an exception: {}", err);
+        }
+    }
+
+    /// Invoke every callback with `value`.
+    pub(super) fn fire_all(py: Python<'_>, callbacks: &[Arc<Self>], value: &Bound<'_, PyAny>) {
+        for callback in callbacks {
+            callback.invoke(py, value);
+        }
+    }
+}
 
 /// A registered callback, invoked with the future's outcome as its sole argument.
 pub(super) struct Callback {
@@ -16,7 +61,7 @@ impl Callback {
     /// Invoke this callback with `value` as its only argument.
     /// Errors are logged and swallowed.
     fn invoke(&self, py: Python<'_>, value: &Py<PyAny>) {
-        if let Err(err) = self.callable.call1(py, (value.clone_ref(py),)) {
+        if let Err(err) = self.callable.call1(py, (value,)) {
             log::error!("DriverFuture callback raised an exception: {}", err);
         }
     }

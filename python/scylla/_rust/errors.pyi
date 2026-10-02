@@ -41,5 +41,10 @@ class RetryPolicyError(ScyllaError): ...
 class QueryMetadataError(ScyllaError): ...
 class SpeculativeExecutionPolicyError(ScyllaError): ...
 
+class QueryExhausted(Exception):
+    """
+    Raised by `ResponseFuture.start_fetching_next_page()` when there are no more pages.
+    """
+
 class FutureCancelledError(Exception):
     """Raised when a `DriverFuture` is cancelled via `cancel()`."""

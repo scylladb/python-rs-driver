@@ -185,6 +185,36 @@ where
     }
 }
 
+/// `first` followed by `rest`, keeping the exact size `PyTuple::new` needs.
+pub(crate) struct Prepended<I: ExactSizeIterator> {
+    first: Option<I::Item>,
+    rest: I,
+}
+
+impl<I: ExactSizeIterator> Prepended<I> {
+    pub(crate) fn new(first: I::Item, rest: I) -> Self {
+        Self {
+            first: Some(first),
+            rest,
+        }
+    }
+}
+
+impl<I: ExactSizeIterator> Iterator for Prepended<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.first.take().or_else(|| self.rest.next())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.rest.len() + usize::from(self.first.is_some());
+        (len, Some(len))
+    }
+}
+
+impl<I: ExactSizeIterator> ExactSizeIterator for Prepended<I> {}
+
 /// Add submodule.
 ///
 /// This function is required,

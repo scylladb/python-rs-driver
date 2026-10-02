@@ -8,7 +8,8 @@ use pyo3::prelude::{PyDictMethods, PyModule, PyModuleMethods};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 use pyo3::{
-    Bound, Py, PyAny, PyErr, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods, pymodule,
+    Bound, IntoPyObject, Py, PyAny, PyErr, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods,
+    pymodule,
 };
 use scylla::deserialize::DeserializationError as ScyllaDeserializationError;
 use scylla::response::query_result::QueryResult;
@@ -44,6 +45,17 @@ impl From<RequestResultCore> for RequestResult {
             core,
             columns: PyOnceLock::new(),
         }
+    }
+}
+
+/// A request future resolves to the core; this is how it reaches Python.
+impl<'py> IntoPyObject<'py> for RequestResultCore {
+    type Target = RequestResult;
+    type Output = Bound<'py, RequestResult>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Bound::new(py, RequestResult::from(self))
     }
 }
 
@@ -88,17 +100,10 @@ impl RequestResult {
     fn fetch_next_page(
         &self,
         py: Python<'_>,
-    ) -> PyResult<DriverFuture<Option<RequestResult>, PyErr>> {
+    ) -> PyResult<DriverFuture<Option<RequestResultCore>, PyErr>> {
         let core = self.core.clone();
 
-        DriverFuture::spawn(
-            py,
-            boxed_py_future(async move {
-                core.fetch_next_page()
-                    .await
-                    .map(|next| next.map(RequestResult::from))
-            }),
-        )
+        DriverFuture::spawn(py, boxed_py_future(core.fetch_next_page()))
     }
 
     /// Returns an iterator over rows in the current page.
@@ -177,10 +182,7 @@ impl RequestResult {
     #[getter]
     fn get_columns(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
         let columns = self.columns.get_or_try_init(py, || {
-            match self.core.query_result.deserialized_metadata_and_rows() {
-                None => column_spec_tuple(py, &[]),
-                Some(rows) => column_spec_tuple(py, rows.metadata().col_specs()),
-            }
+            column_spec_tuple(py, self.core.col_specs().unwrap_or_default())
         })?;
         Ok(columns.clone_ref(py))
     }

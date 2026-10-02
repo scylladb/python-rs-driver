@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyString, PyTuple};
+use pyo3::types::{PyList, PyString, PyTuple};
 use scylla::frame::response::result::{ColumnSpec, PartitionKeyIndex};
 
 use crate::cluster::metadata::column_type::{PyCqlColumnType, extract_column_type};
@@ -90,6 +90,18 @@ impl PyColumnSpec {
 /// Builds a Python tuple of lazily-initialized `ColumnSpec`s from column specifications.
 pub(crate) fn column_spec_tuple(py: Python<'_>, specs: &[ColumnSpec<'_>]) -> PyResult<Py<PyTuple>> {
     PyTuple::new(py, specs.iter().map(PyColumnSpec::from)).map(Bound::unbind)
+}
+
+/// Builds a Python list of the CQL types of `specs`.
+pub(crate) fn column_type_list(py: Python<'_>, specs: &[ColumnSpec<'_>]) -> PyResult<Py<PyList>> {
+    let types = PyList::empty(py);
+    for spec in specs {
+        let cql_type = extract_column_type(py, spec.typ())
+            .map_err(DriverQueryMetadataError::column_type_extraction_failed)?;
+        types.append(cql_type)?;
+    }
+
+    Ok(types.unbind())
 }
 
 /// Builds a Python tuple of bind variable indexes of the partition key columns,

@@ -42,6 +42,7 @@ use crate::future::boxed_future::{PyBoxedFuture, ResolvedResult};
 use crate::future::callbacks::CallbackKind;
 pub(crate) use crate::future::driver_future::DriverFuture;
 use crate::future::panics::{catch_panics, resolve_catch_panics};
+use crate::future::task::spawn_guarded;
 use crate::utils::PyDuration;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::exceptions::PyStopIteration;
@@ -61,6 +62,11 @@ mod boxed_future;
 mod callbacks;
 mod driver_future;
 mod panics;
+mod response_future;
+mod task;
+
+pub(crate) use crate::future::panics::{catch_panics_typed, catch_unwind};
+pub(crate) use crate::future::response_future::PyResponseFuture;
 
 /// Internal state of a PyDriverFuture.
 enum FutureState {
@@ -113,7 +119,7 @@ impl ReadyResult {
 }
 
 /// The error every entry point reports for a future left [`FutureState::Panicked`].
-fn panicked_err() -> PyErr {
+pub(in crate::future) fn panicked_err() -> PyErr {
     PyRuntimeError::new_err(
         "internal driver error: a panic left this future unusable; \
          this is a bug in the scylla driver, please report it",
@@ -217,63 +223,99 @@ impl PyDriverFuture {
         inner: &Arc<FutureInner>,
         waker: &Arc<AsyncioWaker>,
     ) -> AbortHandle {
-        let inner_clone = Arc::clone(inner);
-        let waker_clone = Arc::clone(waker);
+        let (inner_done, waker_done) = (Arc::clone(inner), Arc::clone(waker));
+        let (inner_dropped, waker_dropped) = (Arc::clone(inner), Arc::clone(waker));
 
-        let handle = RUNTIME.spawn(async move {
-            let guard = TaskDropGuard::new(&inner_clone, &waker_clone);
-            let resolved = catch_panics(future).await;
-            guard.disarm();
+        spawn_guarded(
+            catch_panics(future),
+            move |resolved| Self::resolve_on_tokio(resolved, inner_done, waker_done),
+            move || Self::resolve_dropped(&inner_dropped, &waker_dropped),
+        )
+    }
 
-            let finished = {
-                let mut state = inner_clone.state.lock().unwrap();
-                match &mut *state {
-                    FutureState::PendingTokio {
-                        callbacks, waiters, ..
-                    } => {
-                        let taken = std::mem::take(callbacks);
-                        let waiters = *waiters;
-                        *state = FutureState::Ready {
-                            result: ReadyResult::Unconverted(resolved),
-                        };
-                        Some((taken, waiters))
-                    }
-                    _ => None,
-                }
-            };
-
-            // `None` means the future was already closed/cancelled/thrown-into
-            // by the time this task completed. There is nothing left to notify.
-            let Some((callbacks, waiters)) = finished else {
-                return;
-            };
-
-            if callbacks.is_empty() {
-                waker_clone.wake();
-                inner_clone.notify_waiters(waiters);
-                return;
-            }
-
-            RUNTIME.spawn_blocking(move || {
-                Python::attach(|py| {
-                    let result = {
-                        let mut state = inner_clone.state.lock_py_attached(py).unwrap();
-                        match &mut *state {
-                            FutureState::Ready { result } => result.get_or_convert(py),
-                            _ => unreachable!(
-                                "This is unreachable if no panic happened during the transitions"
-                            ),
-                        }
+    /// The spawned task completed: `PendingTokio` → `Ready`, then notify and fire callbacks.
+    fn resolve_on_tokio(
+        resolved: ResolvedResult,
+        inner: Arc<FutureInner>,
+        waker: Arc<AsyncioWaker>,
+    ) {
+        let finished = {
+            let mut state = inner.state.lock().unwrap();
+            match &mut *state {
+                FutureState::PendingTokio {
+                    callbacks, waiters, ..
+                } => {
+                    let taken = std::mem::take(callbacks);
+                    let waiters = *waiters;
+                    *state = FutureState::Ready {
+                        result: ReadyResult::Unconverted(resolved),
                     };
-                    CallbackKind::fire_all(py, callbacks, &result);
+                    Some((taken, waiters))
+                }
+                _ => None,
+            }
+        };
 
-                    waker_clone.wake();
-                    inner_clone.notify_waiters(waiters);
-                });
+        // `None` means the future was already closed/cancelled/thrown-into
+        // by the time this task completed. There is nothing left to notify.
+        let Some((callbacks, waiters)) = finished else {
+            return;
+        };
+
+        if callbacks.is_empty() {
+            waker.wake();
+            inner.notify_waiters(waiters);
+            return;
+        }
+
+        RUNTIME.spawn_blocking(move || {
+            Python::attach(|py| {
+                let result = {
+                    let mut state = inner.state.lock_py_attached(py).unwrap();
+                    match &mut *state {
+                        FutureState::Ready { result } => result.get_or_convert(py),
+                        _ => unreachable!(
+                            "This is unreachable if no panic happened during the transitions"
+                        ),
+                    }
+                };
+                CallbackKind::fire_all(py, callbacks, &result);
+
+                waker.wake();
+                inner.notify_waiters(waiters);
             });
         });
+    }
 
-        handle.abort_handle()
+    /// The spawned task was dropped before completing, likely because the
+    /// runtime shut down. Without this the future would stay `PendingTokio`
+    /// forever and its waiters would hit the `atexit` timeout.
+    fn resolve_dropped(inner: &Arc<FutureInner>, waker: &Arc<AsyncioWaker>) {
+        let (callbacks, waiters) = {
+            let mut state = inner.state.lock().unwrap();
+            match &mut *state {
+                FutureState::PendingTokio {
+                    callbacks, waiters, ..
+                } => {
+                    let taken = std::mem::take(callbacks);
+                    let waiters = *waiters;
+                    *state = FutureState::Ready {
+                        result: ReadyResult::Converted(Err(dropped_err())),
+                    };
+                    (taken, waiters)
+                }
+                _ => return,
+            }
+        };
+
+        if !callbacks.is_empty() {
+            Python::attach(|py| {
+                CallbackKind::fire_all(py, callbacks, &Err(dropped_err()));
+            });
+        }
+
+        waker.wake_by_ref();
+        inner.notify_waiters(waiters);
     }
 
     /// Transition from PendingAsyncio to PendingTokio by spawning the given
@@ -567,71 +609,16 @@ impl PyDriverFuture {
     }
 }
 
-/// Guards a task spawned by [`PyDriverFuture::spawn_future_on_tokio`] against
-/// being dropped without completing. Without this, such a future would stay
-/// `PendingTokio` forever and users callbacks awaiting its completion
-/// could reach the timeout at `atexit` hook.
-struct TaskDropGuard<'a> {
-    inner: &'a Arc<FutureInner>,
-    waker: &'a Arc<AsyncioWaker>,
-    armed: bool,
-}
-
-impl<'a> TaskDropGuard<'a> {
-    fn new(inner: &'a Arc<FutureInner>, waker: &'a Arc<AsyncioWaker>) -> Self {
-        Self {
-            inner,
-            waker,
-            armed: true,
-        }
-    }
-
-    fn disarm(mut self) {
-        self.armed = false;
-    }
-}
-
-fn dropped_err() -> PyErr {
+pub(in crate::future) fn dropped_err() -> PyErr {
     FutureCancelledError::new_err(
         "future was dropped before completing, likely because the driver runtime shut down",
     )
 }
 
-impl<'a> Drop for TaskDropGuard<'a> {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-
-        let (callbacks, waiters) = {
-            let mut state = self.inner.state.lock().unwrap();
-            match &mut *state {
-                FutureState::PendingTokio {
-                    callbacks, waiters, ..
-                } => {
-                    let taken = std::mem::take(callbacks);
-                    let waiters = *waiters;
-                    *state = FutureState::Ready {
-                        result: ReadyResult::Converted(Err(dropped_err())),
-                    };
-                    (taken, waiters)
-                }
-                _ => return,
-            }
-        };
-
-        if !callbacks.is_empty() {
-            Python::attach(|py| {
-                CallbackKind::fire_all(py, callbacks, &Err(dropped_err()));
-            });
-        }
-
-        self.waker.wake_by_ref();
-        self.inner.notify_waiters(waiters);
-    }
-}
-
-fn clone_result(py: Python<'_>, result: &PyResult<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+pub(in crate::future) fn clone_result(
+    py: Python<'_>,
+    result: &PyResult<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
     match result {
         Ok(value) => Ok(value.clone_ref(py)),
         Err(err) => Err(err.clone_ref(py)),
@@ -783,5 +770,6 @@ impl PyDriverFuture {
 #[pymodule]
 pub(crate) fn future(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyDriverFuture>()?;
+    module.add_class::<PyResponseFuture>()?;
     Ok(())
 }
