@@ -1,6 +1,6 @@
 use crate::TaskExecutionMode;
 use crate::cluster::metadata::query_metadata::column_spec_tuple;
-use crate::core::results::{Pager, PendingRequestResult, RequestResultCore, next_row_with_paging};
+use crate::core::results::{PageCore, Pager, PendingRequestResult, next_row_with_paging};
 use crate::deserialize::error::{DriverDeserializationError, DriverRowIterationError};
 use crate::deserialize::row_factory::{
     PyClassRowFactory, PyDictRowFactory, PyNamedTupleRowFactory, PyRowFactory, PyRowFactoryBase,
@@ -29,18 +29,18 @@ use yoke::{Yoke, Yokeable};
 /// Represents a result frame from the database, providing access to rows
 /// and support for fetching additional pages.
 ///
-/// Python-facing facade over [`RequestResultCore`]: each method clones the core,
+/// Python-facing facade over [`PageCore`]: each method clones the core,
 /// hands the work over, and awaits it.
 #[pyclass(module = "scylla.results", frozen)]
 pub(crate) struct RequestResult {
-    core: RequestResultCore,
+    core: PageCore,
 
     /// Cached Python-side result column specifications.
     columns: PyOnceLock<Py<PyTuple>>,
 }
 
-impl From<RequestResultCore> for RequestResult {
-    fn from(core: RequestResultCore) -> Self {
+impl From<PageCore> for RequestResult {
+    fn from(core: PageCore) -> Self {
         Self {
             core,
             columns: PyOnceLock::new(),
@@ -285,7 +285,7 @@ pub struct AsyncRowsIterator {
 }
 
 impl AsyncRowsIterator {
-    fn new(core: RequestResultCore) -> Self {
+    fn new(core: PageCore) -> Self {
         let (page, query_pager, factory) = core.into_parts();
 
         AsyncRowsIterator {

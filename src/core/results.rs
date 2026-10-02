@@ -15,16 +15,16 @@ use crate::deserialize::results::{RequestResult, ResolvedPage, RowsIteratorKind}
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::DriverExecuteError;
 
-/// Helper performing the core logic of handling query results.
+/// One page of a query result, together with the pager positioned after it.
 #[derive(Clone)]
-pub(crate) struct RequestResultCore {
+pub(crate) struct PageCore {
     /// Kept to resolve a builder for every following page.
     row_factory: PyRowFactory,
     query_pager: Pager,
     page: ResolvedPage,
 }
 
-impl RequestResultCore {
+impl PageCore {
     pub(crate) fn new(
         py: Python<'_>,
         query_result: QueryResult,
@@ -160,7 +160,7 @@ impl<'py> IntoPyObject<'py> for PendingRequestResult {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let core = RequestResultCore::new(py, self.query_result, self.query_pager, self.factory)?;
+        let core = PageCore::new(py, self.query_result, self.query_pager, self.factory)?;
 
         Bound::new(py, RequestResult::from(core))
     }
