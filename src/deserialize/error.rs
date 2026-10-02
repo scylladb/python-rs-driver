@@ -5,9 +5,70 @@ use pyo3::prelude::*;
 
 use crate::errors::execution::DriverExecuteError;
 use crate::errors::{
-    DecodeFailedError, PyConversionFailedError, RowIterationError,
-    UnsupportedTypeDeserializationError, with_cause,
+    DecodeFailedError, PyConversionFailedError, RowFactoryError, RowIterationError,
+    UnsupportedTypeDeserializationError, get_type_name, with_cause,
 };
+
+/* Row factory errors */
+
+/// Errors that can occur while accepting a row factory from Python.
+#[derive(Debug, thiserror::Error)]
+pub enum DriverRowFactoryError {
+    #[error(
+        "invalid row factory '{type_name}': expected a built-in row factory, a callable taking \
+         the row values, or an object with a 'prepare' method returning one"
+    )]
+    InvalidFactory { type_name: String },
+
+    #[error(
+        "invalid ClassRowFactory target '{type_name}': expected a callable accepting the column \
+         names as keyword arguments"
+    )]
+    InvalidClass { type_name: String },
+
+    #[error(
+        "'prepare' returned an invalid row builder '{type_name}': expected a callable taking the \
+         row values"
+    )]
+    UncallableBuilder { type_name: String },
+
+    #[error("failed to look up 'prepare' on row factory '{type_name}'")]
+    PrepareLookupFailed { type_name: String, cause: PyErr },
+}
+
+impl DriverRowFactoryError {
+    /* Constructors */
+
+    pub(crate) fn invalid_factory(obj: Borrowed<PyAny>) -> Self {
+        let type_name = get_type_name(obj);
+        Self::InvalidFactory { type_name }
+    }
+
+    pub(crate) fn invalid_class(obj: Borrowed<PyAny>) -> Self {
+        let type_name = get_type_name(obj);
+        Self::InvalidClass { type_name }
+    }
+
+    pub(crate) fn uncallable_builder(obj: Borrowed<PyAny>) -> Self {
+        let type_name = get_type_name(obj);
+        Self::UncallableBuilder { type_name }
+    }
+
+    pub(crate) fn prepare_lookup_failed(obj: Borrowed<PyAny>, cause: PyErr) -> Self {
+        let type_name = get_type_name(obj);
+        Self::PrepareLookupFailed { type_name, cause }
+    }
+}
+
+impl From<DriverRowFactoryError> for PyErr {
+    fn from(e: DriverRowFactoryError) -> PyErr {
+        let err = RowFactoryError::new_err(e.to_string());
+        match e {
+            DriverRowFactoryError::PrepareLookupFailed { cause, .. } => with_cause(err, cause),
+            _ => err,
+        }
+    }
+}
 
 /* Row iteration errors */
 
@@ -15,13 +76,13 @@ use crate::errors::{
 pub enum DriverRowIterationError {
     /// An error occurred during deserialization of a CQL value into a Python object.
     #[error(transparent)]
-    Deserialization(DriverDeserializationError),
+    Deserialization(#[from] DriverDeserializationError),
     /// An error occurred while fetching the next page of results from the Rust driver during iteration.
     #[error("Row iteration error: failed to fetch next page of results")]
     FailedToFetchNextPage(#[source] DriverExecuteError),
     /// An error occurred in Python code during processing of a row.
     #[error("Row iteration error: a Python error occurred during processing of a row")]
-    PythonError(#[source] PyErr),
+    PythonError(#[from] PyErr),
 }
 
 impl From<DriverRowIterationError> for PyErr {

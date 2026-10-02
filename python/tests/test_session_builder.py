@@ -17,6 +17,7 @@ from helpers.ccm import (  # pyright: ignore[reportMissingTypeStubs]
     stop_and_remove_cluster,
 )
 from helpers.ddl import ddl
+from helpers.session import session_builder
 from scylla.enums import Compression, Consistency, PoolSize, SelfIdentity, SerialConsistency, WriteCoalescingDelay
 from scylla.errors import AddressTranslationError, HostFilterError, SessionConfigError
 from scylla.execution_profile import ExecutionProfile
@@ -308,12 +309,7 @@ async def test_custom_timestamp_generator_success() -> None:
     ts_gen = MockTimestampGenerator(my_custom_ts)
     assert isinstance(ts_gen, TimestampGenerator)
 
-    builder = (
-        SessionBuilder()
-        .contact_points([("127.0.0.2", 9042)])
-        .user("cassandra", "cassandra")
-        .timestamp_generator(ts_gen)
-    )
+    builder = session_builder().user("cassandra", "cassandra").timestamp_generator(ts_gen)
 
     session = await builder.connect()
 
@@ -340,12 +336,7 @@ async def test_custom_timestamp_generator_success() -> None:
 async def test_simple_timestamp_generator_success() -> None:
     ts_gen = SimpleTimestampGenerator()
 
-    builder = (
-        SessionBuilder()
-        .contact_points([("127.0.0.2", 9042)])
-        .user("cassandra", "cassandra")
-        .timestamp_generator(ts_gen)
-    )
+    builder = session_builder().user("cassandra", "cassandra").timestamp_generator(ts_gen)
 
     session = await builder.connect()
 
@@ -398,7 +389,7 @@ async def test_custom_timestamp_generator_fallback_on_failure(
 async def test_monotonic_timestamp_generator_works_with_session() -> None:
     ts_gen = MonotonicTimestampGenerator()
 
-    builder = SessionBuilder().contact_points([("127.0.0.2", 9042)]).timestamp_generator(ts_gen)
+    builder = session_builder().timestamp_generator(ts_gen)
 
     session = await builder.connect()
 
@@ -739,7 +730,7 @@ async def test_accept_all_host_filter() -> None:
 async def test_dc_host_filter_matches() -> None:
     host_filter = DcHostFilter("datacenter1")
 
-    builder = SessionBuilder().contact_points([("127.0.0.2", 9042)]).host_filter(host_filter)
+    builder = session_builder().host_filter(host_filter)
 
     session = await builder.connect()
 

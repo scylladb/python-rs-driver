@@ -9,6 +9,7 @@ from typing import Generic, TypeVar
 import pytest
 import pytest_asyncio
 from helpers.exit_scenarios import SCENARIO_READY
+from helpers.session import connect
 from scylla.errors import ExecuteError, FutureCancelledError, ScyllaError
 from scylla.future import DriverFuture
 from scylla.results import RequestResult
@@ -47,7 +48,7 @@ class Recorder(Generic[T]):
 
 
 async def set_up() -> Session:
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
+    session = await connect()
     await session.execute("""
         CREATE KEYSPACE IF NOT EXISTS future_testks
         WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1};

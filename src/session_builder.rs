@@ -457,16 +457,24 @@ impl SessionBuilder {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<PySession, DriverSessionConnectionError>> {
-        let config = {
+        let (config, default_row_factory) = {
             let inner = self.inner.lock_py_attached(py).unwrap();
-            inner.config.clone()
+            (
+                inner.config.clone(),
+                inner
+                    .execution_profile
+                    .get()
+                    .row_factory
+                    .as_ref()
+                    .map(|f| f.extracted.clone()),
+            )
         };
 
         DriverFuture::spawn_on_tokio(
             py,
             boxed_py_future(async move {
                 match scylla::client::session::Session::connect(config).await {
-                    Ok(session) => PySession::try_from(Arc::new(session))
+                    Ok(session) => PySession::new(Arc::new(session), default_row_factory)
                         .map_err(DriverSessionConnectionError::python_conversion_error),
                     Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
                 }
@@ -508,6 +516,7 @@ impl PySessionBuilderConfig {
                 load_balancing_policy: None,
                 retry_policy: None,
                 speculative_execution_policy: None,
+                row_factory: None,
             },
         )?;
 

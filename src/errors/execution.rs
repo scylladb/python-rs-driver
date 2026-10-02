@@ -137,6 +137,9 @@ pub enum DriverExecuteError {
     /// The Tokio runtime task responsible for executing the query failed to join.
     #[error("Internal driver error: runtime error while executing query: {message}")]
     RuntimeTaskJoinFailed { message: Box<str> },
+    /// Resolving the row factory against the result metadata failed.
+    #[error("Failed to prepare the row factory for the result metadata")]
+    RowFactoryFailed { source: PyErr },
 }
 
 impl DriverExecuteError {
@@ -161,11 +164,19 @@ impl DriverExecuteError {
     pub(crate) fn serialization_failed(source: scylla::serialize::SerializationError) -> Self {
         Self::SerializationFailed { source }
     }
+
+    pub(crate) fn row_factory_failed(source: PyErr) -> Self {
+        Self::RowFactoryFailed { source }
+    }
 }
 
 impl From<DriverExecuteError> for PyErr {
     fn from(e: DriverExecuteError) -> PyErr {
-        ExecuteError::new_err(e.to_string())
+        let err = ExecuteError::new_err(e.to_string());
+        match e {
+            DriverExecuteError::RowFactoryFailed { source } => with_cause(err, source),
+            _ => err,
+        }
     }
 }
 

@@ -42,7 +42,7 @@ async def connect_server_auth(ca: Path, contact_points: list[tuple[str, int]]) -
     result = await session.execute("SELECT release_version FROM system.local")
     row = await result.first_row()
     assert row is not None
-    print(f"[server-auth] connected, ScyllaDB version: {row['release_version']}")
+    print(f"[server-auth] connected, ScyllaDB version: {row.release_version}")
 
 
 async def connect_mutual_tls(ca: Path, cert: Path, key: Path, contact_points: list[tuple[str, int]]) -> None:
@@ -57,7 +57,7 @@ async def connect_mutual_tls(ca: Path, cert: Path, key: Path, contact_points: li
     result = await session.execute("SELECT release_version FROM system.local")
     row = await result.first_row()
     assert row is not None
-    print(f"[mutual-tls]  connected, ScyllaDB version: {row['release_version']}")
+    print(f"[mutual-tls]  connected, ScyllaDB version: {row.release_version}")
 
 
 async def connect_no_verify(contact_points: list[tuple[str, int]]) -> None:
@@ -70,7 +70,7 @@ async def connect_no_verify(contact_points: list[tuple[str, int]]) -> None:
     result = await session.execute("SELECT release_version FROM system.local")
     row = await result.first_row()
     assert row is not None
-    print(f"[no-verify]   connected, ScyllaDB version: {row['release_version']}")
+    print(f"[no-verify]   connected, ScyllaDB version: {row.release_version}")
 
 
 async def main() -> None:

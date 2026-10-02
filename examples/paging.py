@@ -8,7 +8,7 @@ This file demonstrates:
   2) Manual paging: iter_current_page() + fetch_next_page()
   3) Manual paging with explicit PagingState resume
   4) Convenience helpers: first_row() and all()
-  5) Custom row shaping via RowFactory
+  5) Built-in row factories and custom row shaping
 
 """
 
@@ -16,7 +16,8 @@ import asyncio
 import os
 from typing import Any
 
-from scylla.results import ColumnIterator, RowFactory
+from scylla.cluster.metadata import ColumnSpec
+from scylla.results import DictRowFactory, RowBuilder, TupleRowFactory
 from scylla.session import Session
 from scylla.session_builder import SessionBuilder
 from scylla.statement import Statement
@@ -183,41 +184,62 @@ async def example_first_row_and_all(session: Session) -> None:
 
 
 # ----------------------------
-# A custom RowFactory example
+# Custom row factory examples
 # ----------------------------
-class SelectedColumnsDictFactory(RowFactory):
+class SelectedColumnsDictFactory:
     """
     Keep only selected columns in the produced row dict.
+
+    `prepare` runs once per page, so the positions to keep are resolved
+    against the result metadata before any row is built.
     """
 
     def __init__(self, columns: list[str]) -> None:
-        super().__init__()
         self.columns = set(columns)
 
-    def build(self, column_iterator: ColumnIterator) -> dict[str, Any]:
-        return {col.column_name: col.value for col in column_iterator if col.column_name in self.columns}
+    def prepare(self, columns: tuple[ColumnSpec, ...]) -> RowBuilder:
+        kept = [(index, spec.name) for index, spec in enumerate(columns) if spec.name in self.columns]
+
+        return lambda values: {name: values[index] for index, name in kept}
 
 
-class UppercaseKeysDictFactory(RowFactory):
+class UppercaseKeysDictFactory:
     """
     Example: dict row, but keys uppercased.
     """
 
-    def build(self, column_iterator: ColumnIterator) -> dict[str, Any]:
-        return {col.column_name.upper(): col.value for col in column_iterator}
+    def prepare(self, columns: tuple[ColumnSpec, ...]) -> RowBuilder:
+        names = [spec.name.upper() for spec in columns]
+
+        return lambda values: dict(zip(names, values))
 
 
 # ----------------------------
-# 5) Custom row shapes (RowFactory)
+# 5) Built-in and custom row shapes
 # ----------------------------
 async def example_custom_row_factory(session: Session) -> None:
-    print("\n=== 5) Custom row factories ===")
+    print("\n=== 5) Row factories ===")
 
     stmt = Statement("SELECT a, b, c FROM select_paging").with_page_size(20)
-    result = await session.execute(stmt, factory=UppercaseKeysDictFactory())
 
-    res = await result.all()
-    print(f"set_factory(UppercaseKeysDictFactory()); first row -> {res[:1]}")
+    # Without a factory, rows are named tuples: row.a, row[0] and unpacking all work.
+    rows = await (await session.execute(stmt)).all()
+    print(f"default (named tuples); first row -> {rows[:1]}")
+
+    # Built-in factories cover the common shapes.
+    rows = await (await session.execute(stmt, factory=DictRowFactory())).all()
+    print(f"DictRowFactory(); first row -> {rows[:1]}")
+
+    rows = await (await session.execute(stmt, factory=TupleRowFactory())).all()
+    print(f"TupleRowFactory(); first row -> {rows[:1]}")
+
+    # Any callable is accepted as the row builder directly.
+    rows = await (await session.execute(stmt, factory=lambda values: values[0])).all()
+    print(f"lambda taking the first column; first rows -> {rows[:3]}")
+
+    result = await session.execute(stmt, factory=UppercaseKeysDictFactory())
+    rows = await result.all()
+    print(f"UppercaseKeysDictFactory(); first row -> {rows[:1]}")
 
     # And async iteration will now yield only the selected columns as dict keys:
     factory = SelectedColumnsDictFactory(["a", "c"])

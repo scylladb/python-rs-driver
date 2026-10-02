@@ -9,16 +9,16 @@ import pytest
 import pytest_asyncio
 from dateutil.relativedelta import relativedelta
 from helpers.ddl import ddl
+from helpers.session import connect
 
 # SerializationError is never raised directly, but it shapes the error message.
 # We import ExecuteError which is raised for serialization issues during query execution.
 from scylla.errors import ExecuteError
 from scylla.session import Session
-from scylla.session_builder import SessionBuilder
 
 
 async def set_up() -> Session:
-    session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
+    session = await connect()
 
     await ddl(
         session,

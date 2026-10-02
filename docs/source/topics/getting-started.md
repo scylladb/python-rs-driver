@@ -87,12 +87,12 @@ await session.execute("INSERT INTO users (id, name, age) VALUES (?, ?, ?)", (1, 
 
 ### Reading rows
 
-Rows are returned in pages as `dict[str, Any]` by default. Iterate over all rows in all pages with transparent async paging using `async for`:
+Rows are returned in pages as namedtuples by default. Iterate over all rows in all pages with transparent async paging using `async for`:
 
 ```python
 result = await session.execute("SELECT id, name, age FROM users")
 async for row in result:
-    print(row["id"], row["name"], row["age"])
+    print(row.id, row.name, row.age)
 ```
 
 ### Concurrent execution
@@ -226,7 +226,7 @@ Iterate over all rows, transparently following pages:
 ```python
 result = await session.execute("SELECT id, name, age FROM users")
 async for row in result:
-    print(row["id"], row["name"], row["age"])
+    print(row.id, row.name, row.age)
 ```
 
 ### Convenience helpers
@@ -237,7 +237,7 @@ async for row in result:
 result = await session.execute("SELECT id, name FROM users WHERE id = ?", [1])
 row = await result.first_row()
 if row is not None:
-    print(row["name"])
+    print(row.name)
 ```
 
 **`all()`** - materialise all pages into a Python list (use with care for large result sets):
@@ -364,7 +364,7 @@ async def main():
     # Read back all rows.
     result = await session.execute("SELECT id, name, age FROM users")
     async for row in result:
-        print(f"id={row['id']}  name={row['name']}  age={row['age']}")
+        print(f"id={row.id}  name={row.name}  age={row.age}")
 
 
 asyncio.run(main())

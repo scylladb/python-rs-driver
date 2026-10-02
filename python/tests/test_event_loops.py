@@ -9,9 +9,9 @@ from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, TypeVar, cast
 
 import pytest
+from helpers.session import connect
 from scylla.results import RequestResult
 from scylla.session import Session
-from scylla.session_builder import SessionBuilder
 from scylla.statement import Statement
 
 T = TypeVar("T")
@@ -28,14 +28,10 @@ TIMEOUT = 30.0
 CLEANUP_MARGIN = 5.0
 
 
-async def _connect() -> Session:
-    return await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
-
-
 @pytest.fixture(scope="module")
 def session() -> Iterator[Session]:
     """A session outliving the loop it was created on."""
-    yield asyncio.run(_connect())
+    yield asyncio.run(connect())
 
 
 async def _burst(session: Session, count: int = BURST) -> list[RequestResult]:

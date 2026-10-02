@@ -1,5 +1,5 @@
 import ipaddress
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, TypeAlias
@@ -83,46 +83,52 @@ CqlCollection: TypeAlias = (
 
 CqlValue: TypeAlias = CqlNative | CqlCollection
 
-class ColumnIterator:
+class NamedTupleRowFactory:
     """
-    Iterator over columns of a single row.
+    Builds every row as a `collections.namedtuple`. This is the default.
 
-    Yields Column objects representing individual column values
-    in the current row.
-    """
-    def __iter__(self) -> ColumnIterator: ...
-    def __next__(self) -> Column: ...
+    Field names come from the column names, with characters that cannot appear
+    in a Python identifier stripped or replaced. A column whose name is still
+    unusable is renamed after its position.
 
-class RowFactory:
-    """
-    Factory used to construct a row object from a column iterator.
-
-    Allows custom row representations (e.g. dicts, dataclasses).
+    Recognized by the driver and executed in Rust, so unlike a user-defined
+    factory it does not implement the `prepare` protocol.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
-    def build(self, column_iterator: ColumnIterator) -> dict[str, CqlValue]:
-        """
-        Build a row object from the provided column iterator.
-        """
+    def __init__(self) -> None: ...
 
-class Column:
+class DictRowFactory:
     """
-    Represents a single column in a result row.
+    Builds every row as a `dict` mapping column names to values, in column order.
     """
+
+    def __init__(self) -> None: ...
+
+class TupleRowFactory:
+    """
+    Builds every row as a plain `tuple` of values, in column order.
+    """
+
+    def __init__(self) -> None: ...
+
+class ClassRowFactory:
+    """
+    Builds every row as `cls(**columns)`, passing the column names as keyword
+    arguments, so the row's shape follows the query rather than column order.
+
+    `cls` must be callable. A query whose columns do not match what `cls`
+    accepts raises on the first row, with the `TypeError` raised by `cls`.
+    """
+
+    def __init__(self, cls: Callable[..., Any]) -> None: ...
     @property
-    def column_name(self) -> str:
-        """Name of the column."""
-
-    @property
-    def value(self) -> CqlValue:
-        """Deserialized value of the column."""
+    def cls(self) -> Callable[..., Any]: ...
 
 class SinglePageIterator:
     """
     Iterates over rows in a single page of query results.
 
-    Yields deserialized rows materialized using a `RowFactory`.
+    Yields rows materialized by the request's row factory.
     Does not fetch additional pages - use AsyncRowsIterator for automatic paging.
     """
 
