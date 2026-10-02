@@ -1,0 +1,39 @@
+# Blocking on a lock while attached to the interpreter can deadlock: the holder
+# may have lost the GIL inside Python and needs it back to release the lock.
+# Attached code waits through pyo3's `*_py_attached` methods. A plain call is
+# only fine on a detached thread, inside `py.detach`, or when every holder of
+# that lock releases it without needing the GIL (pure Rust under the lock: no
+# Python call, no Python allocation, no `Py` drop). Each such call carries an
+# `#[expect]` saying which.
+disallowed-methods = [
+  { path = "std::sync::Mutex::lock", reason = "use lock_py_attached, or #[expect] saying why this thread is detached or why holders release the lock without needing the GIL" },
+  { path = "std::sync::RwLock::read", reason = "use read_py_attached, or #[expect] saying why this thread is detached or why holders release the lock without needing the GIL" },
+  { path = "std::sync::RwLock::write", reason = "use write_py_attached, or #[expect] saying why this thread is detached or why holders release the lock without needing the GIL" },
+  { path = "std::sync::Condvar::wait", reason = "wait inside py.detach and #[expect] this lint" },
+  { path = "std::sync::Condvar::wait_while", reason = "wait inside py.detach and #[expect] this lint" },
+  { path = "std::sync::Condvar::wait_timeout", reason = "wait inside py.detach and #[expect] this lint" },
+  { path = "std::sync::Condvar::wait_timeout_while", reason = "wait inside py.detach and #[expect] this lint" },
+  { path = "std::sync::OnceLock::get_or_init", reason = "use get_or_init_py_attached" },
+  { path = "std::sync::OnceLock::get_or_try_init", reason = "use PyOnceLock::get_or_try_init(py, ..), or call inside py.detach and #[expect] this lint" },
+  { path = "std::sync::OnceLock::set", reason = "call inside py.detach and #[expect] this lint; PyOnceLock::set can also block while attached" },
+  { path = "pyo3::sync::PyOnceLock::set", reason = "blocks while attached if another thread is initializing; use get_or_init(py, ..)" },
+  { path = "std::sync::OnceLock::wait", reason = "wait inside py.detach and #[expect] this lint" },
+  { path = "std::sync::Once::call_once", reason = "use call_once_py_attached" },
+  { path = "std::sync::Once::call_once_force", reason = "use call_once_force_py_attached" },
+  { path = "std::sync::Once::wait", reason = "wait inside py.detach and #[expect] this lint" },
+  { path = "std::sync::Once::wait_force", reason = "wait inside py.detach and #[expect] this lint" },
+  { path = "tokio::sync::Mutex::blocking_lock", reason = "never block a Python thread on a tokio lock" },
+  { path = "tokio::sync::Mutex::blocking_lock_owned", reason = "never block a Python thread on a tokio lock" },
+  { path = "tokio::sync::RwLock::blocking_read", reason = "never block a Python thread on a tokio lock" },
+  { path = "tokio::sync::RwLock::blocking_write", reason = "never block a Python thread on a tokio lock" },
+  { path = "tokio::sync::oneshot::Receiver::blocking_recv", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::sync::mpsc::Receiver::blocking_recv", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::sync::mpsc::Receiver::blocking_recv_many", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::sync::mpsc::Sender::blocking_send", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::sync::mpsc::UnboundedReceiver::blocking_recv", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::sync::mpsc::UnboundedReceiver::blocking_recv_many", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::sync::broadcast::Receiver::blocking_recv", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::runtime::Runtime::block_on", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::runtime::Handle::block_on", reason = "block inside py.detach and #[expect] this lint" },
+  { path = "tokio::runtime::Runtime::shutdown_timeout", reason = "shut down inside py.detach and #[expect] this lint" },
+]

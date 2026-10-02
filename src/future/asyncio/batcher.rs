@@ -87,6 +87,10 @@ fn release_waiter(future: &Bound<'_, PyAny>) -> PyResult<()> {
 
 /// The completion queue of one event loop.
 pub(crate) struct Batcher {
+    /// Every critical section on this mutex (`push`, `drain`, `discard`) is pure
+    /// Rust bookkeeping: no Python call, no Python allocation, no `Py` drop. A
+    /// holder therefore never needs the GIL to release it, which is what makes
+    /// a plain `lock()` safe.
     state: Mutex<State>,
     /// How a worker gets the drain onto the loop thread.
     notifier: Notifier,
@@ -265,8 +269,13 @@ impl Batcher {
     }
 
     /// Queue `future` for `set_result`, scheduling a drain if none is pending.
+    /// Callers may hold the GIL, see `state`.
     pub(crate) fn push(&self, future: Py<PyAny>) {
         let first_of_batch = {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "every critical section on `state` is pure Rust, see the field doc"
+            )]
             let mut state = self.state.lock().unwrap();
             state.queue.push(future);
             !std::mem::replace(&mut state.armed, true)
@@ -283,6 +292,10 @@ impl Batcher {
 
     /// The loop is gone or unusable: nothing queued can ever be woken.
     fn discard(&self) {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "every critical section on `state` is pure Rust, see the field doc"
+        )]
         let mut state = self.state.lock().unwrap();
         let dead = std::mem::take(&mut state.queue);
         // Let the next push try again, so a dead loop never accumulates a queue.
@@ -297,7 +310,11 @@ impl Batcher {
     fn drain(&self, py: Python<'_>) -> PyResult<()> {
         self.notifier.acknowledge();
         let ready = {
-            let mut state = self.state.lock_py_attached(py).unwrap();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "nothing under `state` needs the GIL, so waiting for it with the GIL held cannot deadlock"
+            )]
+            let mut state = self.state.lock().unwrap();
             state.armed = false;
             std::mem::take(&mut state.queue)
         };

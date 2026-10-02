@@ -304,3 +304,21 @@ impl From<DurationParseError> for PyErr {
         pyo3::exceptions::PyValueError::new_err(e.to_string())
     }
 }
+
+/// Whether this thread is attached to the interpreter.
+///
+/// `PyGILState_GetThisThreadState` returns the thread state that belongs to this
+/// thread, attached or not. `PyThreadState_GetUnchecked` returns the one that is
+/// running right now. The thread is attached when those are the same.
+///
+/// The comparison is needed for 3.10 and 3.11. There, `PyThreadState_GetUnchecked`
+/// returns the thread state of whichever thread holds the GIL, so it is non-null even
+/// when this thread is detached. But while we are detached, the GIL holder is another
+/// thread, so its thread state never matches ours. From 3.12 on it is NULL when detached.
+pub(crate) fn thread_is_attached() -> bool {
+    // SAFETY: both only read a pointer, valid attached or not; neither is dereferenced.
+    unsafe {
+        let current = pyo3::ffi::compat::PyThreadState_GetUnchecked();
+        !current.is_null() && current == pyo3::ffi::PyGILState_GetThisThreadState()
+    }
+}

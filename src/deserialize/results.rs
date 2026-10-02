@@ -5,7 +5,7 @@ use crate::deserialize::value::{PyDeserializeValue, PyDeserializedValue};
 use crate::future::{DriverFuture, boxed_py_future};
 use pyo3::exceptions::{PyRuntimeError, PyStopAsyncIteration, PyStopIteration};
 use pyo3::prelude::{PyDictMethods, PyModule, PyModuleMethods};
-use pyo3::sync::PyOnceLock;
+use pyo3::sync::{MutexExt, PyOnceLock};
 use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 use pyo3::{
     Bound, Py, PyAny, PyErr, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods, pymodule,
@@ -210,7 +210,7 @@ impl SinglePageIterator {
 #[pymethods]
 impl SinglePageIterator {
     pub fn __next__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let guard = self.kind.lock().map_err(|_| {
+        let guard = self.kind.lock_py_attached(py).map_err(|_| {
             PyErr::new::<PyRuntimeError, _>("SinglePageIterator mutex was poisoned")
         })?;
 

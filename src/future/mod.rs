@@ -42,7 +42,7 @@ use crate::future::boxed_future::{PyBoxedFuture, ResolvedResult};
 use crate::future::callbacks::CallbackKind;
 pub(crate) use crate::future::driver_future::DriverFuture;
 use crate::future::panics::{catch_panics, resolve_catch_panics};
-use crate::utils::PyDuration;
+use crate::utils::{PyDuration, thread_is_attached};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::exceptions::PyStopIteration;
 use pyo3::exceptions::PyTimeoutError;
@@ -51,7 +51,6 @@ use pyo3::sync::MutexExt;
 use pyo3::types::{PyGenericAlias, PyType};
 use pyo3::{Py, PyAny, PyResult};
 use std::sync::{Arc, Condvar, Mutex};
-use std::task::Wake;
 use std::time::Duration;
 
 use tokio::task::AbortHandle;
@@ -226,6 +225,8 @@ impl PyDriverFuture {
             guard.disarm();
 
             let finished = {
+                debug_assert!(!thread_is_attached(), "tokio worker is attached");
+                #[expect(clippy::disallowed_methods, reason = "tokio worker, not attached")]
                 let mut state = inner_clone.state.lock().unwrap();
                 match &mut *state {
                     FutureState::PendingTokio {
@@ -249,7 +250,7 @@ impl PyDriverFuture {
             };
 
             if callbacks.is_empty() {
-                waker_clone.wake();
+                waker_clone.wake_detached();
                 inner_clone.notify_waiters(waiters);
                 return;
             }
@@ -266,10 +267,10 @@ impl PyDriverFuture {
                         }
                     };
                     CallbackKind::fire_all(py, callbacks, &result);
-
-                    waker_clone.wake();
-                    inner_clone.notify_waiters(waiters);
                 });
+
+                waker_clone.wake_detached();
+                inner_clone.notify_waiters(waiters);
             });
         });
 
@@ -396,7 +397,7 @@ impl PyDriverFuture {
         self.inner.notify_waiters(waiters);
 
         if let Some(waker) = waker {
-            waker.wake();
+            waker.wake_py_attached(py);
         }
 
         if let Some(callbacks) = callbacks {
@@ -407,7 +408,12 @@ impl PyDriverFuture {
     /// Release the GIL, wait on the condvar until state is Ready or `timeout`
     /// elapses, then return the result. Raises `TimeoutError` on timeout.
     fn wait_for_ready(&self, py: Python<'_>, timeout: Option<Duration>) -> PyResult<Py<PyAny>> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "every wait below is inside py.detach"
+        )]
         let timed_out = py.detach(|| {
+            debug_assert!(!thread_is_attached(), "still attached inside py.detach");
             let mut state = self.inner.state.lock().unwrap();
 
             match &mut *state {
@@ -556,7 +562,7 @@ impl PyDriverFuture {
                 };
                 drop(state);
 
-                waker.wake();
+                waker.wake_py_attached(py);
                 self.inner.notify_waiters(waiters);
                 CallbackKind::fire_all(py, callbacks, &err_result);
 
@@ -604,6 +610,11 @@ impl<'a> Drop for TaskDropGuard<'a> {
         }
 
         let (callbacks, waiters) = {
+            debug_assert!(!thread_is_attached(), "task dropped while attached");
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the task is dropped on a runtime thread, or during shutdown inside py.detach"
+            )]
             let mut state = self.inner.state.lock().unwrap();
             match &mut *state {
                 FutureState::PendingTokio {
@@ -626,7 +637,7 @@ impl<'a> Drop for TaskDropGuard<'a> {
             });
         }
 
-        self.waker.wake_by_ref();
+        self.waker.wake_detached();
         self.inner.notify_waiters(waiters);
     }
 }

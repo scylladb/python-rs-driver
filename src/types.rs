@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
-use std::sync::OnceLock;
+use pyo3::sync::PyOnceLock;
 
-static UNSET_INSTANCE: OnceLock<Py<UnsetType>> = OnceLock::new();
+static UNSET_INSTANCE: PyOnceLock<Py<UnsetType>> = PyOnceLock::new();
 
 #[pyclass(module = "scylla.statement")]
 pub(crate) struct UnsetType;
@@ -26,7 +26,9 @@ impl UnsetType {
     pub(crate) fn get_instance(py: Python<'_>) -> Py<UnsetType> {
         UNSET_INSTANCE
             // There is nothing we can do when creating a global instance fails.
-            .get_or_init(|| Py::new(py, UnsetType).expect("Failed to create UnsetType instance"))
+            .get_or_init(py, || {
+                Py::new(py, UnsetType).expect("Failed to create UnsetType instance")
+            })
             .clone_ref(py)
     }
 }

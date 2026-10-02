@@ -25,7 +25,7 @@
 //!   and yields it, or returns `py.None()` if the waker was already woken (the
 //!   `sleep(0)` equivalent).
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::Wake;
 
 use pyo3::intern;
@@ -34,6 +34,7 @@ use pyo3::sync::MutexExt;
 use pyo3::types::PyIterator;
 
 use crate::future::asyncio::batcher::{Batcher, batcher_for, running_loop};
+use crate::utils::thread_is_attached;
 
 /// Where the coroutine using this waker currently is.
 enum WakerSlot {
@@ -108,6 +109,37 @@ impl AsyncioWaker {
         });
         Ok(yielded)
     }
+
+    /// Wake from a thread attached to the interpreter.
+    pub(crate) fn wake_py_attached(&self, py: Python<'_>) {
+        deliver(take_parked(self.slot.lock_py_attached(py).unwrap()));
+    }
+
+    /// Wake from a thread that is not attached to the interpreter.
+    pub(crate) fn wake_detached(&self) {
+        #[expect(clippy::disallowed_methods, reason = "caller is detached")]
+        let slot = self.slot.lock().unwrap();
+        deliver(take_parked(slot));
+    }
+}
+
+/// Record a wake in the slot, returning the parked future to deliver it to, if any.
+/// Idle becomes Woken, Woken stays Woken, Parked becomes Idle.
+fn take_parked(mut slot: MutexGuard<'_, WakerSlot>) -> Option<Parked> {
+    match std::mem::replace(&mut *slot, WakerSlot::Woken) {
+        WakerSlot::Parked(parked) => {
+            *slot = WakerSlot::Idle;
+            Some(parked)
+        }
+        WakerSlot::Idle | WakerSlot::Woken => None,
+    }
+}
+
+/// Hand a parked future to its loop's batcher. Called with the slot released.
+fn deliver(parked: Option<Parked>) {
+    if let Some(Parked { future, batcher }) = parked {
+        batcher.push(future);
+    }
 }
 
 /// What to yield to the event loop to park on `future`: the future itself, or
@@ -128,21 +160,14 @@ impl Wake for AsyncioWaker {
         self.wake_by_ref()
     }
 
+    /// Called by the Rust future being polled, so the context is unknown: a future
+    /// may wake itself during a poll, while attached, or later from a detached reactor.
     fn wake_by_ref(self: &Arc<Self>) {
-        let parked = {
-            let mut slot = self.slot.lock().unwrap();
-            match std::mem::replace(&mut *slot, WakerSlot::Woken) {
-                // The wake is delivered below; nothing stays pending.
-                WakerSlot::Parked(parked) => {
-                    *slot = WakerSlot::Idle;
-                    parked
-                }
-                // Idle becomes Woken; Woken stays Woken.
-                WakerSlot::Idle | WakerSlot::Woken => return,
-            }
-        };
-
-        let Parked { future, batcher } = parked;
-        batcher.push(future);
+        if thread_is_attached() {
+            // SAFETY: we just checked this thread is attached.
+            self.wake_py_attached(unsafe { Python::assume_attached() });
+        } else {
+            self.wake_detached();
+        }
     }
 }
