@@ -153,6 +153,11 @@ impl PendingRequestResult {
             factory,
         }
     }
+
+    /// Binds the page to the row factory.
+    pub(crate) fn resolve(self, py: Python<'_>) -> Result<PageCore, DriverExecuteError> {
+        PageCore::new(py, self.query_result, self.query_pager, self.factory)
+    }
 }
 
 impl<'py> IntoPyObject<'py> for PendingRequestResult {
@@ -161,9 +166,7 @@ impl<'py> IntoPyObject<'py> for PendingRequestResult {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let core = PageCore::new(py, self.query_result, self.query_pager, self.factory)?;
-
-        Bound::new(py, RequestResult::from(core))
+        Bound::new(py, RequestResult::from(self.resolve(py)?))
     }
 }
 
