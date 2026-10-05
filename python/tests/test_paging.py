@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
@@ -215,7 +216,8 @@ async def test_paging_state_resume(
         "paging_resume_table",
     )
 
-    await insert_rows(session, table, 20)
+    # Not a multiple of the page size, so the resumed page is the last one.
+    await insert_rows(session, table, 15)
 
     prepared = await session.prepare(f"SELECT * FROM {table}")
     prepared.page_size = 10
@@ -239,6 +241,84 @@ async def test_paging_state_resume(
     ids_second = {row["id"] for row in second_page}
 
     assert ids_first.isdisjoint(ids_second)
+    assert ids_first | ids_second == set(range(15))
+    assert result2.first_page.has_more_pages is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_paging_state_resumes_after_bytes_roundtrip(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_resume_bytes_table",
+    )
+
+    await insert_rows(session, table, 15)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 10
+
+    result = await session.execute(prepared)
+    state = result.first_page.paging_state
+    assert state is not None
+    raw = state.as_bytes()
+    assert raw is not None
+
+    resumed = await session.execute(prepared, paging_state=PagingState.from_bytes(raw))
+
+    expected = await result.first_page.fetch_next_page()
+    assert expected is not None
+    assert list(resumed.first_page) == list(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_start_paging_state_starts_at_first_page(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_start_state_table",
+    )
+
+    await insert_rows(session, table, 15)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 10
+
+    default = await session.execute(prepared)
+    explicit = await session.execute(prepared, paging_state=PagingState())
+
+    assert list(explicit.first_page) == list(default.first_page)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_unpaged_execution_returns_every_row_in_one_page(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_unpaged_table",
+    )
+
+    await insert_rows(session, table, 15)
+
+    statement = Statement(f"SELECT * FROM {table}")
+    statement.page_size = 10
+
+    result = await session.execute(statement, paged=False)
+    page = result.first_page
+
+    assert sorted(row["id"] for row in page) == list(range(15))
+    assert page.has_more_pages is False
+    assert page.paging_state is None
+    assert await page.fetch_next_page() is None
 
 
 @pytest.mark.asyncio
@@ -331,6 +411,253 @@ async def test_first_for_non_rows_result_returns_none(
 
     assert row_first is None
     assert row_all == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+@pytest.mark.parametrize("total_rows,page_size", [(25, 10), (100, 1), (20, 100), (0, 10)])
+async def test_pages_yields_every_page_starting_with_first_page(
+    session: Session,
+    table_factory: TableFactory,
+    total_rows: int,
+    page_size: int,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_pages_table",
+    )
+
+    await insert_rows(session, table, total_rows)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = page_size
+
+    result = await session.execute(prepared)
+
+    pages = [page async for page in result.pages()]
+
+    assert list(pages[0]) == list(result.first_page)
+    assert all(page.has_more_pages for page in pages[:-1])
+    assert pages[-1].has_more_pages is False
+
+    ids = [row["id"] for page in pages for row in page]
+    assert sorted(ids) == list(range(total_rows))
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_pages_can_be_read_with_blocking_result(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_pages_tokio_table",
+    )
+
+    await insert_rows(session, table, 5)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 2
+
+    result = await session.execute(prepared)
+    pages = result.pages()
+
+    # `result()` runs each fetch on a tokio worker, not polled by the event loop.
+    ids: list[int] = []
+    while True:
+        try:
+            page = pages.__anext__().result()
+        except StopAsyncIteration:
+            break
+        ids.extend(row["id"] for row in page)
+
+    assert sorted(ids) == list(range(5))
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_pages_of_non_rows_result_is_one_empty_page(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_pages_non_rows_table",
+    )
+
+    result = await session.execute(f"INSERT INTO {table} (id, x) VALUES (1, 1)")
+
+    pages = [page async for page in result.pages()]
+
+    assert len(pages) == 1
+    assert list(pages[0]) == []
+    assert pages[0].has_more_pages is False
+    assert pages[0].paging_state is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_page_is_immutable(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_page_immutable_table",
+    )
+
+    await insert_rows(session, table, 4)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 2
+
+    result = await session.execute(prepared)
+    page = result.first_page
+    rows = list(page)
+    state = page.paging_state
+
+    next_page = await page.fetch_next_page()
+
+    assert next_page is not None
+    assert list(page) == rows
+    assert page.paging_state == state
+    assert page.has_more_pages is True
+    assert {row["id"] for row in rows}.isdisjoint({row["id"] for row in next_page})
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_fetch_next_page_of_last_page_returns_none(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_last_page_table",
+    )
+
+    await insert_rows(session, table, 3)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 10
+
+    result = await session.execute(prepared)
+    page = result.first_page
+
+    assert page.has_more_pages is False
+    assert page.paging_state is None
+    assert await page.fetch_next_page() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_result_is_consumed_from_first_page_after_walking_pages(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_whole_result_table",
+    )
+
+    await insert_rows(session, table, 10)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 3
+
+    result = await session.execute(prepared)
+    second_page = await result.first_page.fetch_next_page()
+    assert second_page is not None
+
+    rows = await result.all()
+    iterated = [row async for row in result]
+    first_row = await result.first_row()
+    paged = [row async for page in result.pages() for row in page]
+
+    assert sorted(row["id"] for row in rows) == list(range(10))
+    assert iterated == rows
+    assert first_row == rows[0]
+    assert paged == rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_pages_can_be_iterated_more_than_once(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_pages_twice_table",
+    )
+
+    await insert_rows(session, table, 10)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 3
+
+    result = await session.execute(prepared)
+
+    first = [list(page) async for page in result.pages()]
+    second = [list(page) async for page in result.pages()]
+
+    assert first == second
+    assert sorted(row["id"] for page in first for row in page) == list(range(10))
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_fetch_next_page_twice_returns_the_same_rows(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_fetch_twice_table",
+    )
+
+    await insert_rows(session, table, 6)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 3
+
+    page = (await session.execute(prepared)).first_page
+
+    first = await page.fetch_next_page()
+    second = await page.fetch_next_page()
+
+    assert first is not None
+    assert second is not None
+    assert list(first) == list(second)
+    assert first.paging_state == second.paging_state
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_concurrent_anext_on_pages_yields_each_page_once(
+    session: Session,
+    table_factory: TableFactory,
+):
+    table = await table_factory(
+        "id int PRIMARY KEY, x int",
+        "paging_pages_concurrent_table",
+    )
+
+    # Pages of 3, 3 and 1 rows: the last page is not full, so it is the last one.
+    await insert_rows(session, table, 7)
+
+    prepared = await session.prepare(f"SELECT * FROM {table}")
+    prepared.page_size = 3
+
+    pages = aiter((await session.execute(prepared)).pages())
+
+    fetched = await asyncio.gather(anext(pages), anext(pages), anext(pages))
+    ids = [row["id"] for page in fetched for row in page]
+
+    assert sorted(ids) == list(range(7))
+    with pytest.raises(StopAsyncIteration):
+        await anext(pages)
 
 
 def test_paging_state_new_is_start_state():
