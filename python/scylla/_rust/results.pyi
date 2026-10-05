@@ -236,6 +236,12 @@ class RequestResult:
         """
 
     @property
+    def first_page(self) -> Page:
+        """
+        The first page of the result, already fetched by `execute()`.
+        """
+
+    @property
     def columns(self) -> tuple[ColumnSpec, ...]:
         """
         Specifications of the columns in this result.

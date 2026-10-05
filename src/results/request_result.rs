@@ -3,6 +3,7 @@ use crate::cluster::metadata::query_metadata::column_spec_tuple;
 use crate::core::results::{PageCore, PendingRequestResult};
 use crate::future::{DriverFuture, boxed_py_future};
 use crate::results::iterators::{AsyncRowsIterator, SinglePageIterator};
+use crate::results::page::Page;
 use crate::results::paging_state::PyPagingState;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyList, PyTuple};
@@ -143,6 +144,12 @@ impl RequestResult {
         let core = self.core.clone();
 
         DriverFuture::spawn(py, boxed_py_future(async move { core.all().await }))
+    }
+
+    /// The first page of the result, already fetched by `execute()`.
+    #[getter]
+    fn first_page(&self) -> Page {
+        Page::from(self.core.clone())
     }
 
     /// Specifications of the columns in this result.
