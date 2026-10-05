@@ -4,7 +4,7 @@ use std::convert::Infallible;
 use std::marker::PhantomData;
 
 use pyo3::prelude::*;
-use pyo3::{IntoPyObject, Py, PyAny, PyErr, PyResult, Python};
+use pyo3::{IntoPyObject, Py, PyResult, Python};
 
 use crate::future::PyDriverFuture;
 use crate::future::boxed_future::BoxedFuture;
@@ -32,12 +32,13 @@ impl<T, E> DriverFuture<T, E> {
     pub(crate) fn spawn_on_tokio(py: Python<'_>, future: BoxedFuture<T, E>) -> PyResult<Self> {
         PyDriverFuture::spawn_on_tokio(py, future.into_erased()).map(Self::new)
     }
-}
 
-impl DriverFuture<Py<PyAny>, PyErr> {
-    /// An already-resolved future, for a result available synchronously.
-    pub(crate) fn ready(py: Python<'_>, result: PyResult<Py<PyAny>>) -> PyResult<Self> {
-        PyDriverFuture::ready(py, result).map(Self::new)
+    /// An already-resolved future, holding an object of the class `T` converts to.
+    pub(crate) fn ready<U>(py: Python<'_>, result: PyResult<Py<U>>) -> PyResult<Self>
+    where
+        T: for<'py> IntoPyObject<'py, Target = U>,
+    {
+        PyDriverFuture::ready(py, result.map(Py::into_any)).map(Self::new)
     }
 }
 
