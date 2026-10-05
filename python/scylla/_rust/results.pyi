@@ -179,60 +179,36 @@ class Page:
 
 class RequestResult:
     """
-    Immutable result of a query execution.
+    Result of a whole query, across all of its pages.
+
+    Returned only by `execute()` and `batch()`, so it always starts at the
+    query's first page (or at the `paging_state` passed to `execute()`).
+    Every way of consuming it starts from that page.
     """
 
-    def has_more_pages(self) -> bool:
+    def __aiter__(self) -> AsyncRowsIterator:
         """
-        Returns True if more pages are available.
-        """
-
-    def paging_state(self) -> PagingState | None:
-        """
-        Returns current paging state. Can be `None` if there are no more pages available.
+        Iterates over every row of the result, fetching pages as needed.
         """
 
-    def fetch_next_page(self) -> DriverFuture[RequestResult | None]:
-        """
-        Fetches the next page if available.
-
-        Returns a new RequestResult with the next page's data if more pages
-        are available. Returns None if no more pages exist.
-
-        Returns
-        -------
-        DriverFuture[RequestResult | None]
-            A future resolving to the next page data, or None if no more pages.
-        """
-
-    def iter_current_page(self) -> SinglePageIterator:
-        """
-        Returns an iterator over rows in the current page.
-        """
-
-    def __aiter__(self) -> AsyncRowsIterator: ...
     def first_row(self) -> DriverFuture[Any | None]:
         """
-        Returns a future resolving to the first row starting from the current state.
+        Returns a future resolving to the first row of the result.
 
-        Fetches the first available row from the current page onwards,
-        automatically retrieving additional pages as needed. This method
-        does not modify the RequestResult object. Returns None if no more
-        rows are available.
+        Fetches further pages as needed when the leading pages are empty.
 
         Returns
         -------
         DriverFuture[Any | None]
-            A future resolving to the first row, or None if no more rows exist.
+            A future resolving to the first row, or None if the result has no rows.
         """
 
     def all(self) -> DriverFuture[list[Any]]:
         """
-        Return a future resolving to all rows of the result set as a list.
+        Return a future resolving to all rows of the result as a list.
 
-        This method eagerly fetches all remaining pages and materializes
-        the entire result set in memory. It should be used with care
-        for large queries.
+        This method eagerly fetches all pages and materializes the entire
+        result in memory. It should be used with care for large queries.
         """
 
     @property

@@ -154,7 +154,7 @@ def blocking_builder(values):
 
 session = SessionBuilder().contact_points([(sys.argv[1], int(sys.argv[2]))]).connect().result(timeout=10)
 result = session.execute("SELECT release_version FROM system.local", factory=blocking_builder).result(timeout=10)
-iterator = result.iter_current_page()
+iterator = iter(result.first_page)
 rows = []
 
 

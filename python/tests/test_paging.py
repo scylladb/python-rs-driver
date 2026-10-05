@@ -75,21 +75,22 @@ async def test_execute_paged_basic_flow(session: Session, table_factory: TableFa
     prepared = await session.prepare(f"SELECT * FROM {table}")
     prepared.page_size = page_size
 
-    paging_result = await session.execute(prepared)
+    result = await session.execute(prepared)
 
     seen_ids: list[int] = []
 
+    page = result.first_page
     while True:
-        page = list(paging_result.iter_current_page())
-        seen_ids.extend(row["id"] for row in page)
-        if paging_result.has_more_pages():
-            assert len(page) == page_size
-            next_page = await paging_result.fetch_next_page()
+        rows = list(page)
+        seen_ids.extend(row["id"] for row in rows)
+        if page.has_more_pages:
+            assert len(rows) == page_size
+            next_page = await page.fetch_next_page()
             assert next_page is not None
-            paging_result = next_page
+            page = next_page
         else:
             break
-    assert paging_result.has_more_pages() is False
+    assert page.has_more_pages is False
     assert len(seen_ids) == total_rows
 
     assert sorted(seen_ids) == list(range(total_rows))
@@ -111,22 +112,23 @@ async def test_execute_paged_basic_flow_for_unprepared_statements(
     statement = Statement(f"SELECT * FROM {table}")
     statement.page_size = page_size
 
-    paging_result = await session.execute(statement)
+    result = await session.execute(statement)
 
     seen_ids: list[int] = []
 
+    page = result.first_page
     while True:
-        page = list(paging_result.iter_current_page())
-        seen_ids.extend(row["id"] for row in page)
-        if paging_result.has_more_pages():
-            assert len(page) == page_size
-            next_page = await paging_result.fetch_next_page()
+        rows = list(page)
+        seen_ids.extend(row["id"] for row in rows)
+        if page.has_more_pages:
+            assert len(rows) == page_size
+            next_page = await page.fetch_next_page()
             assert next_page is not None
-            paging_result = next_page
+            page = next_page
         else:
             break
 
-    assert paging_result.has_more_pages() is False
+    assert page.has_more_pages is False
     assert len(seen_ids) == total_rows
 
     assert sorted(seen_ids) == list(range(total_rows))
@@ -220,8 +222,8 @@ async def test_paging_state_resume(
 
     result1 = await session.execute(prepared)
 
-    first_page = list(result1.iter_current_page())
-    state = result1.paging_state()
+    first_page = list(result1.first_page)
+    state = result1.first_page.paging_state
 
     assert state is not None
 
@@ -231,7 +233,7 @@ async def test_paging_state_resume(
         paging_state=state,
     )
 
-    second_page = list(result2.iter_current_page())
+    second_page = list(result2.first_page)
 
     ids_first = {row["id"] for row in first_page}
     ids_second = {row["id"] for row in second_page}

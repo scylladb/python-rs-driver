@@ -315,17 +315,17 @@ async def read_all_rows(result: RequestResult, mode: str) -> list[Any]:
     if mode == "async-for":
         return [row async for row in result]
 
-    rows = list(result.iter_current_page())
-    page = await result.fetch_next_page()
+    rows = list(result.first_page)
+    page = await result.first_page.fetch_next_page()
     while page is not None:
-        rows.extend(page.iter_current_page())
+        rows.extend(page)
         page = await page.fetch_next_page()
     return rows
 
 
 async def count_pages(session: Session, statement: Statement) -> int:
     pages = 1
-    page = await (await session.execute(statement)).fetch_next_page()
+    page = await (await session.execute(statement)).first_page.fetch_next_page()
     while page is not None:
         pages += 1
         page = await page.fetch_next_page()
@@ -413,14 +413,14 @@ async def test_fetch_next_page_follows_columns_added_between_pages(session: Sess
     statement = Statement(f"SELECT * FROM {paged_table}")
     statement.page_size = 2
     result = await session.execute(statement, factory=DictRowFactory())
-    assert list(result.iter_current_page()) == [{"id": 0, "ck": 0, "b": 0}, {"id": 0, "ck": 1, "b": 1}]
+    assert list(result.first_page) == [{"id": 0, "ck": 0, "b": 0}, {"id": 0, "ck": 1, "b": 1}]
 
     # Regular columns are ordered by name, so `a` lands before `b`.
     await ddl(session, f"ALTER TABLE {paged_table} ADD a int")
-    next_page = await result.fetch_next_page()
+    next_page = await result.first_page.fetch_next_page()
 
     assert next_page is not None
-    assert list(next_page.iter_current_page()) == [
+    assert list(next_page) == [
         {"id": 0, "ck": 2, "a": None, "b": 2},
         {"id": 0, "ck": 3, "a": None, "b": 3},
     ]

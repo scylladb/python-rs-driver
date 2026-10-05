@@ -1,21 +1,19 @@
-use crate::TaskExecutionMode;
 use crate::cluster::metadata::query_metadata::column_spec_tuple;
-use crate::core::results::{PageCore, PendingRequestResult};
+use crate::core::results::PageCore;
 use crate::future::{DriverFuture, boxed_py_future};
-use crate::results::iterators::{AsyncPagesIterator, AsyncRowsIterator, SinglePageIterator};
+use crate::results::iterators::{AsyncPagesIterator, AsyncRowsIterator};
 use crate::results::page::Page;
-use crate::results::paging_state::PyPagingState;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyList, PyTuple};
 use pyo3::{Py, PyAny, PyErr, PyResult, Python, pyclass, pymethods};
 
-/// Database query result with paging support.
+/// Result of a whole query, across all of its pages.
 ///
-/// Represents a result frame from the database, providing access to rows
-/// and support for fetching additional pages.
+/// Returned only by `execute()` and `batch()`, so it always starts at the
+/// query's first page. Every way of consuming it starts from that page.
 ///
-/// Python-facing facade over [`PageCore`]: each method clones the core,
-/// hands the work over, and awaits it.
+/// Python-facing facade over the [`PageCore`] of the first page: each method
+/// clones the core, hands the work over, and awaits it.
 #[pyclass(module = "scylla.results", frozen)]
 pub(crate) struct RequestResult {
     core: PageCore,
@@ -35,68 +33,6 @@ impl From<PageCore> for RequestResult {
 
 #[pymethods]
 impl RequestResult {
-    /// Returns `true` if more pages are available.
-    ///
-    /// # Returns
-    ///
-    /// `true` if additional pages can be fetched, `false` otherwise.
-    fn has_more_pages(&self) -> bool {
-        self.core.has_more_pages()
-    }
-
-    /// Returns the current paging state.
-    ///
-    /// Can be `None` if there are no more pages available.
-    /// The paging state can be passed to `execute()` to resume paging
-    /// from a specific position.
-    ///
-    /// # Returns
-    ///
-    /// Current paging state or `None` if no more pages are available.
-    fn paging_state(&self) -> Option<PyPagingState> {
-        self.core.paging_state().map(PyPagingState::from)
-    }
-
-    /// Fetches the next page if available.
-    ///
-    /// Returns a new `RequestResult` with the next page's data if more pages
-    /// are available. Returns `None` if no more pages exist.
-    ///
-    /// # Returns
-    ///
-    /// `Some(RequestResult)` with the next page data, or `None` if no more pages.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the fetch operation fails.
-    fn fetch_next_page(
-        &self,
-        py: Python<'_>,
-    ) -> PyResult<DriverFuture<Option<PendingRequestResult>, PyErr>> {
-        let (query_pager, row_factory) = self.core.clone_pager_and_factory();
-
-        DriverFuture::spawn(
-            py,
-            boxed_py_future(async move {
-                query_pager
-                    .fetch_next_pending_page(row_factory, TaskExecutionMode::SpawnOnRuntime)
-                    .await
-            }),
-        )
-    }
-
-    /// Returns an iterator over rows in the current page.
-    ///
-    /// Creates a `SinglePageIterator` that yields deserialized rows
-    /// from the current page only, without fetching additional pages.
-    ///
-    /// # Returns
-    ///
-    /// Iterator over rows in the current page.
-    fn iter_current_page(&self) -> SinglePageIterator {
-        SinglePageIterator::new(self.core.page().clone())
-    }
-
     /// Returns an async iterator over all rows with automatic paging.
     ///
     /// Creates an `AsyncRowsIterator` that transparently fetches
@@ -109,15 +45,10 @@ impl RequestResult {
         AsyncRowsIterator::new(self.core.clone())
     }
 
-    /// Returns the first row starting from the current state.
+    /// Returns the first row of the result.
     ///
-    /// Fetches the first available row from the current page onwards,
-    /// automatically retrieving additional pages as needed.
-    /// Returns `None` if no more rows are available.
-    ///
-    /// # Returns
-    ///
-    /// The first row as a Python object from current state, or `None` if no more rows exist.
+    /// Fetches further pages as needed when the leading pages are empty.
+    /// Returns `None` if the result has no rows.
     ///
     /// # Errors
     ///
