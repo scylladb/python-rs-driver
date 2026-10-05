@@ -1,3 +1,4 @@
+use crate::TaskExecutionMode;
 use crate::cluster::metadata::query_metadata::column_spec_tuple;
 use crate::core::results::{Pager, PendingRequestResult, RequestResultCore, next_row_with_paging};
 use crate::deserialize::error::{DriverDeserializationError, DriverRowIterationError};
@@ -91,7 +92,11 @@ impl RequestResult {
 
         DriverFuture::spawn(
             py,
-            boxed_py_future(async move { query_pager.fetch_next_pending_page(row_factory).await }),
+            boxed_py_future(async move {
+                query_pager
+                    .fetch_next_pending_page(row_factory, TaskExecutionMode::SpawnOnRuntime)
+                    .await
+            }),
         )
     }
 

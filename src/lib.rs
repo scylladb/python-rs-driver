@@ -57,6 +57,15 @@ pub(crate) static RUNTIME: LazyLock<DriverRuntime> = LazyLock::new(|| {
     }
 });
 
+/// Where a task runs relative to the future that awaits it.
+#[derive(Clone, Copy)]
+pub(crate) enum TaskExecutionMode {
+    /// On a runtime worker, for futures polled from a Python thread.
+    SpawnOnRuntime,
+    /// In the awaiting future, for futures already running on the runtime.
+    Inline,
+}
+
 impl DriverRuntime {
     pub(crate) fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where

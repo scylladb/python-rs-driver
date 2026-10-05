@@ -7,7 +7,8 @@ use scylla::response::query_result::QueryResult;
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 use scylla_cql::frame::response::result::ColumnSpec;
 
-use crate::core::session::{BoundStatement, SessionCore};
+use crate::TaskExecutionMode;
+use crate::core::session::{BoundStatement, SessionCore, fetch_page};
 use crate::deserialize::error::DriverRowIterationError;
 use crate::deserialize::results::{RequestResult, ResolvedPage, RowsIteratorKind};
 use crate::deserialize::row_factory::PyRowFactory;
@@ -117,7 +118,10 @@ impl RequestResultCore {
                 Ok(())
             })?;
 
-            let Some(page) = query_pager.fetch_next_page().await else {
+            let Some(page) = query_pager
+                .fetch_next_page(TaskExecutionMode::SpawnOnRuntime)
+                .await
+            else {
                 break;
             };
 
@@ -185,7 +189,10 @@ pub(crate) async fn next_row_with_paging(
             return row;
         }
 
-        next_page = match query_pager.fetch_next_page().await? {
+        next_page = match query_pager
+            .fetch_next_page(TaskExecutionMode::SpawnOnRuntime)
+            .await?
+        {
             Ok(p) => Some(p),
             Err(e) => return Some(Err(DriverRowIterationError::FailedToFetchNextPage(e))),
         };
@@ -247,8 +254,10 @@ impl Pager {
         }
     }
 
+    /// Fetches the next page, running the request where `mode` says.
     pub(crate) async fn fetch_next_page(
         &mut self,
+        mode: TaskExecutionMode,
     ) -> Option<Result<QueryResult, DriverExecuteError>> {
         let Pager::Paged {
             paging_response,
@@ -264,9 +273,13 @@ impl Pager {
             PagingStateResponse::NoMorePages => return None,
         };
 
-        let result = session
-            .execute_single_page(state, Arc::clone(prepared))
-            .await;
+        let result = fetch_page(
+            Arc::clone(&session.inner),
+            state,
+            Arc::clone(prepared),
+            mode,
+        )
+        .await;
 
         let (query_result, new_paging_response) = match result {
             Ok(v) => v,
@@ -284,8 +297,9 @@ impl Pager {
     pub(crate) async fn fetch_next_pending_page(
         mut self,
         row_factory: PyRowFactory,
+        mode: TaskExecutionMode,
     ) -> PyResult<Option<PendingRequestResult>> {
-        let Some(query_result) = self.fetch_next_page().await else {
+        let Some(query_result) = self.fetch_next_page(mode).await else {
             return Ok(None);
         };
 
