@@ -233,7 +233,7 @@ Statement-level settings (e.g. `consistency`) take precedence over the execution
 
 ## Working with Results
 
-`session.execute()` returns a `RequestResult`.
+`session.execute()` returns a `RequestResult`: the result of the whole query, across all of its pages. Every way of consuming it starts from the first page, so it can be consumed more than once.
 
 ### Async iteration
 
@@ -266,19 +266,28 @@ print(f"Total rows: {len(rows)}")
 
 ### Manual paging
 
-Use `iter_current_page()` and `fetch_next_page()` to consume one page at a time:
+A `Page` holds the rows of a single page. It never changes: iterating it never fetches, and `fetch_next_page()` returns a new `Page`, or `None` after the last one. `result.first_page` is already fetched by `execute()`:
 
 ```python
 from scylla.statement import Statement
 
 statement = Statement("SELECT id, name FROM users")
 statement.page_size = 100
-page_result = await session.execute(statement)
+result = await session.execute(statement)
 
-while page_result:
-    for row in page_result.iter_current_page():
+page = result.first_page
+while page is not None:
+    for row in page:
         print(row)
-    page_result = await page_result.fetch_next_page()
+    page = await page.fetch_next_page()
+```
+
+`pages()` does the same walk, starting with `first_page`:
+
+```python
+async for page in result.pages():
+    for row in page:
+        print(row)
 ```
 
 ### Resuming from a paging state
@@ -293,13 +302,13 @@ statement.page_size = 10
 
 # --- First request ---
 result = await session.execute(statement)
-page = list(result.iter_current_page())
-state = result.paging_state()
+page = list(result.first_page)
+state = result.first_page.paging_state
 
 # --- Later request ---
 if state is not None:
     result = await session.execute(statement, paging_state=state)
-    next_page = list(result.iter_current_page())
+    next_page = list(result.first_page)
 ```
 
 ## Batch Statements
