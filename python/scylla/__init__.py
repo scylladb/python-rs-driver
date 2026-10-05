@@ -22,8 +22,8 @@ them:
 - ``scylla.tracing`` - query traces: ``QueryTrace`` and ``TraceEvent``.
 - ``scylla.routing`` and ``scylla.future`` - tokens, replica lookup and the
   awaitable returned by the driver.
-- ``scylla.legacy`` - the ``cassandra-driver`` compatible API: for now
-  ``ResponseFuture``.
+- ``scylla.legacy`` - the ``cassandra-driver`` compatible API: ``LegacySession``,
+  ``ResponseFuture`` and ``ResultSet``.
 """
 
 from .errors import ScyllaError
