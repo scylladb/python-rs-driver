@@ -145,6 +145,38 @@ class PagingState:
 
     def __eq__(self, other: object) -> bool: ...
 
+class Page:
+    """
+    A single page of a query result.
+
+    Immutable: iterating it yields only this page's rows and never fetches
+    another page, and `fetch_next_page()` returns a new `Page`.
+    """
+
+    def __iter__(self) -> SinglePageIterator: ...
+    @property
+    def paging_state(self) -> PagingState | None:
+        """
+        Paging state that resumes the query after this page, or `None` if this
+        is the last page.
+        """
+
+    @property
+    def has_more_pages(self) -> bool:
+        """
+        `True` if there is a page after this one.
+        """
+
+    def fetch_next_page(self) -> DriverFuture[Page | None]:
+        """
+        Fetches the page after this one.
+
+        Returns
+        -------
+        DriverFuture[Page | None]
+            A future resolving to the next page, or `None` if this is the last page.
+        """
+
 class RequestResult:
     """
     Immutable result of a query execution.

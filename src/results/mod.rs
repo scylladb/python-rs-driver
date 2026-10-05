@@ -1,9 +1,11 @@
 //! Python-facing result types: thin facades over [`crate::core::results`].
 
 mod iterators;
+mod page;
 mod paging_state;
 mod request_result;
 
+use page::Page;
 pub(crate) use paging_state::PyPagingState;
 pub(crate) use request_result::RequestResult;
 
@@ -25,6 +27,7 @@ pub(crate) fn results(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult
     module.add_class::<SinglePageIterator>()?;
     module.add_class::<PyPagingState>()?;
     module.add_class::<RequestResult>()?;
+    module.add_class::<Page>()?;
     module.add_class::<AsyncRowsIterator>()?;
 
     Ok(())
