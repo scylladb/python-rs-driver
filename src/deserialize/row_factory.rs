@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use pyo3::exceptions::{PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
@@ -195,17 +195,20 @@ fn py_column_names(py: Python<'_>, columns: &Bound<'_, PyTuple>) -> PyResult<Vec
 
 /// A row factory as handed over from Python, classified but not yet resolved:
 /// resolving needs the column metadata, which only arrives with the response.
+///
+/// Python objects are behind an `Arc`, so cloning it is safe on a thread that
+/// is not attached to the interpreter.
 #[derive(Clone)]
 pub(crate) enum PyRowFactory {
     NamedTuple,
     Dict,
     Tuple,
-    Class(Py<PyAny>),
+    Class(Arc<Py<PyAny>>),
     /// A user `RowFactory` subclass, whose `prepare` is called once the
     /// metadata is known.
-    Deferred(Py<PyAny>),
+    Deferred(Arc<Py<PyAny>>),
     /// A callable used directly as the row builder.
-    Builder(Py<PyAny>),
+    Builder(Arc<Py<PyAny>>),
 }
 
 impl<'py> FromPyObject<'_, 'py> for PyRowFactory {
@@ -225,15 +228,17 @@ impl<'py> FromPyObject<'_, 'py> for PyRowFactory {
         }
 
         if let Ok(factory) = obj.cast::<PyClassRowFactory>() {
-            return Ok(Self::Class(factory.get().class.clone_ref(obj.py())));
+            return Ok(Self::Class(Arc::new(
+                factory.get().class.clone_ref(obj.py()),
+            )));
         }
 
         if obj.cast::<PyRowFactoryBase>().is_ok() {
-            return Ok(Self::Deferred(obj.to_owned().unbind()));
+            return Ok(Self::Deferred(Arc::new(obj.to_owned().unbind())));
         }
 
         if obj.is_callable() {
-            return Ok(Self::Builder(obj.to_owned().unbind()));
+            return Ok(Self::Builder(Arc::new(obj.to_owned().unbind())));
         }
 
         Err(DriverRowFactoryError::invalid_factory(obj))
