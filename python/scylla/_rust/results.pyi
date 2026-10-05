@@ -241,6 +241,11 @@ class RequestResult:
         The first page of the result, already fetched by `execute()`.
         """
 
+    def pages(self) -> AsyncPagesIterator:
+        """
+        Iterates over the pages of the result, starting with `first_page`.
+        """
+
     @property
     def columns(self) -> tuple[ColumnSpec, ...]:
         """
@@ -259,3 +264,11 @@ class AsyncRowsIterator(AsyncIterator[Any]):
 
     def __aiter__(self) -> AsyncRowsIterator: ...
     def __anext__(self) -> DriverFuture[Any]: ...
+
+class AsyncPagesIterator(AsyncIterator[Page]):
+    """
+    Async iterator over the pages of a result, starting with the first page.
+    """
+
+    def __aiter__(self) -> AsyncPagesIterator: ...
+    def __anext__(self) -> DriverFuture[Page]: ...

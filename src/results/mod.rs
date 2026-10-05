@@ -13,7 +13,7 @@ use crate::deserialize::row_factory::{
     PyClassRowFactory, PyDictRowFactory, PyNamedTupleRowFactory, PyRowFactoryBase,
     PyTupleRowFactory,
 };
-use iterators::{AsyncRowsIterator, SinglePageIterator};
+use iterators::{AsyncPagesIterator, AsyncRowsIterator, SinglePageIterator};
 use pyo3::prelude::{PyModule, PyModuleMethods};
 use pyo3::{Bound, PyResult, Python, pymodule};
 
@@ -29,6 +29,7 @@ pub(crate) fn results(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult
     module.add_class::<RequestResult>()?;
     module.add_class::<Page>()?;
     module.add_class::<AsyncRowsIterator>()?;
+    module.add_class::<AsyncPagesIterator>()?;
 
     Ok(())
 }

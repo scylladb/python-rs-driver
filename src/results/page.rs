@@ -69,6 +69,12 @@ impl Page {
 /// A fetched page that becomes a [`Page`] when handed to Python.
 pub(crate) struct PendingPage(PendingRequestResult);
 
+impl From<PendingRequestResult> for PendingPage {
+    fn from(result: PendingRequestResult) -> Self {
+        Self(result)
+    }
+}
+
 impl<'py> IntoPyObject<'py> for PendingPage {
     type Target = Page;
     type Output = Bound<'py, Page>;

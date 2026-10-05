@@ -2,7 +2,7 @@ use crate::TaskExecutionMode;
 use crate::cluster::metadata::query_metadata::column_spec_tuple;
 use crate::core::results::{PageCore, PendingRequestResult};
 use crate::future::{DriverFuture, boxed_py_future};
-use crate::results::iterators::{AsyncRowsIterator, SinglePageIterator};
+use crate::results::iterators::{AsyncPagesIterator, AsyncRowsIterator, SinglePageIterator};
 use crate::results::page::Page;
 use crate::results::paging_state::PyPagingState;
 use pyo3::sync::PyOnceLock;
@@ -150,6 +150,12 @@ impl RequestResult {
     #[getter]
     fn first_page(&self) -> Page {
         Page::from(self.core.clone())
+    }
+
+    /// Returns an async iterator over the pages of the result, starting with
+    /// the first page.
+    fn pages(&self) -> AsyncPagesIterator {
+        AsyncPagesIterator::new(self.core.clone())
     }
 
     /// Specifications of the columns in this result.

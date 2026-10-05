@@ -1,11 +1,14 @@
-use crate::core::results::{PageCore, Pager, next_row_with_paging};
+use crate::TaskExecutionMode;
+use crate::core::results::{PageCore, Pager, PendingRequestResult, next_row_with_paging};
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::deserialize::rows::{ResolvedPage, RowsIteratorKind};
 use crate::future::{DriverFuture, boxed_py_future};
+use crate::results::page::{Page, PendingPage};
 use pyo3::exceptions::{PyRuntimeError, PyStopAsyncIteration, PyStopIteration};
 use pyo3::sync::MutexExt;
-use pyo3::{Py, PyAny, PyErr, PyRef, PyResult, Python, pyclass, pymethods};
+use pyo3::{Bound, IntoPyObject, Py, PyAny, PyErr, PyRef, PyResult, Python, pyclass, pymethods};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 /// Iterator over a single page of query results.
@@ -119,5 +122,111 @@ impl AsyncIteratorState {
     fn finish(&mut self) {
         self.rows_iterator = RowsIteratorKind::NonRows;
         self.query_pager = Pager::exhausted();
+    }
+}
+
+/// Async iterator over the pages of a result, starting with the first one.
+///
+/// Following pages are fetched without attaching to Python: each is resolved
+/// against the row factory only when it is handed to Python.
+#[pyclass(module = "scylla.results", frozen)]
+pub struct AsyncPagesIterator {
+    state: Arc<Mutex<PagesState>>,
+    /// Set by the first error, which ends the iteration like `async for` over rows.
+    /// Shared with the pages in flight, as resolving one can fail after its fetch.
+    finished: Arc<AtomicBool>,
+}
+
+impl AsyncPagesIterator {
+    pub(super) fn new(first_page: PageCore) -> Self {
+        let (query_pager, factory) = first_page.clone_pager_and_factory();
+        let state = PagesState {
+            query_pager,
+            factory,
+            first_page: Some(first_page),
+        };
+
+        AsyncPagesIterator {
+            state: Arc::new(Mutex::new(state)),
+            finished: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+#[pymethods]
+impl AsyncPagesIterator {
+    pub(crate) fn __anext__(&self, py: Python<'_>) -> PyResult<DriverFuture<IteratedPage, PyErr>> {
+        // A locked state means a fetch is in flight, so the first page is already out.
+        if let Ok(mut state) = self.state.try_lock()
+            && let Some(first_page) = state.first_page.take()
+        {
+            return DriverFuture::ready(py, Py::new(py, Page::from(first_page)));
+        }
+
+        let state = self.state.clone();
+        let finished = self.finished.clone();
+
+        let future = boxed_py_future(async move {
+            let mut state = state.lock().await;
+
+            if finished.load(Ordering::Relaxed) {
+                return Err(PyErr::new::<PyStopAsyncIteration, _>(""));
+            }
+
+            let PagesState {
+                query_pager,
+                factory,
+                ..
+            } = &mut *state;
+
+            match query_pager.fetch_next_page(TaskExecutionMode::Inline).await {
+                Some(Ok(query_result)) => Ok(IteratedPage {
+                    page: PendingPage::from(PendingRequestResult::new(
+                        query_result,
+                        query_pager.clone(),
+                        factory.clone(),
+                    )),
+                    finished,
+                }),
+                Some(Err(err)) => {
+                    finished.store(true, Ordering::Relaxed);
+                    Err(err.into())
+                }
+                None => Err(PyErr::new::<PyStopAsyncIteration, _>("")),
+            }
+        });
+
+        DriverFuture::spawn_on_tokio(py, future)
+    }
+
+    pub fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+}
+
+/// Mutable state for async page iteration.
+struct PagesState {
+    /// Handed out by the first `__anext__`, without a trip to tokio.
+    first_page: Option<PageCore>,
+    query_pager: Pager,
+    /// Kept unresolved; each page is resolved when it reaches Python.
+    factory: PyRowFactory,
+}
+
+/// A page fetched by [`AsyncPagesIterator`], resolved when handed to Python.
+pub(crate) struct IteratedPage {
+    page: PendingPage,
+    finished: Arc<AtomicBool>,
+}
+
+impl<'py> IntoPyObject<'py> for IteratedPage {
+    type Target = Page;
+    type Output = Bound<'py, Page>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.page
+            .into_pyobject(py)
+            .inspect_err(|_| self.finished.store(true, Ordering::Relaxed))
     }
 }
