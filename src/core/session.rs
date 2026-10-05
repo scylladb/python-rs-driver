@@ -255,7 +255,7 @@ impl SessionCore {
 
         Ok(PendingRequestResult::new(
             result,
-            Pager::paged(paging_response, self, prepared),
+            Pager::paged(paging_response, self.inner, prepared),
             factory,
         ))
     }

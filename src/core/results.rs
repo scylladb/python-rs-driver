@@ -3,12 +3,13 @@ use std::sync::Arc;
 use pyo3::prelude::{IntoPyObject, PyListMethods, Python};
 use pyo3::types::PyList;
 use pyo3::{Bound, Py, PyAny, PyErr, PyResult};
+use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 use scylla_cql::frame::response::result::ColumnSpec;
 
 use crate::TaskExecutionMode;
-use crate::core::session::{BoundStatement, SessionCore, fetch_page};
+use crate::core::session::{BoundStatement, fetch_page};
 use crate::deserialize::error::DriverRowIterationError;
 use crate::deserialize::results::{RequestResult, ResolvedPage, RowsIteratorKind};
 use crate::deserialize::row_factory::PyRowFactory;
@@ -208,7 +209,7 @@ pub(crate) enum Pager {
     Unpaged,
     Paged {
         paging_response: PagingStateResponse,
-        session: SessionCore,
+        session: Arc<Session>,
         prepared: Arc<BoundStatement>,
     },
 }
@@ -220,7 +221,7 @@ impl Pager {
 
     pub(crate) fn paged(
         paging_response: PagingStateResponse,
-        session: SessionCore,
+        session: Arc<Session>,
         prepared: Arc<BoundStatement>,
     ) -> Self {
         Pager::Paged {
@@ -273,13 +274,7 @@ impl Pager {
             PagingStateResponse::NoMorePages => return None,
         };
 
-        let result = fetch_page(
-            Arc::clone(&session.inner),
-            state,
-            Arc::clone(prepared),
-            mode,
-        )
-        .await;
+        let result = fetch_page(Arc::clone(session), state, Arc::clone(prepared), mode).await;
 
         let (query_result, new_paging_response) = match result {
             Ok(v) => v,
