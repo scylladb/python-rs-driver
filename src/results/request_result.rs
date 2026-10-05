@@ -18,15 +18,15 @@ use pyo3::{Py, PyAny, PyErr, PyResult, Python, pyclass, pymethods};
 pub(crate) struct RequestResult {
     core: PageCore,
 
-    /// Cached Python-side result column specifications.
-    columns: PyOnceLock<Py<PyTuple>>,
+    /// Cached Python-side column specifications of the first page.
+    first_page_columns: PyOnceLock<Py<PyTuple>>,
 }
 
 impl From<PageCore> for RequestResult {
     fn from(core: PageCore) -> Self {
         Self {
             core,
-            columns: PyOnceLock::new(),
+            first_page_columns: PyOnceLock::new(),
         }
     }
 }
@@ -89,12 +89,12 @@ impl RequestResult {
         AsyncPagesIterator::new(self.core.clone())
     }
 
-    /// Specifications of the columns in this result.
+    /// Specifications of the columns of the first page.
     ///
     /// Empty for a result that carries no rows, such as an `INSERT`.
     #[getter]
-    fn get_columns(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
-        let columns = self.columns.get_or_try_init(py, || {
+    fn get_first_page_columns(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
+        let columns = self.first_page_columns.get_or_try_init(py, || {
             column_spec_tuple(py, self.core.columns().unwrap_or_default())
         })?;
         Ok(columns.clone_ref(py))

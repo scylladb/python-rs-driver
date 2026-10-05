@@ -1188,12 +1188,12 @@ async def test_timestamp_overflow(
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_request_result_columns_for_rows(session: Session):
+async def test_request_result_first_page_columns_for_rows(session: Session):
     result = await session.execute("SELECT cluster_name FROM system.local")
 
-    assert len(result.columns) == 1
+    assert len(result.first_page_columns) == 1
 
-    column = result.columns[0]
+    column = result.first_page_columns[0]
 
     assert column.name == "cluster_name"
     assert column.table_name == "local"
@@ -1204,7 +1204,7 @@ async def test_request_result_columns_for_rows(session: Session):
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_request_result_columns_for_non_rows(session: Session, table_factory: TableFactory):
+async def test_request_result_first_page_columns_for_non_rows(session: Session, table_factory: TableFactory):
     table = await table_factory(
         "id int PRIMARY KEY, value text",
         "result_metadata_non_rows_table",
@@ -1212,7 +1212,7 @@ async def test_request_result_columns_for_non_rows(session: Session, table_facto
 
     result = await session.execute(f"INSERT INTO {table} (id, value) VALUES (1, 'hello')")
 
-    assert result.columns == ()
+    assert result.first_page_columns == ()
 
 
 @pytest.mark.asyncio

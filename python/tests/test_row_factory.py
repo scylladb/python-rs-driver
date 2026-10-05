@@ -259,7 +259,7 @@ async def test_builtin_prepare_builds_what_the_driver_builds(session: Session, u
     result = await session.execute(query, factory=factory)
     values = await (await session.execute(query, factory=TupleRowFactory())).first_row()
 
-    row = factory.prepare(result.columns)(values)
+    row = factory.prepare(result.first_page_columns)(values)
     expected = await result.first_row()
 
     assert row == expected
@@ -283,7 +283,7 @@ async def test_custom_factory_can_delegate_to_a_builtin(session: Session, users:
 @pytest.mark.requires_db
 async def test_builtin_builder_rejects_a_wrong_number_of_values(session: Session, users: str):
     result = await session.execute(f"SELECT id, name FROM {users}")
-    build = NamedTupleRowFactory().prepare(result.columns)
+    build = NamedTupleRowFactory().prepare(result.first_page_columns)
 
     with pytest.raises(ValueError, match="expected 2 column values, got 1"):
         build((1,))

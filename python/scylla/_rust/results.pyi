@@ -223,9 +223,9 @@ class RequestResult:
         """
 
     @property
-    def columns(self) -> tuple[ColumnSpec, ...]:
+    def first_page_columns(self) -> tuple[ColumnSpec, ...]:
         """
-        Specifications of the columns in this result.
+        Specifications of the columns of the first page.
 
         Empty for a result that carries no rows, such as an ``INSERT``.
         """
