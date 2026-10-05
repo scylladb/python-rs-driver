@@ -2,7 +2,6 @@
 //! Python conversion can be deferred to a thread that already holds the GIL.
 
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -20,18 +19,35 @@ pub(in crate::future) trait PyFuture {
     fn into_py_result(self: Pin<Box<Self>>, py: Python<'_>) -> PyResult<Py<PyAny>>;
 }
 
+/// A [`PyFuture`] whose output is still typed, for a facade that consumes it as Rust.
+pub(in crate::future) trait TypedFuture<T, E>: PyFuture {
+    /// Consume the future, taking its stashed output. `None` if it never resolved.
+    fn into_output(self: Pin<Box<Self>>) -> Option<Result<T, E>>;
+}
+
 /// The future the pyclass internals store.
 pub(in crate::future) type PyBoxedFuture = Pin<Box<dyn PyFuture + Send>>;
 
-/// A [`PyBoxedFuture`] that remembers what it resolves to.
+/// A boxed driver future that remembers what it resolves to.
+///
+/// Boxed where it is built, so the large request future is copied once; every
+/// hand-over after that moves a pointer.
 pub(crate) struct BoxedFuture<T, E> {
-    inner: PyBoxedFuture,
-    _output: PhantomData<fn() -> Result<T, E>>,
+    inner: Pin<Box<dyn TypedFuture<T, E> + Send>>,
 }
 
 impl<T, E> BoxedFuture<T, E> {
+    /// Forget the output type; an upcast of the trait object, no allocation.
     pub(in crate::future) fn into_erased(self) -> PyBoxedFuture {
         self.inner
+    }
+
+    pub(in crate::future) fn as_erased_mut(&mut self) -> Pin<&mut (dyn PyFuture + Send)> {
+        self.inner.as_mut()
+    }
+
+    pub(in crate::future) fn into_output(self) -> Option<Result<T, E>> {
+        self.inner.into_output()
     }
 }
 
@@ -105,6 +121,17 @@ where
     }
 }
 
+impl<Fut, T, E> TypedFuture<T, E> for StashingFuture<Fut, T, E>
+where
+    Fut: Future<Output = Result<T, E>>,
+    T: for<'py> IntoPyObject<'py>,
+    E: Into<PyErr>,
+{
+    fn into_output(mut self: Pin<Box<Self>>) -> Option<Result<T, E>> {
+        self.as_mut().drain()
+    }
+}
+
 /// Box `future` at its construction site, deferring the Python conversion of its
 /// output to a slot in the same allocation.
 pub(crate) fn boxed_py_future<Fut, T, E>(future: Fut) -> BoxedFuture<T, E>
@@ -118,6 +145,5 @@ where
             future,
             output: None,
         }),
-        _output: PhantomData,
     }
 }

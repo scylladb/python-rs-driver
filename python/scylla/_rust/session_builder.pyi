@@ -5,6 +5,7 @@ from typing import Any
 
 from scylla.auth import AuthenticatorProvider
 from scylla.future import DriverFuture
+from scylla.legacy import LegacySession
 from scylla.policies.address_translator import AddressTranslator
 from scylla.policies.host_filter import HostFilter
 from scylla.policies.timestamp_generator import TimestampGenerator
@@ -156,6 +157,12 @@ class SessionBuilder:
         -------
         DriverFuture[Session]
             A future resolving to a connected session ready to execute queries.
+        """
+
+    def connect_legacy(self) -> LegacySession:
+        """
+        Block until connected and return the legacy (``cassandra-driver``
+        compatible) session.
         """
 
     def user(self, username: str, password: str) -> SessionBuilder:

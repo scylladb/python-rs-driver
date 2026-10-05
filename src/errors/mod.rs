@@ -73,6 +73,7 @@ create_exception!(scylla.errors, TlsError, ScyllaError);
 create_exception!(scylla.errors, LoadBalancingPolicyError, ScyllaError);
 create_exception!(scylla.errors, RetryPolicyError, ScyllaError);
 create_exception!(scylla.errors, FutureCancelledError, PyException);
+create_exception!(scylla.errors, QueryExhausted, PyException);
 create_exception!(scylla.errors, SpeculativeExecutionPolicyError, ScyllaError);
 
 create_exception!(scylla.errors, QueryMetadataError, ScyllaError);
@@ -194,6 +195,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     )?;
     module.add("RetryPolicyError", py.get_type::<RetryPolicyError>())?;
     module.add("QueryMetadataError", py.get_type::<QueryMetadataError>())?;
+    module.add("QueryExhausted", py.get_type::<QueryExhausted>())?;
     module.add(
         "FutureCancelledError",
         py.get_type::<FutureCancelledError>(),

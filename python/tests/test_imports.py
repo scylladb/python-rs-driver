@@ -10,6 +10,7 @@ PUBLIC_MODULES = [
     "scylla.cluster",
     "scylla.errors",
     "scylla.future",
+    "scylla.legacy",
     "scylla.policies.address_translator",
     "scylla.policies.host_filter",
     "scylla.policies.load_balancing",
@@ -66,6 +67,7 @@ def test_classes_report_their_public_module() -> None:
     from scylla.cluster import Keyspace
     from scylla.cql_types import CqlInt
     from scylla.errors import RequestTimeoutError
+    from scylla.legacy import LegacySession
     from scylla.session import PoolSize, SessionBuilder
     from scylla.statement import Consistency
 
@@ -75,3 +77,4 @@ def test_classes_report_their_public_module() -> None:
     assert CqlInt.__module__ == "scylla.cql_types"
     assert Keyspace.__module__ == "scylla.cluster"
     assert RequestTimeoutError.__module__ == "scylla.errors"
+    assert LegacySession.__module__ == "scylla.legacy"
