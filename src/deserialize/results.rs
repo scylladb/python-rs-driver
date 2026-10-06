@@ -68,9 +68,7 @@ impl RequestResult {
     ///
     /// Current paging state or `None` if no more pages are available.
     fn paging_state(&self) -> Option<PyPagingState> {
-        self.core
-            .paging_state()
-            .map(|inner| PyPagingState { inner })
+        self.core.paging_state().map(PyPagingState::from)
     }
 
     /// Fetches the next page if available.
@@ -222,7 +220,19 @@ impl SinglePageIterator {
 /// Can be passed to execute() to resume paging from a specific position.
 #[pyclass(module = "scylla.results", name = "PagingState", frozen)]
 pub struct PyPagingState {
-    pub(crate) inner: PagingState,
+    inner: PagingState,
+}
+
+impl From<PagingState> for PyPagingState {
+    fn from(inner: PagingState) -> Self {
+        Self { inner }
+    }
+}
+
+impl PyPagingState {
+    pub(crate) fn inner(&self) -> &PagingState {
+        &self.inner
+    }
 }
 
 #[pymethods]

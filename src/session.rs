@@ -71,7 +71,7 @@ impl PySession {
         // to `unwrap_or_default()` here.
         let values = values.unwrap_or_default();
         let paging_state: Option<PagingState> =
-            paging_state.map(|state| state.borrow(py).inner.clone());
+            paging_state.map(|state| state.borrow(py).inner().clone());
 
         if let Some(target) = target {
             statement.set_target(target);
