@@ -51,6 +51,11 @@ impl RequestResultCore {
             .map(|rows| rows.metadata().col_specs())
     }
 
+    /// Clones what fetching the following pages needs, without the page itself.
+    pub(crate) fn clone_pager_and_factory(&self) -> (Pager, PyRowFactory) {
+        (self.query_pager.clone(), self.row_factory.clone())
+    }
+
     pub(crate) fn into_parts(self) -> (ResolvedPage, Pager, PyRowFactory) {
         (self.page, self.query_pager, self.row_factory)
     }
@@ -64,27 +69,6 @@ impl RequestResultCore {
     /// available.
     pub(crate) fn paging_state(&self) -> Option<PagingState> {
         self.query_pager.paging_state()
-    }
-
-    /// Fetches the next page, or returns `None` if no more pages exist.
-    ///
-    /// The page is bound to the row factory when it is handed to Python.
-    pub(crate) async fn fetch_next_page(self) -> PyResult<Option<PendingRequestResult>> {
-        let Self {
-            row_factory,
-            mut query_pager,
-            ..
-        } = self;
-
-        let Some(query_result) = query_pager.fetch_next_page().await else {
-            return Ok(None);
-        };
-
-        Ok(Some(PendingRequestResult::new(
-            query_result?,
-            query_pager,
-            row_factory,
-        )))
     }
 
     /// Returns the first row from the current position onwards, fetching
@@ -292,5 +276,23 @@ impl Pager {
         *paging_response = new_paging_response;
 
         Some(Ok(query_result))
+    }
+
+    /// Fetches the next page, or returns `None` if no more pages exist.
+    ///
+    /// The page is bound to `row_factory` when it is handed to Python.
+    pub(crate) async fn fetch_next_pending_page(
+        mut self,
+        row_factory: PyRowFactory,
+    ) -> PyResult<Option<PendingRequestResult>> {
+        let Some(query_result) = self.fetch_next_page().await else {
+            return Ok(None);
+        };
+
+        Ok(Some(PendingRequestResult::new(
+            query_result?,
+            self,
+            row_factory,
+        )))
     }
 }

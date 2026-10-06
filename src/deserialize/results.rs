@@ -87,11 +87,11 @@ impl RequestResult {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<Option<PendingRequestResult>, PyErr>> {
-        let core = self.core.clone();
+        let (query_pager, row_factory) = self.core.clone_pager_and_factory();
 
         DriverFuture::spawn(
             py,
-            boxed_py_future(async move { core.fetch_next_page().await }),
+            boxed_py_future(async move { query_pager.fetch_next_pending_page(row_factory).await }),
         )
     }
 
