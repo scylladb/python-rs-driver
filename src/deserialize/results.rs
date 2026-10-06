@@ -104,7 +104,7 @@ impl RequestResult {
     ///
     /// Iterator over rows in the current page.
     fn iter_current_page(&self) -> SinglePageIterator {
-        SinglePageIterator::new(self.core.page.clone())
+        SinglePageIterator::new(self.core.page().clone())
     }
 
     /// Returns an async iterator over all rows with automatic paging.
@@ -116,11 +116,7 @@ impl RequestResult {
     ///
     /// Async iterator over all rows across all pages.
     pub fn __aiter__(&self) -> AsyncRowsIterator {
-        AsyncRowsIterator::new(
-            self.core.query_pager.clone(),
-            self.core.page.clone(),
-            self.core.row_factory.clone(),
-        )
+        AsyncRowsIterator::new(self.core.clone())
     }
 
     /// Returns the first row starting from the current state.
@@ -166,15 +162,7 @@ impl RequestResult {
     #[getter]
     fn get_columns(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
         let columns = self.columns.get_or_try_init(py, || {
-            match self
-                .core
-                .page
-                .query_result()
-                .deserialized_metadata_and_rows()
-            {
-                None => column_spec_tuple(py, &[]),
-                Some(rows) => column_spec_tuple(py, rows.metadata().col_specs()),
-            }
+            column_spec_tuple(py, self.core.columns().unwrap_or_default())
         })?;
         Ok(columns.clone_ref(py))
     }
@@ -292,11 +280,13 @@ pub struct AsyncRowsIterator {
 }
 
 impl AsyncRowsIterator {
-    fn new(paging_api: Pager, page: ResolvedPage, factory: PyRowFactory) -> Self {
+    fn new(core: RequestResultCore) -> Self {
+        let (page, query_pager, factory) = core.into_parts();
+
         AsyncRowsIterator {
             state: Arc::new(Mutex::new(AsyncIteratorState {
                 rows_iterator: RowsIteratorKind::new(page),
-                query_pager: paging_api,
+                query_pager,
                 factory,
             })),
         }

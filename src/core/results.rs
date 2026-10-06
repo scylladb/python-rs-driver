@@ -5,6 +5,7 @@ use pyo3::types::PyList;
 use pyo3::{Bound, Py, PyAny, PyErr, PyResult};
 use scylla::response::query_result::QueryResult;
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
+use scylla_cql::frame::response::result::ColumnSpec;
 
 use crate::core::session::{BoundStatement, SessionCore};
 use crate::deserialize::error::DriverRowIterationError;
@@ -16,9 +17,9 @@ use crate::errors::execution::DriverExecuteError;
 #[derive(Clone)]
 pub(crate) struct RequestResultCore {
     /// Kept to resolve a builder for every following page.
-    pub(crate) row_factory: PyRowFactory,
-    pub(crate) query_pager: Pager,
-    pub(crate) page: ResolvedPage,
+    row_factory: PyRowFactory,
+    query_pager: Pager,
+    page: ResolvedPage,
 }
 
 impl RequestResultCore {
@@ -36,6 +37,22 @@ impl RequestResultCore {
             page,
             row_factory,
         })
+    }
+
+    pub(crate) fn page(&self) -> &ResolvedPage {
+        &self.page
+    }
+
+    /// Specifications of the page's columns, or `None` for a result without rows.
+    pub(crate) fn columns(&self) -> Option<&[ColumnSpec<'_>]> {
+        self.page
+            .query_result()
+            .deserialized_metadata_and_rows()
+            .map(|rows| rows.metadata().col_specs())
+    }
+
+    pub(crate) fn into_parts(self) -> (ResolvedPage, Pager, PyRowFactory) {
+        (self.page, self.query_pager, self.row_factory)
     }
 
     /// Returns `true` if more pages are available.
