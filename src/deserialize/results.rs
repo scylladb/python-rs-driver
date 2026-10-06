@@ -339,9 +339,12 @@ struct AsyncIteratorState {
 
 /// A page together with the row builder resolved against its columns.
 #[derive(Clone)]
-pub(crate) struct ResolvedPage {
-    query_result: Arc<QueryResult>,
-    builder: Option<RowBuilder>,
+pub(crate) enum ResolvedPage {
+    Rows {
+        query_result: Arc<QueryResult>,
+        builder: RowBuilder,
+    },
+    NonRows(Arc<QueryResult>),
 }
 
 impl ResolvedPage {
@@ -350,19 +353,21 @@ impl ResolvedPage {
         query_result: Arc<QueryResult>,
         factory: &PyRowFactory,
     ) -> PyResult<Self> {
-        let builder = query_result
-            .deserialized_metadata_and_rows()
-            .map(|rows| RowBuilder::resolve(py, factory, rows.metadata().col_specs()))
-            .transpose()?;
+        let Some(rows) = query_result.deserialized_metadata_and_rows() else {
+            return Ok(Self::NonRows(query_result));
+        };
+        let builder = RowBuilder::resolve(py, factory, rows.metadata().col_specs())?;
 
-        Ok(Self {
+        Ok(Self::Rows {
             query_result,
             builder,
         })
     }
 
     pub(crate) fn query_result(&self) -> &QueryResult {
-        &self.query_result
+        match self {
+            Self::Rows { query_result, .. } | Self::NonRows(query_result) => query_result,
+        }
     }
 }
 
@@ -379,13 +384,15 @@ pub(crate) enum RowsIteratorKind {
 
 impl RowsIteratorKind {
     pub(crate) fn new(page: ResolvedPage) -> Self {
-        let Some(builder) = page.builder else {
-            return RowsIteratorKind::NonRows;
-        };
-
-        RowsIteratorKind::Rows {
-            rows: PageRowIterator::new(page.query_result),
-            builder,
+        match page {
+            ResolvedPage::Rows {
+                query_result,
+                builder,
+            } => RowsIteratorKind::Rows {
+                rows: PageRowIterator::new(query_result),
+                builder,
+            },
+            ResolvedPage::NonRows(_) => RowsIteratorKind::NonRows,
         }
     }
 
@@ -421,11 +428,12 @@ pub(crate) struct PageRowIterator {
 }
 
 impl PageRowIterator {
+    /// Only for the `query_result` of a [`ResolvedPage::Rows`].
     fn new(query_result: Arc<QueryResult>) -> Self {
         let yoked = Yoke::attach_to_cart(QueryResultCart(query_result), |cart| {
             let raw_rows_with_metadata = cart
                 .deserialized_metadata_and_rows()
-                .expect("ResolvedPage only has a row builder for a page that carries rows");
+                .expect("ResolvedPage::Rows only holds a page that carries rows");
             let frame_slice = FrameSlice::new(raw_rows_with_metadata.raw_rows());
 
             PageRows {
