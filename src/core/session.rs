@@ -95,10 +95,7 @@ impl SessionCore {
         paging_state: Option<PagingState>,
         paged: bool,
     ) -> Result<BoxedFuture<PendingRequestResult, DriverExecuteError>, DriverExecuteError> {
-        let ExecutableStatement {
-            kind,
-            row_factory: statement_factory,
-        } = statement;
+        let (kind, statement_factory) = statement.into_parts();
         let effective_factory = self.choose_row_factory(explicit_factory, statement_factory);
 
         let request = if paged {
@@ -344,10 +341,10 @@ impl BoundStatement {
 /// A statement ready to run: the Rust statement, plus the row factory it asks
 /// for.
 pub(crate) struct ExecutableStatement {
-    pub(crate) kind: StatementKind,
+    kind: StatementKind,
     /// What the statement asks for: its own row factory, else its execution
     /// profile's. `None` when it asks for neither.
-    pub(crate) row_factory: Option<PyRowFactory>,
+    row_factory: Option<PyRowFactory>,
 }
 
 pub(crate) enum StatementKind {
@@ -369,6 +366,10 @@ impl StatementKind {
 impl ExecutableStatement {
     pub(crate) fn set_target(&mut self, target: PyTargetPolicy) {
         self.kind.set_target(target);
+    }
+
+    pub(crate) fn into_parts(self) -> (StatementKind, Option<PyRowFactory>) {
+        (self.kind, self.row_factory)
     }
 }
 
@@ -442,7 +443,7 @@ impl<'py> FromPyObject<'_, 'py> for PreparableStatement {
 
 impl From<ExecutableStatement> for BatchStatement {
     fn from(s: ExecutableStatement) -> Self {
-        match s.kind {
+        match s.into_parts().0 {
             StatementKind::Prepared(p) => BatchStatement::PreparedStatement(p),
             StatementKind::Unprepared(q) => BatchStatement::Query(q),
         }
