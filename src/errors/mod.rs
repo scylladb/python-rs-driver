@@ -1,5 +1,5 @@
 use pyo3::create_exception;
-use pyo3::exceptions::PyException;
+use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -35,6 +35,14 @@ create_exception!(scylla.errors, SessionConfigError, ScyllaError);
 create_exception!(scylla.errors, StatementConversionError, ScyllaError);
 
 create_exception!(scylla.errors, InternalDriverError, ScyllaError);
+
+/* Invalid input, rejected before sending - retrying won't help */
+
+create_exception_multi!(scylla.errors, BadQuery, (ScyllaError, PyValueError));
+create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
+create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
+create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
+create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
 
 /* Failures while executing a request */
 
@@ -150,6 +158,20 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<StatementConversionError>(),
     )?;
     module.add("InternalDriverError", py.get_type::<InternalDriverError>())?;
+    module.add("BadQuery", py.get_type::<BadQuery>())?;
+    module.add("ValuesTooLongForKey", py.get_type::<ValuesTooLongForKey>())?;
+    module.add(
+        "TooManyStatementsInBatch",
+        py.get_type::<TooManyStatementsInBatch>(),
+    )?;
+    module.add(
+        "PartitionKeyExtractionFailed",
+        py.get_type::<PartitionKeyExtractionFailed>(),
+    )?;
+    module.add(
+        "PagingStateNotAllowed",
+        py.get_type::<PagingStateNotAllowed>(),
+    )?;
     module.add("ExecutionError", py.get_type::<ExecutionError>())?;
     module.add("MetadataError", py.get_type::<MetadataError>())?;
     module.add(

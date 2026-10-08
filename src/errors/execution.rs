@@ -3,8 +3,8 @@ use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 
 use crate::errors::request::execution_error_to_pyerr;
 use crate::errors::{
-    BadKeyspaceNameError, ExecutionError, InternalDriverError, KeyspaceNameMismatchError,
-    MetadataRefreshError, PrepareError, RequestError, RequestTimeoutError, RowFactoryError,
+    BadKeyspaceNameError, InternalDriverError, KeyspaceNameMismatchError, MetadataRefreshError,
+    PagingStateNotAllowed, PrepareError, RequestError, RequestTimeoutError, RowFactoryError,
     RuntimeTaskJoinFailedError, SchemaAgreementError, SerializationError, SessionConnectionError,
     StatementConversionError, TraceUnavailable, get_type_name, with_cause,
 };
@@ -157,19 +157,19 @@ impl DriverExecuteError {
 impl From<DriverExecuteError> for PyErr {
     fn from(e: DriverExecuteError) -> PyErr {
         let message = e.to_string();
-        match e {
+        Python::attach(|py| match e {
             DriverExecuteError::PagingStateMustBeNoneForUnpagedExecution => {
-                py_err!(ExecutionError, message)
+                py_err!(PagingStateNotAllowed, message)
             }
             DriverExecuteError::RustDriverExecutionError { source } => {
-                execution_error_to_pyerr(&source, message)
+                execution_error_to_pyerr(py, &source, message)
             }
             DriverExecuteError::SerializationFailed { .. } => py_err!(SerializationError, message),
             DriverExecuteError::RuntimeTaskJoinFailed(_) => py_err!(InternalDriverError, message),
             DriverExecuteError::RowFactoryFailed { source } => {
                 with_cause(py_err!(RowFactoryError, message), source)
             }
-        }
+        })
     }
 }
 
