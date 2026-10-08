@@ -9,6 +9,7 @@ mod macros;
 mod attrs;
 pub(crate) mod config;
 pub(crate) mod execution;
+pub(crate) mod request;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
 
@@ -33,11 +34,18 @@ create_exception!(scylla.errors, SessionConfigError, ScyllaError);
 
 create_exception!(scylla.errors, StatementConversionError, ScyllaError);
 
-create_exception!(scylla.errors, ExecuteError, ScyllaError);
+create_exception!(scylla.errors, InternalDriverError, ScyllaError);
 
-create_exception!(scylla.errors, PrepareError, ScyllaError);
+/* Failures while executing a request */
 
-create_exception!(scylla.errors, SchemaAgreementError, ScyllaError);
+create_exception!(scylla.errors, ExecutionError, ScyllaError);
+create_exception!(scylla.errors, MetadataError, ExecutionError);
+create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
+
+create_exception!(scylla.errors, PrepareError, ExecutionError);
+
+/* Other errors */
+
 create_exception!(scylla.errors, MetadataRefreshError, ScyllaError);
 create_exception!(scylla.errors, StatementConfigError, ScyllaError);
 
@@ -141,16 +149,18 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "StatementConversionError",
         py.get_type::<StatementConversionError>(),
     )?;
-    module.add("PrepareError", py.get_type::<PrepareError>())?;
+    module.add("InternalDriverError", py.get_type::<InternalDriverError>())?;
+    module.add("ExecutionError", py.get_type::<ExecutionError>())?;
+    module.add("MetadataError", py.get_type::<MetadataError>())?;
     module.add(
         "SchemaAgreementError",
         py.get_type::<SchemaAgreementError>(),
     )?;
+    module.add("PrepareError", py.get_type::<PrepareError>())?;
     module.add(
         "MetadataRefreshError",
         py.get_type::<MetadataRefreshError>(),
     )?;
-    module.add("ExecuteError", py.get_type::<ExecuteError>())?;
     module.add("RowFactoryError", py.get_type::<RowFactoryError>())?;
     module.add(
         "StatementConfigError",

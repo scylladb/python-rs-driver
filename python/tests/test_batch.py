@@ -5,7 +5,7 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import connect
-from scylla.errors import BatchError, ExecuteError
+from scylla.errors import BatchError, ExecutionError
 from scylla.policies.retry import DefaultRetryPolicy
 from scylla.results import TupleRowFactory
 from scylla.session import ExecutionProfile, Session
@@ -123,7 +123,7 @@ async def test_simple_batch_bad_query(session: Session):
     batch = Batch(BatchType.Logged)
     batch.add("meow")
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(ExecutionError) as exc_info:
         await session.batch(batch)
 
     assert "failed to execute" in str(exc_info.value).lower()
