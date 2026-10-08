@@ -1,5 +1,5 @@
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyTimeoutError, PyValueError};
+use pyo3::exceptions::{PyException, PyOverflowError, PyTimeoutError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -43,6 +43,29 @@ create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
 create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
 create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
 create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
+
+create_exception!(scylla.errors, SerializationError, BadQuery);
+create_exception!(
+    scylla.errors,
+    UnsupportedTypeSerializationError,
+    SerializationError
+);
+create_exception_multi!(
+    scylla.errors,
+    TypeMismatchSerializationError,
+    (SerializationError, PyTypeError)
+);
+create_exception_multi!(
+    scylla.errors,
+    ValueOverflowSerializationError,
+    (SerializationError, PyOverflowError)
+);
+create_exception!(scylla.errors, SerializeFailedError, SerializationError);
+create_exception!(
+    scylla.errors,
+    PySerializationFailedError,
+    SerializationError
+);
 
 /* Failures while executing a request */
 
@@ -109,29 +132,6 @@ create_exception!(scylla.errors, MetadataRefreshError, ScyllaError);
 create_exception!(scylla.errors, StatementConfigError, ScyllaError);
 
 create_exception!(scylla.errors, BatchError, ScyllaError);
-
-create_exception!(scylla.errors, SerializationError, ScyllaError);
-create_exception!(
-    scylla.errors,
-    UnsupportedTypeSerializationError,
-    SerializationError
-);
-create_exception!(
-    scylla.errors,
-    TypeMismatchSerializationError,
-    SerializationError
-);
-create_exception!(
-    scylla.errors,
-    ValueOverflowSerializationError,
-    SerializationError
-);
-create_exception!(scylla.errors, SerializeFailedError, SerializationError);
-create_exception!(
-    scylla.errors,
-    PySerializationFailedError,
-    SerializationError
-);
 
 create_exception!(scylla.errors, ClusterStateTokenError, ScyllaError);
 create_exception!(scylla.errors, UseKeyspaceError, ScyllaError);
