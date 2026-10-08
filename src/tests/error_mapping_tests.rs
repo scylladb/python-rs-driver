@@ -1,3 +1,4 @@
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,17 +6,18 @@ use pyo3::exceptions::{PyConnectionRefusedError, PyKeyError, PyTimeoutError};
 use pyo3::prelude::*;
 use scylla::deserialize::TypeCheckError;
 use scylla::errors::{
-    ConnectionError, ConnectionPoolError, CustomTranslationError, DbError, ExecutionError,
-    RequestAttemptError, TracingError,
+    BrokenConnectionErrorKind, ConnectionError, ConnectionPoolError, CustomTranslationError,
+    DbError, ExecutionError, RequestAttemptError, TracingError,
 };
 use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
 
 use crate::errors::request::{execution_error_to_pyerr, tracing_error_to_pyerr};
 use crate::errors::{
-    AddressTranslationFailed, AlreadyExists, ConnectionPoolBroken, DatabaseError,
-    OperationTimedOut, ReadTimeout, ResponseParseError, SerializeFailedError, TraceUnavailable,
-    Unavailable,
+    AddressTranslationFailed, AlreadyExists, BrokenConnection, ConnectionLost,
+    ConnectionPoolBroken, ConnectionPoolError as PyConnectionPoolError, DatabaseError,
+    OperationTimedOut, PyBrokenConnectionKind, ReadTimeout, RequestFailedError, ResponseParseError,
+    SerializeFailedError, TraceUnavailable, Unavailable,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -140,6 +142,59 @@ fn unreadable_trace_rows_raise_response_parse_error() {
 }
 
 #[test]
+fn broken_pool_keepalive_timeout_is_connection_lost() {
+    Python::initialize();
+    let address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+    let err = ExecutionError::ConnectionPoolError(ConnectionPoolError::Broken {
+        last_connection_error: ConnectionError::BrokenConnection(
+            BrokenConnectionErrorKind::KeepaliveTimeout(address).into(),
+        ),
+    });
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<ConnectionLost>(py));
+        assert!(!err.is_instance_of::<RequestFailedError>(py));
+        // A dead connection is not a client timer.
+        assert!(!err.is_instance_of::<PyTimeoutError>(py));
+        assert_eq!(
+            attr::<PyBrokenConnectionKind>(py, &err, "kind"),
+            PyBrokenConnectionKind::KeepaliveTimeout
+        );
+    });
+}
+
+#[test]
+fn request_keepalive_timeout_is_broken_connection() {
+    Python::initialize();
+    let address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+    let err = ExecutionError::LastAttemptError(RequestAttemptError::BrokenConnectionError(
+        BrokenConnectionErrorKind::KeepaliveTimeout(address).into(),
+    ));
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<BrokenConnection>(py));
+        assert!(!err.is_instance_of::<PyConnectionPoolError>(py));
+        assert_eq!(
+            attr::<PyBrokenConnectionKind>(py, &err, "kind"),
+            PyBrokenConnectionKind::KeepaliveTimeout
+        );
+    });
+}
+
+#[test]
+fn request_broken_connection_is_not_broken_pool() {
+    Python::initialize();
+    let err = ExecutionError::LastAttemptError(RequestAttemptError::BrokenConnectionError(
+        BrokenConnectionErrorKind::ChannelError.into(),
+    ));
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<BrokenConnection>(py));
+        assert!(!err.is_instance_of::<ConnectionPoolBroken>(py));
+    });
+}
+
+#[test]
 fn translator_exception_is_the_cause() {
     Python::initialize();
     let raised = PyKeyError::new_err("10.0.0.5");
@@ -169,6 +224,54 @@ fn refused_connection_is_the_cause_of_broken_pool() {
         let cause = err.cause(py).expect("I/O error is the cause");
         assert!(cause.is_instance_of::<PyConnectionRefusedError>(py));
     });
+}
+
+#[test]
+fn dropped_connection_keeps_its_kind_on_both_paths() {
+    Python::initialize();
+    let kinds: Vec<(fn() -> BrokenConnectionErrorKind, PyBrokenConnectionKind)> = vec![
+        (
+            || BrokenConnectionErrorKind::KeepaliveTimeout(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            PyBrokenConnectionKind::KeepaliveTimeout,
+        ),
+        (
+            || BrokenConnectionErrorKind::KeepaliveRequestError(Arc::new(std::fmt::Error)),
+            PyBrokenConnectionKind::KeepaliveFailed,
+        ),
+        (
+            || BrokenConnectionErrorKind::WriteError(std::io::ErrorKind::BrokenPipe.into()),
+            PyBrokenConnectionKind::WriteFailed,
+        ),
+        (
+            || BrokenConnectionErrorKind::UnexpectedStreamId(7),
+            PyBrokenConnectionKind::UnexpectedStreamId,
+        ),
+        (
+            || BrokenConnectionErrorKind::TooManyOrphanedStreamIds(3),
+            PyBrokenConnectionKind::TooManyOrphanedStreams,
+        ),
+        (
+            || BrokenConnectionErrorKind::ChannelError,
+            PyBrokenConnectionKind::ChannelClosed,
+        ),
+    ];
+    for (make, expected) in kinds {
+        let on_request = ExecutionError::LastAttemptError(
+            RequestAttemptError::BrokenConnectionError(make().into()),
+        );
+        let in_pool = ExecutionError::ConnectionPoolError(ConnectionPoolError::Broken {
+            last_connection_error: ConnectionError::BrokenConnection(make().into()),
+        });
+        Python::attach(|py| {
+            let on_request = execution_error_to_pyerr(py, &on_request, on_request.to_string());
+            let in_pool = execution_error_to_pyerr(py, &in_pool, in_pool.to_string());
+            assert!(on_request.is_instance_of::<BrokenConnection>(py));
+            assert!(in_pool.is_instance_of::<ConnectionLost>(py));
+            for err in [&on_request, &in_pool] {
+                assert_eq!(attr::<PyBrokenConnectionKind>(py, err, "kind"), expected);
+            }
+        });
+    }
 }
 
 #[test]

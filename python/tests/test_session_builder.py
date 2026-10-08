@@ -23,15 +23,18 @@ from scylla.errors import (
     AddressTranslationError,
     AddressTranslationFailed,
     AuthenticationFailed,
+    BrokenConnection,
     ConnectionAuthenticationFailed,
     ConnectionLost,
     ConnectionPoolBroken,
+    ConnectionPoolError,
     ConnectionSetupFailed,
     ConnectTimeout,
     ContactPointError,
     HostFilterError,
     HostnameResolutionFailed,
     NoKnownNodes,
+    RequestFailedError,
     SessionConfigError,
 )
 from scylla.policies.address_translator import AddressTranslator, DictAddressTranslator, UntranslatedPeer
@@ -811,3 +814,6 @@ def test_connection_class_bases():
     # Covers client-side failures too, so it is not the server's AuthenticationFailed.
     assert not issubclass(ConnectionAuthenticationFailed, AuthenticationFailed)
     assert issubclass(AddressTranslationFailed, AddressTranslationError)
+    # A lost pool connection sent nothing, a broken request connection sent the request.
+    assert not issubclass(ConnectionLost, RequestFailedError)
+    assert not issubclass(BrokenConnection, ConnectionPoolError)
