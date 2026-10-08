@@ -1,7 +1,6 @@
 import pytest
 from scylla.errors import CqlSyntaxError
 from scylla.policies.retry import (
-    DbError,
     DefaultRetryPolicy,
     DowngradingConsistencyRetryPolicy,
     FallthroughRetryPolicy,
@@ -254,6 +253,6 @@ async def test_custom_retry_policy_receives_request_info_fields_from_driver():
 
     assert policy.session.error is not None
     assert isinstance(policy.session.error, RequestAttemptError.DbError)
-    assert isinstance(policy.session.error.error, DbError.SyntaxError)
+    assert isinstance(policy.session.error.error, CqlSyntaxError)
     assert policy.session.is_idempotent is False
     assert policy.session.consistency is not None
