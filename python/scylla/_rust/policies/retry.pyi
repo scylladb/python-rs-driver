@@ -1,7 +1,7 @@
 from enum import IntEnum
 from typing import Protocol, runtime_checkable
 
-from scylla.errors import DatabaseError
+from scylla.errors import PrepareError, RequestFailedError, SerializationError
 from scylla.statement import Consistency
 
 class WriteType:
@@ -169,85 +169,14 @@ class RetryDecision:
 
         def __init__(self) -> None: ...
 
-class RequestAttemptError:
-    """
-    An error that occurred during a single attempt of:
-    - `PREPARE`
-    - `EXECUTE`
-    - `BATCH`
-
-    requests. The retry decision is made based on this error.
-    """
-
-    class SerializationError(RequestAttemptError):
-        """Failed to serialize query parameters."""
-
-    class CqlRequestSerialization(RequestAttemptError):
-        """Failed to serialize CQL request."""
-
-    class UnableToAllocStreamId(RequestAttemptError):
-        """Driver was unable to allocate a stream id to execute a query on."""
-
-    class BrokenConnectionError(RequestAttemptError):
-        """A connection has been broken during query execution."""
-
-    class BodyExtensionsParseError(RequestAttemptError):
-        """Failed to deserialize frame body extensions."""
-
-    class CqlResultParseError(RequestAttemptError):
-        """Received a RESULT server response, but failed to deserialize it."""
-
-    class CqlErrorParseError(RequestAttemptError):
-        """Received an ERROR server response, but failed to deserialize it."""
-
-    class RepreparedIdMissingInBatch(RequestAttemptError):
-        """Driver tried to reprepare a statement in the batch, but the reprepared
-        statement's id is not included in the batch."""
-
-    class NonfinishedPagingState(RequestAttemptError):
-        """A result with nonfinished paging state received for unpaged query."""
-
-    class Unknown(RequestAttemptError): ...
-
-    class DbError(RequestAttemptError):
-        """
-        The database returned an error.
-
-        Attributes:
-            error (`DatabaseError`): The exception for the error code, for example `ReadTimeout`.
-            message (`str`): The error message from the database.
-        """
-
-        @property
-        def error(self) -> DatabaseError: ...
-        @property
-        def message(self) -> str: ...
-        def __init__(self, error: DatabaseError, message: str) -> None: ...
-
-    class UnexpectedResponse(RequestAttemptError):
-        """Received an unexpected response from the server."""
-
-        @property
-        def kind(self) -> CqlResponseKind: ...
-        def __init__(self, kind: CqlResponseKind) -> None: ...
-
-    class RepreparedIdChanged(RequestAttemptError):
-        """Prepared statement id changed after repreparation."""
-
-        @property
-        def statement(self) -> str: ...
-        @property
-        def expected_id(self) -> bytes: ...
-        @property
-        def reprepared_id(self) -> bytes: ...
-        def __init__(self, statement: str, expected_id: bytes, reprepared_id: bytes) -> None: ...
-
 class RequestInfo:
     """
     Information about a failed request.
 
     Attributes:
-        error (`RequestAttemptError`): The error with which the request failed
+        error (`RequestFailedError` | `PrepareError` | `SerializationError`): The exception
+            for the failed attempt. It is the same class that `execute` raises
+            for this failure, for example `ReadTimeout`.
 
         is_idempotent (`bool`): A request is idempotent if it can be applied multiple times
             without changing the result of the initial application.
@@ -258,7 +187,7 @@ class RequestInfo:
     """
 
     @property
-    def error(self) -> RequestAttemptError: ...
+    def error(self) -> RequestFailedError | PrepareError | SerializationError: ...
     @property
     def is_idempotent(self) -> bool: ...
     @property

@@ -24,7 +24,7 @@ ParsedData = list[dict[str, Any]]
 
 def _skip_nested_classes_of_bases() -> None:
     # PyO3 enum variants are nested subclasses of their enum
-    # (RequestAttemptError.DbError). autoapi parses a base's nested classes
+    # (RetryDecision.RetrySameTarget). autoapi parses a base's nested classes
     # while collecting inherited members, which recurses forever on them.
     orig_parse_class_body = cast(
         Callable[[Parser, astroid_nodes.ClassDef, bool], dict[str, Any]],
