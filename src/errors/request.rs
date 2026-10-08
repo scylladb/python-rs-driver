@@ -4,13 +4,16 @@
 //! class whichever operation hit it; the operation is only part of the message.
 
 use pyo3::prelude::*;
-use scylla::errors::{BadQuery as RustBadQuery, ExecutionError as RustExecutionError};
+use scylla::errors::{
+    BadQuery as RustBadQuery, ConnectionPoolError as RustConnectionPoolError,
+    ExecutionError as RustExecutionError,
+};
 
 use crate::errors::execution::{DriverPrepareError, DriverUseKeyspaceError};
 use crate::errors::{
-    ExecutionError, MetadataError, NoHostAvailable, OperationTimedOut,
-    PartitionKeyExtractionFailed, SchemaAgreementError, SerializationError,
-    TooManyStatementsInBatch, ValuesTooLongForKey,
+    ConnectionPoolBroken, ConnectionPoolInitializing, ExecutionError, MetadataError,
+    NoHostAvailable, NodeDisabledByHostFilter, OperationTimedOut, PartitionKeyExtractionFailed,
+    SchemaAgreementError, SerializationError, TooManyStatementsInBatch, ValuesTooLongForKey,
 };
 
 /// Maps an `ExecutionError`; `message` is the full description including the failed operation.
@@ -26,9 +29,8 @@ pub(crate) fn execution_error_to_pyerr(
         RustExecutionError::PrepareError(e) => {
             DriverPrepareError::rust_driver_prepare_error(e.clone()).into()
         }
-        RustExecutionError::ConnectionPoolError(_) | RustExecutionError::LastAttemptError(_) => {
-            py_err!(ExecutionError, message)
-        }
+        RustExecutionError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustExecutionError::LastAttemptError(_) => py_err!(ExecutionError, message),
         RustExecutionError::RequestTimeout(timeout) => {
             py_err!(py, OperationTimedOut, message; timeout)
         }
@@ -49,6 +51,18 @@ fn bad_query_to_pyerr(py: Python<'_>, err: &RustBadQuery, message: String) -> Py
         }
         RustBadQuery::TooManyQueriesInBatchStatement(count) => {
             py_err!(py, TooManyStatementsInBatch, message; count)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn connection_pool_error_to_pyerr(err: &RustConnectionPoolError, message: String) -> PyErr {
+    match err {
+        RustConnectionPoolError::Broken { .. } => py_err!(ConnectionPoolBroken, message),
+        RustConnectionPoolError::Initializing => py_err!(ConnectionPoolInitializing, message),
+        RustConnectionPoolError::NodeDisabledByHostFilter => {
+            py_err!(NodeDisabledByHostFilter, message)
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }

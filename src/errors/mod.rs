@@ -56,6 +56,15 @@ create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
 create_exception!(scylla.errors, MetadataError, ExecutionError);
 create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
 
+create_exception!(scylla.errors, ConnectionPoolError, ExecutionError);
+create_exception!(scylla.errors, ConnectionPoolBroken, ConnectionPoolError);
+create_exception!(
+    scylla.errors,
+    ConnectionPoolInitializing,
+    ConnectionPoolError
+);
+create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
+
 create_exception!(scylla.errors, PrepareError, ExecutionError);
 
 /* Other errors */
@@ -185,6 +194,19 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add(
         "SchemaAgreementError",
         py.get_type::<SchemaAgreementError>(),
+    )?;
+    module.add("ConnectionPoolError", py.get_type::<ConnectionPoolError>())?;
+    module.add(
+        "ConnectionPoolBroken",
+        py.get_type::<ConnectionPoolBroken>(),
+    )?;
+    module.add(
+        "ConnectionPoolInitializing",
+        py.get_type::<ConnectionPoolInitializing>(),
+    )?;
+    module.add(
+        "NodeDisabledByHostFilter",
+        py.get_type::<NodeDisabledByHostFilter>(),
     )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
     module.add(
