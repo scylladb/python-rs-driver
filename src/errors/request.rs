@@ -111,7 +111,12 @@ pub(crate) fn request_attempt_error_to_pyerr(
 
 /// Maps a `DbError`; `reason` is the error message sent by the server.
 #[deny(clippy::wildcard_enum_match_arm)]
-fn db_error_to_pyerr(py: Python<'_>, error: &DbError, reason: &str, message: String) -> PyErr {
+pub(crate) fn db_error_to_pyerr(
+    py: Python<'_>,
+    error: &DbError,
+    reason: &str,
+    message: String,
+) -> PyErr {
     let err = match error {
         DbError::SyntaxError => py_err!(CqlSyntaxError, message),
         DbError::Invalid => py_err!(InvalidRequest, message),

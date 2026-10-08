@@ -13,9 +13,9 @@ import logging
 from collections.abc import Iterable
 
 from scylla.cluster import ClusterState, Node
+from scylla.errors import ServerError
 from scylla.policies.load_balancing import RoutingInfo
 from scylla.policies.retry import (
-    DbError,
     RequestAttemptError,
     RequestInfo,
     RetryDecision,
@@ -61,7 +61,7 @@ class SchemaQueriesRetrySession:
         error = request_info.error
         if not (
             isinstance(error, RequestAttemptError.DbError)
-            and isinstance(error.error, DbError.ServerError)
+            and isinstance(error.error, ServerError)
             and error.message == GROUP0_CONFLICT_MESSAGE
         ):
             return RetryDecision.DontRetry()

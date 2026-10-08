@@ -1,6 +1,7 @@
 from enum import IntEnum
 from typing import Protocol, runtime_checkable
 
+from scylla.errors import DatabaseError
 from scylla.statement import Consistency
 
 class WriteType:
@@ -168,225 +169,6 @@ class RetryDecision:
 
         def __init__(self) -> None: ...
 
-class DbError:
-    """An error sent from the database in response to a query."""
-
-    class SyntaxError(DbError):
-        """The submitted query has a syntax error."""
-
-    class Invalid(DbError):
-        """The query is syntactically correct but invalid."""
-
-    class AuthenticationError(DbError):
-        """Authentication failed - bad credentials."""
-
-    class Unauthorized(DbError):
-        """The logged user doesn't have the right to perform the query."""
-
-    class ConfigError(DbError):
-        """The query is invalid because of some configuration issue."""
-
-    class Overloaded(DbError):
-        """The request cannot be processed because the coordinator node is overloaded."""
-
-    class IsBootstrapping(DbError):
-        """The coordinator node is still bootstrapping."""
-
-    class TruncateError(DbError):
-        """Error during truncate operation."""
-
-    class ServerError(DbError):
-        """Internal server error. This indicates a server-side bug."""
-
-    class ProtocolError(DbError):
-        """Invalid protocol message received from the driver."""
-
-    class AlreadyExists(DbError):
-        """
-        Attempted to create a keyspace or a table that was already existing.
-
-        Attributes:
-            keyspace (`str`): Created keyspace name or name of the keyspace in which table was created.
-            table (`str`): Name of the table created, in case of keyspace creation it's an empty string.
-        """
-
-        @property
-        def keyspace(self) -> str: ...
-        @property
-        def table(self) -> str: ...
-        def __init__(self, keyspace: str, table: str) -> None: ...
-
-    class FunctionFailure(DbError):
-        """
-        User defined function failed during execution.
-
-        Attributes:
-            keyspace (`str`): Keyspace of the failed function.
-            function (`str`): Name of the failed function.
-            arg_types (`list[str]`): Types of arguments passed to the function.
-        """
-
-        @property
-        def keyspace(self) -> str: ...
-        @property
-        def function(self) -> str: ...
-        @property
-        def arg_types(self) -> list[str]: ...
-        def __init__(self, keyspace: str, function: str, arg_types: list[str]) -> None: ...
-
-    class Unavailable(DbError):
-        """
-        Not enough nodes are alive to satisfy required consistency level.
-
-        Attributes:
-            consistency (`Consistency`): Consistency level of the query.
-            required (`int`): Number of nodes required to be alive to satisfy required consistency level.
-            alive (`int`): Found number of active nodes.
-        """
-
-        @property
-        def consistency(self) -> Consistency: ...
-        @property
-        def required(self) -> int: ...
-        @property
-        def alive(self) -> int: ...
-        def __init__(self, consistency: Consistency, required: int, alive: int) -> None: ...
-
-    class ReadTimeout(DbError):
-        """
-        Not enough nodes responded to the read request in time to satisfy required consistency level.
-
-        Attributes:
-            consistency (`Consistency`): Consistency level of the query.
-            received (`int`): Number of nodes that responded to the read request.
-            required (`int`): Number of nodes required to respond to satisfy required consistency level.
-            data_present (`bool`): Replica that was asked for data has responded.
-        """
-
-        @property
-        def consistency(self) -> Consistency: ...
-        @property
-        def received(self) -> int: ...
-        @property
-        def required(self) -> int: ...
-        @property
-        def data_present(self) -> bool: ...
-        def __init__(self, consistency: Consistency, received: int, required: int, data_present: bool) -> None: ...
-
-    class WriteTimeout(DbError):
-        """
-        Not enough nodes responded to the write request in time to satisfy required consistency level.
-
-        Attributes:
-            consistency (`Consistency`): Consistency level of the query.
-            received (`int`): Number of nodes that responded to the write request.
-            required (`int`): Number of nodes required to respond to satisfy required consistency level.
-            write_type (`WriteType`): Type of write operation requested.
-        """
-
-        @property
-        def consistency(self) -> Consistency: ...
-        @property
-        def received(self) -> int: ...
-        @property
-        def required(self) -> int: ...
-        @property
-        def write_type(self) -> WriteType: ...
-        def __init__(self, consistency: Consistency, received: int, required: int, write_type: WriteType) -> None: ...
-
-    class ReadFailure(DbError):
-        """
-        A non-timeout error during a read request.
-
-        Attributes:
-            consistency (`Consistency`): Consistency level of the query.
-            received (`int`): Number of nodes that responded to the read request.
-            required (`int`): Number of nodes required to respond to satisfy required consistency level.
-            numfailures (`i32`): Number of nodes that experience a failure while executing the request.
-            data_present: (`bool`): Replica that was asked for data has responded.
-        """
-
-        @property
-        def consistency(self) -> Consistency: ...
-        @property
-        def received(self) -> int: ...
-        @property
-        def required(self) -> int: ...
-        @property
-        def numfailures(self) -> int: ...
-        @property
-        def data_present(self) -> bool: ...
-        def __init__(
-            self, consistency: Consistency, received: int, required: int, numfailures: int, data_present: bool
-        ) -> None: ...
-
-    class WriteFailure(DbError):
-        """
-        A non-timeout error during a write request.
-
-        Attributes:
-            consistency (`Consistency`): Consistency level of the query.
-            received (`int`): Number of nodes that responded to the write request.
-            required (`int`): Number of nodes required to respond to satisfy required consistency level.
-            numfailures (`i32`): Number of nodes that experience a failure while executing the request.
-            write_type (`WriteType`): Type of write operation requested.
-        """
-
-        @property
-        def consistency(self) -> Consistency: ...
-        @property
-        def received(self) -> int: ...
-        @property
-        def required(self) -> int: ...
-        @property
-        def numfailures(self) -> int: ...
-        @property
-        def write_type(self) -> WriteType: ...
-        def __init__(
-            self, consistency: Consistency, received: int, required: int, numfailures: int, write_type: WriteType
-        ) -> None: ...
-
-    class Unprepared(DbError):
-        """
-        Tried to execute a prepared statement that is not prepared. Driver should prepare it again.
-
-        Attributes:
-            statement_id (`bytes`): Statement id of the requested prepared query.
-        """
-
-        @property
-        def statement_id(self) -> bytes: ...
-        def __init__(self, statement_id: bytes) -> None: ...
-
-    class RateLimitReached(DbError):
-        """
-        Rate limit was exceeded for a partition affected by the request.
-
-        Attributes:
-            op_type (`OperationType`): Type of the operation rejected by rate limiting.
-            rejected_by_coordinator (`bool`): Whether the operation was rate limited on the coordinator or not.
-                Writes rejected on the coordinator are guaranteed not to be applied
-                on any replica.
-        """
-
-        @property
-        def op_type(self) -> OperationType: ...
-        @property
-        def rejected_by_coordinator(self) -> bool: ...
-        def __init__(self, op_type: OperationType, rejected_by_coordinator: bool) -> None: ...
-
-    class Other(DbError):
-        """
-        Other error code not specified in the specification.
-
-        Attributes:
-            code (`int`): Code of the error.
-        """
-
-        @property
-        def code(self) -> int: ...
-        def __init__(self, code: int) -> None: ...
-
 class RequestAttemptError:
     """
     An error that occurred during a single attempt of:
@@ -428,13 +210,19 @@ class RequestAttemptError:
     class Unknown(RequestAttemptError): ...
 
     class DbError(RequestAttemptError):
-        """Database sent a response containing some error with a message"""
+        """
+        The database returned an error.
+
+        Attributes:
+            error (`DatabaseError`): The exception for the error code, for example `ReadTimeout`.
+            message (`str`): The error message from the database.
+        """
 
         @property
-        def error(self) -> DbError: ...
+        def error(self) -> DatabaseError: ...
         @property
         def message(self) -> str: ...
-        def __init__(self, error: DbError, message: str) -> None: ...
+        def __init__(self, error: DatabaseError, message: str) -> None: ...
 
     class UnexpectedResponse(RequestAttemptError):
         """Received an unexpected response from the server."""
