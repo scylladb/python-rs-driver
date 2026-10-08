@@ -16,7 +16,6 @@ from scylla.cluster import ClusterState, Node
 from scylla.errors import ServerError
 from scylla.policies.load_balancing import RoutingInfo
 from scylla.policies.retry import (
-    RequestAttemptError,
     RequestInfo,
     RetryDecision,
     RetrySession,
@@ -59,11 +58,7 @@ class SchemaQueriesRetrySession:
 
     def decide_should_retry(self, request_info: RequestInfo) -> RetryDecision:
         error = request_info.error
-        if not (
-            isinstance(error, RequestAttemptError.DbError)
-            and isinstance(error.error, ServerError)
-            and error.message == GROUP0_CONFLICT_MESSAGE
-        ):
+        if not (isinstance(error, ServerError) and error.reason == GROUP0_CONFLICT_MESSAGE):
             return RetryDecision.DontRetry()
 
         self.count += 1
