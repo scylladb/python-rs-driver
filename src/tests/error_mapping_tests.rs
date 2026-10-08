@@ -1,16 +1,21 @@
+use std::sync::Arc;
 use std::time::Duration;
 
-use pyo3::exceptions::PyTimeoutError;
+use pyo3::exceptions::{PyConnectionRefusedError, PyKeyError, PyTimeoutError};
 use pyo3::prelude::*;
 use scylla::deserialize::TypeCheckError;
-use scylla::errors::{DbError, ExecutionError, RequestAttemptError, TracingError};
+use scylla::errors::{
+    ConnectionError, ConnectionPoolError, CustomTranslationError, DbError, ExecutionError,
+    RequestAttemptError, TracingError,
+};
 use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
 
 use crate::errors::request::{execution_error_to_pyerr, tracing_error_to_pyerr};
 use crate::errors::{
-    AlreadyExists, DatabaseError, OperationTimedOut, ReadTimeout, ResponseParseError,
-    SerializeFailedError, TraceUnavailable, Unavailable,
+    AddressTranslationFailed, AlreadyExists, ConnectionPoolBroken, DatabaseError,
+    OperationTimedOut, ReadTimeout, ResponseParseError, SerializeFailedError, TraceUnavailable,
+    Unavailable,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -131,6 +136,38 @@ fn unreadable_trace_rows_raise_response_parse_error() {
         assert!(err.is_instance_of::<ResponseParseError>(py));
         // Retrying does not help, so it must not look like a trace that is not there yet.
         assert!(!err.is_instance_of::<TraceUnavailable>(py));
+    });
+}
+
+#[test]
+fn translator_exception_is_the_cause() {
+    Python::initialize();
+    let raised = PyKeyError::new_err("10.0.0.5");
+    let err = ExecutionError::ConnectionPoolError(ConnectionPoolError::Broken {
+        last_connection_error: ConnectionError::TranslationError(
+            CustomTranslationError::new(raised).into(),
+        ),
+    });
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<AddressTranslationFailed>(py));
+        let cause = err.cause(py).expect("translator exception is the cause");
+        assert!(cause.is_instance_of::<PyKeyError>(py));
+    });
+}
+
+#[test]
+fn refused_connection_is_the_cause_of_broken_pool() {
+    Python::initialize();
+    let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+    let err = ExecutionError::ConnectionPoolError(ConnectionPoolError::Broken {
+        last_connection_error: ConnectionError::IoError(Arc::new(refused)),
+    });
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<ConnectionPoolBroken>(py));
+        let cause = err.cause(py).expect("I/O error is the cause");
+        assert!(cause.is_instance_of::<PyConnectionRefusedError>(py));
     });
 }
 

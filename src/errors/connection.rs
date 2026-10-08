@@ -3,6 +3,7 @@
 use pyo3::prelude::*;
 use scylla::errors::{
     ConnectionError, ConnectionSetupRequestError, ConnectionSetupRequestErrorKind, DbError,
+    TranslationError,
 };
 
 use crate::errors::{
@@ -19,16 +20,40 @@ pub(crate) fn pool_broken_to_pyerr(
 ) -> PyErr {
     match err {
         ConnectionError::ConnectTimeout => py_err!(ConnectTimeout, message),
-        ConnectionError::TranslationError(_) => py_err!(AddressTranslationFailed, message),
+        ConnectionError::TranslationError(e) => translation_error_to_pyerr(py, e, message),
         ConnectionError::BrokenConnection(_) => py_err!(ConnectionLost, message),
         ConnectionError::ConnectionSetupRequestError(e) => {
             setup_request_error_to_pyerr(py, e, message)
         }
-        ConnectionError::IoError(_) | ConnectionError::NoSourcePortForShard(_) => {
+        ConnectionError::IoError(e) => {
+            let exc = py_err!(ConnectionPoolBroken, message);
+            exc.set_cause(py, Some(io_error_to_pyerr(e)));
+            exc
+        }
+        ConnectionError::NoSourcePortForShard(_) | ConnectionError::UseKeyspaceError(_) => {
             py_err!(ConnectionPoolBroken, message)
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
+}
+
+/// The `OSError` subclass for the error kind, e.g. `ConnectionRefusedError`; the driver shares the error, so it is rebuilt.
+fn io_error_to_pyerr(err: &std::io::Error) -> PyErr {
+    PyErr::from(std::io::Error::new(err.kind(), err.to_string()))
+}
+
+/// Keeps the exception raised by a Python `AddressTranslator`, or the I/O error, as the cause.
+fn translation_error_to_pyerr(py: Python<'_>, err: &TranslationError, message: String) -> PyErr {
+    let exc = py_err!(AddressTranslationFailed, message);
+    let cause = match err {
+        TranslationError::Custom(custom) => custom
+            .downcast_ref::<PyErr>()
+            .map(|cause| cause.clone_ref(py)),
+        TranslationError::IoError(e) => Some(io_error_to_pyerr(e)),
+        _ => None,
+    };
+    exc.set_cause(py, cause);
+    exc
 }
 
 /// A request the driver sends while opening a connection (STARTUP, AUTH_RESPONSE, ...) failed.
