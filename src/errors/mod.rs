@@ -66,6 +66,17 @@ create_exception!(
 create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
 
 create_exception!(scylla.errors, PrepareError, ExecutionError);
+create_exception!(scylla.errors, RepreparedIdChanged, PrepareError);
+create_exception!(scylla.errors, RepreparedIdMissingInBatch, PrepareError);
+
+create_exception!(scylla.errors, RequestFailedError, ExecutionError);
+create_exception!(scylla.errors, BrokenConnection, RequestFailedError);
+create_exception!(scylla.errors, ConnectionBusy, RequestFailedError);
+create_exception!(scylla.errors, NonfinishedPagingState, RequestFailedError);
+create_exception!(scylla.errors, ProtocolError, RequestFailedError);
+create_exception!(scylla.errors, ResponseParseError, ProtocolError);
+create_exception!(scylla.errors, RequestSerializationError, ProtocolError);
+create_exception!(scylla.errors, UnexpectedResponse, ProtocolError);
 
 /* Other errors */
 
@@ -209,11 +220,29 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<NodeDisabledByHostFilter>(),
     )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
+    module.add("RepreparedIdChanged", py.get_type::<RepreparedIdChanged>())?;
+    module.add(
+        "RepreparedIdMissingInBatch",
+        py.get_type::<RepreparedIdMissingInBatch>(),
+    )?;
+    module.add("RequestFailedError", py.get_type::<RequestFailedError>())?;
+    module.add("BrokenConnection", py.get_type::<BrokenConnection>())?;
+    module.add("ConnectionBusy", py.get_type::<ConnectionBusy>())?;
+    module.add(
+        "NonfinishedPagingState",
+        py.get_type::<NonfinishedPagingState>(),
+    )?;
+    module.add("ProtocolError", py.get_type::<ProtocolError>())?;
+    module.add("ResponseParseError", py.get_type::<ResponseParseError>())?;
+    module.add(
+        "RequestSerializationError",
+        py.get_type::<RequestSerializationError>(),
+    )?;
+    module.add("UnexpectedResponse", py.get_type::<UnexpectedResponse>())?;
     module.add(
         "MetadataRefreshError",
         py.get_type::<MetadataRefreshError>(),
     )?;
-    module.add("RowFactoryError", py.get_type::<RowFactoryError>())?;
     module.add(
         "StatementConfigError",
         py.get_type::<StatementConfigError>(),
@@ -265,6 +294,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     )?;
     module.add("HostFilterError", py.get_type::<HostFilterError>())?;
     module.add("TlsError", py.get_type::<TlsError>())?;
+    module.add("RowFactoryError", py.get_type::<RowFactoryError>())?;
     module.add(
         "LoadBalancingPolicyError",
         py.get_type::<LoadBalancingPolicyError>(),

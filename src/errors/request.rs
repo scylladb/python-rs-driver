@@ -6,14 +6,17 @@
 use pyo3::prelude::*;
 use scylla::errors::{
     BadQuery as RustBadQuery, ConnectionPoolError as RustConnectionPoolError,
-    ExecutionError as RustExecutionError,
+    ExecutionError as RustExecutionError, RequestAttemptError,
 };
 
 use crate::errors::execution::{DriverPrepareError, DriverUseKeyspaceError};
 use crate::errors::{
-    ConnectionPoolBroken, ConnectionPoolInitializing, ExecutionError, MetadataError,
-    NoHostAvailable, NodeDisabledByHostFilter, OperationTimedOut, PartitionKeyExtractionFailed,
-    SchemaAgreementError, SerializationError, TooManyStatementsInBatch, ValuesTooLongForKey,
+    BrokenConnection, ConnectionBusy, ConnectionPoolBroken, ConnectionPoolInitializing,
+    MetadataError, NoHostAvailable, NodeDisabledByHostFilter, NonfinishedPagingState,
+    OperationTimedOut, PartitionKeyExtractionFailed, RepreparedIdChanged,
+    RepreparedIdMissingInBatch, RequestFailedError, RequestSerializationError, ResponseParseError,
+    SchemaAgreementError, SerializationError, TooManyStatementsInBatch, UnexpectedResponse,
+    ValuesTooLongForKey,
 };
 
 /// Maps an `ExecutionError`; `message` is the full description including the failed operation.
@@ -30,7 +33,7 @@ pub(crate) fn execution_error_to_pyerr(
             DriverPrepareError::rust_driver_prepare_error(e.clone()).into()
         }
         RustExecutionError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
-        RustExecutionError::LastAttemptError(_) => py_err!(ExecutionError, message),
+        RustExecutionError::LastAttemptError(e) => request_attempt_error_to_pyerr(py, e, message),
         RustExecutionError::RequestTimeout(timeout) => {
             py_err!(py, OperationTimedOut, message; timeout)
         }
@@ -64,6 +67,39 @@ fn connection_pool_error_to_pyerr(err: &RustConnectionPoolError, message: String
         RustConnectionPoolError::NodeDisabledByHostFilter => {
             py_err!(NodeDisabledByHostFilter, message)
         }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+pub(crate) fn request_attempt_error_to_pyerr(
+    py: Python<'_>,
+    err: &RequestAttemptError,
+    message: String,
+) -> PyErr {
+    match err {
+        RequestAttemptError::SerializationError(_) => py_err!(SerializationError, message),
+        RequestAttemptError::CqlRequestSerialization(_) => {
+            py_err!(RequestSerializationError, message)
+        }
+        RequestAttemptError::UnableToAllocStreamId => py_err!(ConnectionBusy, message),
+        RequestAttemptError::BrokenConnectionError(_) => py_err!(BrokenConnection, message),
+        RequestAttemptError::BodyExtensionsParseError(_)
+        | RequestAttemptError::CqlResultParseError(_)
+        | RequestAttemptError::CqlErrorParseError(_) => py_err!(ResponseParseError, message),
+        RequestAttemptError::DbError(..) => py_err!(RequestFailedError, message),
+        RequestAttemptError::UnexpectedResponse(response_kind) => {
+            py_err!(py, UnexpectedResponse, message; response_kind)
+        }
+        RequestAttemptError::RepreparedIdChanged {
+            statement,
+            expected_id,
+            reprepared_id,
+        } => py_err!(py, RepreparedIdChanged, message; statement, expected_id, reprepared_id),
+        RequestAttemptError::RepreparedIdMissingInBatch => {
+            py_err!(RepreparedIdMissingInBatch, message)
+        }
+        RequestAttemptError::NonfinishedPagingState => py_err!(NonfinishedPagingState, message),
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }
