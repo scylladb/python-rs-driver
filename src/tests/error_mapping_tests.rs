@@ -3,10 +3,14 @@ use std::time::Duration;
 use pyo3::exceptions::PyTimeoutError;
 use pyo3::prelude::*;
 use scylla::errors::{DbError, ExecutionError, RequestAttemptError};
+use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
 
 use crate::errors::request::execution_error_to_pyerr;
-use crate::errors::{AlreadyExists, DatabaseError, OperationTimedOut, ReadTimeout, Unavailable};
+use crate::errors::{
+    AlreadyExists, DatabaseError, OperationTimedOut, ReadTimeout, SerializeFailedError, Unavailable,
+};
+use crate::serialize::error::serialization_error_to_pyerr;
 
 fn db_error(py: Python<'_>, error: DbError) -> PyErr {
     let err = ExecutionError::LastAttemptError(RequestAttemptError::DbError(
@@ -92,5 +96,16 @@ fn request_timeout_is_a_timedelta() {
             attr::<Duration>(py, &err, "timeout"),
             Duration::from_millis(1500)
         );
+    });
+}
+
+#[test]
+fn unlocated_serialization_failure_has_none_parameter() {
+    Python::initialize();
+    let err = SerializationError::new(std::fmt::Error);
+    Python::attach(|py| {
+        let err = serialization_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<SerializeFailedError>(py));
+        assert!(err.value(py).getattr("parameter").unwrap().is_none());
     });
 }

@@ -109,3 +109,5 @@ macro_rules! py_err {
         )
     };
 }
+
+pub(crate) use py_err;
