@@ -276,11 +276,57 @@ class AddressTranslationFailed(ConnectionPoolBroken, AddressTranslationError): .
 class ConnectionLost(ConnectionPoolBroken):
     kind: BrokenConnectionKind | None
 
-class ConnectionSetupFailed(ConnectionPoolBroken):
-    request_kind: CqlRequestKind
-    reason: str | None
+class ConnectionSetupErrorKind(IntEnum):
+    """Why a request failed while the driver opened a connection."""
 
-class ConnectionAuthenticationFailed(ConnectionSetupFailed): ...
+    RequestSerializationError = ...
+    """The driver could not serialize the request."""
+
+    BodyExtensionsParseError = ...
+    """The driver could not parse the extensions of the response body."""
+
+    ConnectionBusy = ...
+    """No stream id was free on the connection."""
+
+    DatabaseError = ...
+    """The node returned an error, for example because it rejected the credentials.
+    `__cause__` is the `DatabaseError` subclass for that error, for example `AuthenticationFailed`."""
+
+    UnexpectedResponse = ...
+    """The node sent a response of the wrong type."""
+
+    SupportedResponseParseError = ...
+    """The driver could not parse the SUPPORTED response."""
+
+    AuthenticateResponseParseError = ...
+    """The driver could not parse the AUTHENTICATE response."""
+
+    AuthSuccessResponseParseError = ...
+    """The driver could not parse the AUTH_SUCCESS response."""
+
+    AuthChallengeResponseParseError = ...
+    """The driver could not parse the AUTH_CHALLENGE response."""
+
+    ErrorResponseParseError = ...
+    """The driver could not parse the ERROR response."""
+
+class ConnectionSetupFailed(ConnectionPoolBroken):
+    """A request failed while the driver opened a connection to a node.
+
+    To open a connection, the driver sends its own requests, for example `STARTUP`.
+    `request_kind` tells which one failed, and `kind` tells why.
+
+    Your request was not sent, so this is not a `RequestFailedError`.
+    """
+
+    request_kind: CqlRequestKind
+    kind: ConnectionSetupErrorKind
+
+class ConnectionAuthenticationFailed(ConnectionPoolBroken):
+    """No authenticator is set, or the authenticator raised, while the driver opened a connection."""
+
+    request_kind: CqlRequestKind
+
 class RequestFailedError(ExecutionError): ...
 class PrepareError(ExecutionError): ...
 class PreparedStatementIdsMismatch(PrepareError): ...

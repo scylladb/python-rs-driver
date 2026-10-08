@@ -172,7 +172,7 @@ async def test_custom_authenticator_failing_python_side(ccm_contact_points: list
         await builder.connect()
 
     assert "Python Authentication Exploded" in str(excinfo.value)
-    assert excinfo.value.reason is None
+    assert excinfo.value.__cause__ is None
 
 
 @pytest.mark.asyncio
@@ -803,15 +803,24 @@ async def test_connect_to_unreachable_address_times_out():
 
 @pytest.mark.parametrize(
     "pool_class",
-    [ConnectTimeout, AddressTranslationFailed, ConnectionLost, ConnectionSetupFailed],
+    [
+        ConnectTimeout,
+        AddressTranslationFailed,
+        ConnectionLost,
+        ConnectionSetupFailed,
+        ConnectionAuthenticationFailed,
+    ],
 )
 def test_pool_failures_are_broken_pool_errors(pool_class: type):
     assert issubclass(pool_class, ConnectionPoolBroken)
 
 
 def test_connection_class_bases():
-    assert issubclass(ConnectionAuthenticationFailed, ConnectionSetupFailed)
-    # Covers client-side failures too, so it is not the server's AuthenticationFailed.
+    # Auth failures have no `ConnectionSetupFailed.kind`, so they are not a subclass of it.
+    assert not issubclass(ConnectionAuthenticationFailed, ConnectionSetupFailed)
+    # The request of the user was not sent, so it is not a `RequestFailedError`.
+    assert not issubclass(ConnectionSetupFailed, RequestFailedError)
+    # Covers only client-side failures, so it is not the server's AuthenticationFailed.
     assert not issubclass(ConnectionAuthenticationFailed, AuthenticationFailed)
     assert issubclass(AddressTranslationFailed, AddressTranslationError)
     # A lost pool connection sent nothing, a broken request connection sent the request.

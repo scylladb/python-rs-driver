@@ -14,7 +14,7 @@ pub(crate) mod request;
 pub(crate) mod types;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
-pub(crate) use connection::PyBrokenConnectionKind;
+pub(crate) use connection::{PyBrokenConnectionKind, PyConnectionSetupErrorKind};
 pub(crate) use macros::py_err;
 
 /* Python exception classes */
@@ -146,7 +146,7 @@ create_exception!(scylla.errors, ConnectionSetupFailed, ConnectionPoolBroken);
 create_exception!(
     scylla.errors,
     ConnectionAuthenticationFailed,
-    ConnectionSetupFailed
+    ConnectionPoolBroken
 );
 
 create_exception!(scylla.errors, RequestFailedError, ExecutionError);
@@ -332,6 +332,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "ConnectionSetupFailed",
         py.get_type::<ConnectionSetupFailed>(),
     )?;
+    module.add_class::<PyConnectionSetupErrorKind>()?;
     module.add(
         "ConnectionAuthenticationFailed",
         py.get_type::<ConnectionAuthenticationFailed>(),
