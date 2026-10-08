@@ -1,5 +1,5 @@
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyValueError};
+use pyo3::exceptions::{PyException, PyTimeoutError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -47,6 +47,12 @@ create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
 /* Failures while executing a request */
 
 create_exception!(scylla.errors, ExecutionError, ScyllaError);
+create_exception_multi!(
+    scylla.errors,
+    OperationTimedOut,
+    (ExecutionError, PyTimeoutError)
+);
+create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
 create_exception!(scylla.errors, MetadataError, ExecutionError);
 create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
 
@@ -173,6 +179,8 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<PagingStateNotAllowed>(),
     )?;
     module.add("ExecutionError", py.get_type::<ExecutionError>())?;
+    module.add("OperationTimedOut", py.get_type::<OperationTimedOut>())?;
+    module.add("NoHostAvailable", py.get_type::<NoHostAvailable>())?;
     module.add("MetadataError", py.get_type::<MetadataError>())?;
     module.add(
         "SchemaAgreementError",
