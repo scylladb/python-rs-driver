@@ -8,7 +8,7 @@ import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import connect
 from scylla.cluster import ClusterState, Node
-from scylla.errors import ExecuteError
+from scylla.errors import ExecutionError
 from scylla.policies.load_balancing import RoutingInfo
 from scylla.routing import Shard
 from scylla.session import Session
@@ -84,7 +84,7 @@ async def test_pinning_replaces_the_load_balancing_policy(session: Session) -> N
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 async def test_pinning_to_an_unknown_host_id_fails(session: Session) -> None:
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await session.execute(COORDINATOR_QUERY, target=uuid.uuid4())
 
 
@@ -108,5 +108,5 @@ async def test_batch_pinning_replaces_the_load_balancing_policy(session: Session
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 async def test_batch_pinning_to_an_unknown_host_id_fails(session: Session) -> None:
-    with pytest.raises(ExecuteError):
+    with pytest.raises(ExecutionError):
         await session.batch(insert_batch(2), target=uuid.uuid4())
