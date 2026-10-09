@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 mod tests;
 
 use crate::deserialize::value;
-use deserialize::results;
 use pyo3::prelude::*;
 use pyo3::sync::OnceExt;
 use pyo3::wrap_pyfunction;
@@ -24,6 +23,7 @@ mod errors;
 mod execution_profile;
 mod future;
 mod policies;
+mod results;
 mod routing;
 mod serialize;
 mod session;
@@ -56,6 +56,15 @@ pub(crate) static RUNTIME: LazyLock<DriverRuntime> = LazyLock::new(|| {
         runtime: Mutex::new(Some(runtime)),
     }
 });
+
+/// Where a task runs relative to the future that awaits it.
+#[derive(Clone, Copy)]
+pub(crate) enum TaskExecutionMode {
+    /// On a runtime worker, for futures polled from a Python thread.
+    SpawnOnRuntime,
+    /// In the awaiting future, for futures already running on the runtime.
+    Inline,
+}
 
 impl DriverRuntime {
     pub(crate) fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>

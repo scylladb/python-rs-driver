@@ -145,68 +145,87 @@ class PagingState:
 
     def __eq__(self, other: object) -> bool: ...
 
-class RequestResult:
+class Page:
     """
-    Immutable result of a query execution.
+    A single page of a query result.
+
+    Immutable: iterating it yields only this page's rows and never fetches
+    another page, and `fetch_next_page()` returns a new `Page`.
     """
 
-    def has_more_pages(self) -> bool:
-        """
-        Returns True if more pages are available.
-        """
-
+    def __iter__(self) -> SinglePageIterator: ...
+    @property
     def paging_state(self) -> PagingState | None:
         """
-        Returns current paging state. Can be `None` if there are no more pages available.
+        Paging state that resumes the query after this page, or `None` if this
+        is the last page.
         """
 
-    def fetch_next_page(self) -> DriverFuture[RequestResult | None]:
+    @property
+    def has_more_pages(self) -> bool:
         """
-        Fetches the next page if available.
+        `True` if there is a page after this one.
+        """
 
-        Returns a new RequestResult with the next page's data if more pages
-        are available. Returns None if no more pages exist.
+    def fetch_next_page(self) -> DriverFuture[Page | None]:
+        """
+        Fetches the page after this one.
 
         Returns
         -------
-        DriverFuture[RequestResult | None]
-            A future resolving to the next page data, or None if no more pages.
+        DriverFuture[Page | None]
+            A future resolving to the next page, or `None` if this is the last page.
         """
 
-    def iter_current_page(self) -> SinglePageIterator:
+class RequestResult:
+    """
+    Result of a whole query, across all of its pages.
+
+    Returned only by `execute()` and `batch()`, so it always starts at the
+    query's first page (or at the `paging_state` passed to `execute()`).
+    Every way of consuming it starts from that page.
+    """
+
+    def __aiter__(self) -> AsyncRowsIterator:
         """
-        Returns an iterator over rows in the current page.
+        Iterates over every row of the result, fetching pages as needed.
         """
 
-    def __aiter__(self) -> AsyncRowsIterator: ...
     def first_row(self) -> DriverFuture[Any | None]:
         """
-        Returns a future resolving to the first row starting from the current state.
+        Returns a future resolving to the first row of the result.
 
-        Fetches the first available row from the current page onwards,
-        automatically retrieving additional pages as needed. This method
-        does not modify the RequestResult object. Returns None if no more
-        rows are available.
+        Fetches further pages as needed when the leading pages are empty.
 
         Returns
         -------
         DriverFuture[Any | None]
-            A future resolving to the first row, or None if no more rows exist.
+            A future resolving to the first row, or None if the result has no rows.
         """
 
     def all(self) -> DriverFuture[list[Any]]:
         """
-        Return a future resolving to all rows of the result set as a list.
+        Return a future resolving to all rows of the result as a list.
 
-        This method eagerly fetches all remaining pages and materializes
-        the entire result set in memory. It should be used with care
-        for large queries.
+        This method eagerly fetches all pages and materializes the entire
+        result in memory. It should be used with care for large queries.
         """
 
     @property
-    def columns(self) -> tuple[ColumnSpec, ...]:
+    def first_page(self) -> Page:
         """
-        Specifications of the columns in this result.
+        The first page of the result, already fetched by `execute()`.
+        """
+
+    def pages(self) -> AsyncPagesIterator:
+        """
+        Iterates over the pages of the result, starting with `first_page`.
+        """
+
+    @property
+    def first_page_columns(self) -> tuple[ColumnSpec, ...]:
+        """
+        Specifications of the columns of the first page.
 
         Empty for a result that carries no rows, such as an ``INSERT``.
         """
@@ -221,3 +240,11 @@ class AsyncRowsIterator(AsyncIterator[Any]):
 
     def __aiter__(self) -> AsyncRowsIterator: ...
     def __anext__(self) -> DriverFuture[Any]: ...
+
+class AsyncPagesIterator(AsyncIterator[Page]):
+    """
+    Async iterator over the pages of a result, starting with the first page.
+    """
+
+    def __aiter__(self) -> AsyncPagesIterator: ...
+    def __anext__(self) -> DriverFuture[Page]: ...

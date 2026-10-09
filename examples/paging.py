@@ -5,7 +5,7 @@ Example showcasing multiple ways to consume ScyllaDB query results with the new 
 
 This file demonstrates:
   1) Simple async iteration over all rows (auto-paging under the hood)
-  2) Manual paging: iter_current_page() + fetch_next_page()
+  2) Manual paging: first_page + Page.fetch_next_page(), or pages()
   3) Manual paging with explicit PagingState resume
   4) Convenience helpers: first_row() and all()
   5) Built-in row factories and custom row shaping
@@ -16,7 +16,7 @@ import asyncio
 import os
 from typing import Any
 
-from scylla.results import ColumnSpec, DictRowFactory, RowBuilder, RowFactory, TupleRowFactory
+from scylla.results import ColumnSpec, DictRowFactory, Page, RowBuilder, RowFactory, TupleRowFactory
 from scylla.session import Session, SessionBuilder
 from scylla.statement import Statement
 
@@ -69,7 +69,7 @@ async def example_async_for(session: Session) -> None:
 
 
 # ----------------------------
-# 2) Manual paging loop: iter_current_page() + fetch_next_page()
+# 2) Manual paging: first_page + Page.fetch_next_page(), or pages()
 # ----------------------------
 async def example_manual_paging_unprepared(session: Session) -> None:
     print("\n=== 2) Manual paging (unprepared Statement) ===")
@@ -78,25 +78,16 @@ async def example_manual_paging_unprepared(session: Session) -> None:
     stmt.page_size = 6
     result = await session.execute(stmt)
 
+    # A Page never changes: fetch_next_page() returns a new Page, or None after the last one.
+    page: Page | None = result.first_page
     page_no = 1
-    while True:
-        # Consume only the *current* page:
-        page_rows: list[Any] = list(result.iter_current_page())
+    while page is not None:
+        # Iterating a page yields only its own rows and never fetches:
+        page_rows: list[Any] = list(page)
 
         print(f"page {page_no}: {len(page_rows)} rows -> {page_rows}")
 
-        if not result.has_more_pages():
-            break
-
-        # Fetch the next page (returns a new RequestResult):
-        next_result = await result.fetch_next_page()
-
-        # `fetch_next_page()` returning None is an alternative way of detecting
-        # that there are no more pages. In this example we already checked
-        # `has_more_pages()`, so None here would indicate an inconsistent state.
-        assert next_result is not None
-
-        result = next_result
+        page = await page.fetch_next_page()
         page_no += 1
 
 
@@ -109,24 +100,11 @@ async def example_manual_paging_prepared(session: Session) -> None:
 
     result = await session.execute(prepared)
 
+    # pages() walks the same pages, starting with first_page:
     page_no = 1
-    while True:
-        # Consume only the *current* page of size 7 except maybe the last one:
-        page_rows = list(result.iter_current_page())
-        print(f"page {page_no}: {len(page_rows)} rows")
-
-        if not result.has_more_pages():
-            break
-
-        # Fetch the next page (returns a new RequestResult):
-        next_result = await result.fetch_next_page()
-
-        # `fetch_next_page()` returning None is an alternative way of detecting
-        # that there are no more pages. In this example we already checked
-        # `has_more_pages()`, so None here would indicate an inconsistent state.
-        assert next_result is not None
-
-        result = next_result
+    async for page in result.pages():
+        # Each page holds 7 rows, except maybe the last one:
+        print(f"page {page_no}: {len(list(page))} rows")
         page_no += 1
 
 
@@ -145,11 +123,11 @@ async def example_paging_state_resume(session: Session) -> None:
     seen_rows: list[Any] = []
 
     while True:
-        page = list(result.iter_current_page())
+        page = list(result.first_page)
         print(f"page size={len(page)}")
         seen_rows.extend(row for row in page)
 
-        state = result.paging_state()
+        state = result.first_page.paging_state
 
         # Check if more pages are available via paging state. If None, no more pages.
         if state is None:
@@ -177,7 +155,8 @@ async def example_first_row_and_all(session: Session) -> None:
     one = await result.first_row()
     print(f"first_row() -> {one}")
 
-    # all(): eagerly fetches all remaining pages and materializes into a list
+    # all(): eagerly fetches all pages and materializes into a list; it always
+    # starts from the first page, so calling it after first_row() still returns every row
     rows = await result.all()
     print(f"all() -> {len(rows)} rows")
 

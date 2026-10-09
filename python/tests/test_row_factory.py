@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import CONTACT_POINTS, session_builder
-from scylla.errors import RowFactoryError, RowIterationError
+from scylla.errors import ExecuteError, RowFactoryError, RowIterationError
 from scylla.results import (
     ClassRowFactory,
     ColumnSpec,
@@ -211,6 +211,29 @@ async def test_class_row_factory_passes_column_names_as_keywords(session: Sessio
     assert await result.first_row() == User(id=1, name="alice")
 
 
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_factory_applies_to_unpaged_execution(session: Session, users: str):
+    result = await session.execute(f"SELECT id, name FROM {users}", factory=TupleRowFactory(), paged=False)
+
+    assert await result.first_row() == (1, "alice")
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_factory_is_not_prepared_for_results_without_rows(session: Session, users: str):
+    factory = JoinedRowFactory()
+    batch = Batch()
+    batch.add(f"INSERT INTO {users} (id, name) VALUES (2, 'bob')")
+
+    insert = await session.execute(f"INSERT INTO {users} (id, name) VALUES (3, 'carol')", factory=factory)
+    batched = await session.batch(batch, factory=factory)
+
+    assert await insert.first_row() is None
+    assert await batched.all() == []
+    assert factory.prepared == 0
+
+
 # ---------------------------------------------------------------------------
 # `prepare` on the built-in factories
 # ---------------------------------------------------------------------------
@@ -259,7 +282,7 @@ async def test_builtin_prepare_builds_what_the_driver_builds(session: Session, u
     result = await session.execute(query, factory=factory)
     values = await (await session.execute(query, factory=TupleRowFactory())).first_row()
 
-    row = factory.prepare(result.columns)(values)
+    row = factory.prepare(result.first_page_columns)(values)
     expected = await result.first_row()
 
     assert row == expected
@@ -283,7 +306,7 @@ async def test_custom_factory_can_delegate_to_a_builtin(session: Session, users:
 @pytest.mark.requires_db
 async def test_builtin_builder_rejects_a_wrong_number_of_values(session: Session, users: str):
     result = await session.execute(f"SELECT id, name FROM {users}")
-    build = NamedTupleRowFactory().prepare(result.columns)
+    build = NamedTupleRowFactory().prepare(result.first_page_columns)
 
     with pytest.raises(ValueError, match="expected 2 column values, got 1"):
         build((1,))
@@ -315,17 +338,17 @@ async def read_all_rows(result: RequestResult, mode: str) -> list[Any]:
     if mode == "async-for":
         return [row async for row in result]
 
-    rows = list(result.iter_current_page())
-    page = await result.fetch_next_page()
+    rows = list(result.first_page)
+    page = await result.first_page.fetch_next_page()
     while page is not None:
-        rows.extend(page.iter_current_page())
+        rows.extend(page)
         page = await page.fetch_next_page()
     return rows
 
 
 async def count_pages(session: Session, statement: Statement) -> int:
     pages = 1
-    page = await (await session.execute(statement)).fetch_next_page()
+    page = await (await session.execute(statement)).first_page.fetch_next_page()
     while page is not None:
         pages += 1
         page = await page.fetch_next_page()
@@ -370,18 +393,72 @@ async def test_all_wraps_prepare_errors_of_later_pages(session: Session, paged_t
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+async def test_async_iteration_ends_after_error_on_later_page(session: Session, paged_table: str):
+    statement = Statement(f"SELECT id, ck FROM {paged_table}")
+    statement.page_size = 2
+    rows = aiter(await session.execute(statement, factory=FailsOnSecondPage()))
+
+    assert await anext(rows) == "id=0|ck=0"
+    assert await anext(rows) == "id=0|ck=1"
+    with pytest.raises(RowIterationError):
+        await anext(rows)
+    with pytest.raises(StopAsyncIteration):
+        await anext(rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_pages_ends_after_error_on_later_page(session: Session, paged_table: str):
+    statement = Statement(f"SELECT id, ck FROM {paged_table}")
+    statement.page_size = 2
+    pages = aiter((await session.execute(statement, factory=FailsOnSecondPage())).pages())
+
+    assert list(await anext(pages)) == ["id=0|ck=0", "id=0|ck=1"]
+    with pytest.raises(ExecuteError) as exc_info:
+        await anext(pages)
+    assert isinstance(exc_info.value.__cause__, ValueError)
+    with pytest.raises(StopAsyncIteration):
+        await anext(pages)
+
+
+class FailsOnSecondRow(RowFactory):
+    def prepare(self, columns: tuple[ColumnSpec, ...]) -> RowBuilder:
+        def build(values: tuple[Any, ...]) -> Any:
+            if values[1] == 1:
+                raise ValueError("build failed")
+            return values
+
+        return build
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_async_iteration_ends_after_error_within_page(session: Session, paged_table: str):
+    statement = Statement(f"SELECT id, ck FROM {paged_table}")
+    statement.page_size = 10
+    rows = aiter(await session.execute(statement, factory=FailsOnSecondRow()))
+
+    assert await anext(rows) == (0, 0)
+    with pytest.raises(RowIterationError):
+        await anext(rows)
+    with pytest.raises(StopAsyncIteration):
+        await anext(rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_fetch_next_page_follows_columns_added_between_pages(session: Session, paged_table: str):
     statement = Statement(f"SELECT * FROM {paged_table}")
     statement.page_size = 2
     result = await session.execute(statement, factory=DictRowFactory())
-    assert list(result.iter_current_page()) == [{"id": 0, "ck": 0, "b": 0}, {"id": 0, "ck": 1, "b": 1}]
+    assert list(result.first_page) == [{"id": 0, "ck": 0, "b": 0}, {"id": 0, "ck": 1, "b": 1}]
 
     # Regular columns are ordered by name, so `a` lands before `b`.
     await ddl(session, f"ALTER TABLE {paged_table} ADD a int")
-    next_page = await result.fetch_next_page()
+    next_page = await result.first_page.fetch_next_page()
 
     assert next_page is not None
-    assert list(next_page.iter_current_page()) == [
+    assert list(next_page) == [
         {"id": 0, "ck": 2, "a": None, "b": 2},
         {"id": 0, "ck": 3, "a": None, "b": 3},
     ]
@@ -403,6 +480,24 @@ async def test_async_iteration_follows_columns_added_between_pages(session: Sess
     assert rows[1]._fields == ("id", "ck", "b")
     assert rows[2]._fields == ("id", "ck", "a", "b")
     assert rows[2] == (0, 2, None, 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_prepared_statement_follows_columns_added_between_pages(session: Session, paged_table: str):
+    prepared = await session.prepare(f"SELECT * FROM {paged_table}")
+    prepared.page_size = 2
+    result = await session.execute(prepared, factory=DictRowFactory())
+    assert list(result.first_page) == [{"id": 0, "ck": 0, "b": 0}, {"id": 0, "ck": 1, "b": 1}]
+
+    await ddl(session, f"ALTER TABLE {paged_table} ADD a int")
+    next_page = await result.first_page.fetch_next_page()
+
+    assert next_page is not None
+    assert list(next_page) == [
+        {"id": 0, "ck": 2, "a": None, "b": 2},
+        {"id": 0, "ck": 3, "a": None, "b": 3},
+    ]
 
 
 # ---------------------------------------------------------------------------

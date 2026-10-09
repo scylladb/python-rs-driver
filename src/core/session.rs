@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
@@ -13,7 +12,6 @@ use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 use scylla_cql::serialize::row::SerializedValues;
 use uuid::Uuid;
 
-use crate::RUNTIME;
 use crate::batch::BatchState;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::{Pager, PendingRequestResult};
@@ -28,6 +26,7 @@ use crate::serialize::value_list::PyValueList;
 use crate::statement::{
     PyPreparedStatement, PyStatement, PyStatementSettings, StatementClass, StatementOptions,
 };
+use crate::{RUNTIME, TaskExecutionMode};
 
 /// Helper performing the core logic of executing queries.
 #[derive(Clone)]
@@ -95,10 +94,7 @@ impl SessionCore {
         paging_state: Option<PagingState>,
         paged: bool,
     ) -> Result<BoxedFuture<PendingRequestResult, DriverExecuteError>, DriverExecuteError> {
-        let ExecutableStatement {
-            kind,
-            row_factory: statement_factory,
-        } = statement;
+        let (kind, statement_factory) = statement.into_parts();
         let effective_factory = self.choose_row_factory(explicit_factory, statement_factory);
 
         let request = if paged {
@@ -248,57 +244,46 @@ impl SessionCore {
         paging_state: PagingState,
         factory: PyRowFactory,
     ) -> Result<PendingRequestResult, DriverExecuteError> {
-        let (result, paging_response) = match &*prepared {
-            BoundStatement::Prepared(p, serialized_values) => self
-                .inner
-                .execute_unstable(p, serialized_values, true, paging_state)
-                .await
-                .map_err(DriverExecuteError::rust_driver_execution_error)?,
-            BoundStatement::Unprepared(q, values) => self
-                .inner
-                .query_single_page(q.clone(), values, paging_state)
-                .await
-                .map_err(DriverExecuteError::rust_driver_execution_error)?,
-        };
+        // Already on the runtime, as `Session.execute` spawns its future there.
+        let (result, paging_response) = fetch_page(
+            Arc::clone(&self.inner),
+            paging_state,
+            Arc::clone(&prepared),
+            TaskExecutionMode::Inline,
+        )
+        .await?;
 
         Ok(PendingRequestResult::new(
             result,
-            Pager::paged(paging_response, self, prepared),
+            Pager::paged(paging_response, self.inner, prepared),
             factory,
         ))
     }
+}
 
-    async fn spawn_on_runtime<F, Fut, R, E>(&self, f: F) -> Result<R, E>
-    where
-        // closure: takes Arc<ScyllaSession> and returns a future
-        F: FnOnce(Arc<Session>) -> Fut + Send + 'static,
-        // for spawn we need Send + 'static
-        Fut: Future<Output = Result<R, E>> + Send + 'static,
-        R: Send + 'static,
-        // Error: Send + 'static, and also convertible from JoinError for better error handling
-        E: From<tokio::task::JoinError> + Send + 'static,
-    {
-        let session_clone = Arc::clone(&self.inner);
-
-        RUNTIME.spawn(async move { f(session_clone).await }).await?
-    }
-
-    pub(crate) async fn execute_single_page(
-        &self,
-        paging_state: PagingState,
-        prepared: Arc<BoundStatement>,
-    ) -> Result<(QueryResult, PagingStateResponse), DriverExecuteError> {
-        self.spawn_on_runtime(async move |s| match &*prepared {
-            BoundStatement::Prepared(p, serialized_values) => s
+/// Requests one page of `prepared`, running it where `mode` says.
+pub(crate) async fn fetch_page(
+    session: Arc<Session>,
+    paging_state: PagingState,
+    prepared: Arc<BoundStatement>,
+    mode: TaskExecutionMode,
+) -> Result<(QueryResult, PagingStateResponse), DriverExecuteError> {
+    let page = async move {
+        match &*prepared {
+            BoundStatement::Prepared(p, serialized_values) => session
                 .execute_unstable(p, serialized_values, true, paging_state)
                 .await
                 .map_err(DriverExecuteError::rust_driver_execution_error),
-            BoundStatement::Unprepared(q, values) => s
+            BoundStatement::Unprepared(q, values) => session
                 .query_single_page(q.clone(), values, paging_state)
                 .await
                 .map_err(DriverExecuteError::rust_driver_execution_error),
-        })
-        .await
+        }
+    };
+
+    match mode {
+        TaskExecutionMode::SpawnOnRuntime => RUNTIME.spawn(page).await?,
+        TaskExecutionMode::Inline => page.await,
     }
 }
 
@@ -344,10 +329,10 @@ impl BoundStatement {
 /// A statement ready to run: the Rust statement, plus the row factory it asks
 /// for.
 pub(crate) struct ExecutableStatement {
-    pub(crate) kind: StatementKind,
+    kind: StatementKind,
     /// What the statement asks for: its own row factory, else its execution
     /// profile's. `None` when it asks for neither.
-    pub(crate) row_factory: Option<PyRowFactory>,
+    row_factory: Option<PyRowFactory>,
 }
 
 pub(crate) enum StatementKind {
@@ -369,6 +354,10 @@ impl StatementKind {
 impl ExecutableStatement {
     pub(crate) fn set_target(&mut self, target: PyTargetPolicy) {
         self.kind.set_target(target);
+    }
+
+    pub(crate) fn into_parts(self) -> (StatementKind, Option<PyRowFactory>) {
+        (self.kind, self.row_factory)
     }
 }
 
@@ -442,7 +431,7 @@ impl<'py> FromPyObject<'_, 'py> for PreparableStatement {
 
 impl From<ExecutableStatement> for BatchStatement {
     fn from(s: ExecutableStatement) -> Self {
-        match s.kind {
+        match s.into_parts().0 {
             StatementKind::Prepared(p) => BatchStatement::PreparedStatement(p),
             StatementKind::Unprepared(q) => BatchStatement::Query(q),
         }

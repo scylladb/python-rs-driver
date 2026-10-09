@@ -9,13 +9,13 @@ use crate::batch::PyBatch;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::PendingRequestResult;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
-use crate::deserialize::results::PyPagingState;
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::{
     DriverExecuteError, DriverPrepareError, DriverSchemaAgreementError, DriverUseKeyspaceError,
 };
 use crate::future::DriverFuture;
 use crate::policies::load_balancing::PyTargetPolicy;
+use crate::results::PyPagingState;
 use crate::serialize::value_list::PyValueList;
 use crate::statement::PyPreparedStatement;
 
@@ -71,7 +71,7 @@ impl PySession {
         // to `unwrap_or_default()` here.
         let values = values.unwrap_or_default();
         let paging_state: Option<PagingState> =
-            paging_state.map(|state| state.borrow(py).inner.clone());
+            paging_state.map(|state| state.borrow(py).inner().clone());
 
         if let Some(target) = target {
             statement.set_target(target);

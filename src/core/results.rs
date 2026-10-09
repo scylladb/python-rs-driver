@@ -3,25 +3,29 @@ use std::sync::Arc;
 use pyo3::prelude::{IntoPyObject, PyListMethods, Python};
 use pyo3::types::PyList;
 use pyo3::{Bound, Py, PyAny, PyErr, PyResult};
+use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
+use scylla_cql::frame::response::result::ColumnSpec;
 
-use crate::core::session::{BoundStatement, SessionCore};
+use crate::TaskExecutionMode;
+use crate::core::session::{BoundStatement, fetch_page};
 use crate::deserialize::error::DriverRowIterationError;
-use crate::deserialize::results::{RequestResult, ResolvedPage, RowsIteratorKind};
 use crate::deserialize::row_factory::PyRowFactory;
+use crate::deserialize::rows::{ResolvedPage, RowsIteratorKind};
 use crate::errors::execution::DriverExecuteError;
+use crate::results::RequestResult;
 
-/// Helper performing the core logic of handling query results.
+/// One page of a query result, together with the pager positioned after it.
 #[derive(Clone)]
-pub(crate) struct RequestResultCore {
+pub(crate) struct PageCore {
     /// Kept to resolve a builder for every following page.
-    pub(crate) row_factory: PyRowFactory,
-    pub(crate) query_pager: Pager,
-    pub(crate) page: ResolvedPage,
+    row_factory: PyRowFactory,
+    query_pager: Pager,
+    page: ResolvedPage,
 }
 
-impl RequestResultCore {
+impl PageCore {
     pub(crate) fn new(
         py: Python<'_>,
         query_result: QueryResult,
@@ -38,6 +42,27 @@ impl RequestResultCore {
         })
     }
 
+    pub(crate) fn page(&self) -> &ResolvedPage {
+        &self.page
+    }
+
+    /// Specifications of the page's columns, or `None` for a result without rows.
+    pub(crate) fn columns(&self) -> Option<&[ColumnSpec<'_>]> {
+        self.page
+            .query_result()
+            .deserialized_metadata_and_rows()
+            .map(|rows| rows.metadata().col_specs())
+    }
+
+    /// Clones what fetching the following pages needs, without the page itself.
+    pub(crate) fn clone_pager_and_factory(&self) -> (Pager, PyRowFactory) {
+        (self.query_pager.clone(), self.row_factory.clone())
+    }
+
+    pub(crate) fn into_parts(self) -> (ResolvedPage, Pager, PyRowFactory) {
+        (self.page, self.query_pager, self.row_factory)
+    }
+
     /// Returns `true` if more pages are available.
     pub(crate) fn has_more_pages(&self) -> bool {
         self.query_pager.has_more_pages()
@@ -47,27 +72,6 @@ impl RequestResultCore {
     /// available.
     pub(crate) fn paging_state(&self) -> Option<PagingState> {
         self.query_pager.paging_state()
-    }
-
-    /// Fetches the next page, or returns `None` if no more pages exist.
-    ///
-    /// The page is bound to the row factory when it is handed to Python.
-    pub(crate) async fn fetch_next_page(self) -> PyResult<Option<PendingRequestResult>> {
-        let Self {
-            row_factory,
-            mut query_pager,
-            ..
-        } = self;
-
-        let Some(query_result) = query_pager.fetch_next_page().await else {
-            return Ok(None);
-        };
-
-        Ok(Some(PendingRequestResult::new(
-            query_result?,
-            query_pager,
-            row_factory,
-        )))
     }
 
     /// Returns the first row from the current position onwards, fetching
@@ -116,7 +120,10 @@ impl RequestResultCore {
                 Ok(())
             })?;
 
-            let Some(page) = query_pager.fetch_next_page().await else {
+            let Some(page) = query_pager
+                .fetch_next_page(TaskExecutionMode::SpawnOnRuntime)
+                .await
+            else {
                 break;
             };
 
@@ -146,6 +153,11 @@ impl PendingRequestResult {
             factory,
         }
     }
+
+    /// Binds the page to the row factory.
+    pub(crate) fn resolve(self, py: Python<'_>) -> Result<PageCore, DriverExecuteError> {
+        PageCore::new(py, self.query_result, self.query_pager, self.factory)
+    }
 }
 
 impl<'py> IntoPyObject<'py> for PendingRequestResult {
@@ -154,9 +166,7 @@ impl<'py> IntoPyObject<'py> for PendingRequestResult {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let core = RequestResultCore::new(py, self.query_result, self.query_pager, self.factory)?;
-
-        Bound::new(py, RequestResult::from(core))
+        Bound::new(py, RequestResult::from(self.resolve(py)?))
     }
 }
 
@@ -184,7 +194,10 @@ pub(crate) async fn next_row_with_paging(
             return row;
         }
 
-        next_page = match query_pager.fetch_next_page().await? {
+        next_page = match query_pager
+            .fetch_next_page(TaskExecutionMode::SpawnOnRuntime)
+            .await?
+        {
             Ok(p) => Some(p),
             Err(e) => return Some(Err(DriverRowIterationError::FailedToFetchNextPage(e))),
         };
@@ -200,7 +213,7 @@ pub(crate) enum Pager {
     Unpaged,
     Paged {
         paging_response: PagingStateResponse,
-        session: SessionCore,
+        session: Arc<Session>,
         prepared: Arc<BoundStatement>,
     },
 }
@@ -210,9 +223,14 @@ impl Pager {
         Pager::Unpaged
     }
 
+    /// A pager with no pages left to fetch.
+    pub(crate) fn exhausted() -> Self {
+        Pager::Unpaged
+    }
+
     pub(crate) fn paged(
         paging_response: PagingStateResponse,
-        session: SessionCore,
+        session: Arc<Session>,
         prepared: Arc<BoundStatement>,
     ) -> Self {
         Pager::Paged {
@@ -246,8 +264,10 @@ impl Pager {
         }
     }
 
+    /// Fetches the next page, running the request where `mode` says.
     pub(crate) async fn fetch_next_page(
         &mut self,
+        mode: TaskExecutionMode,
     ) -> Option<Result<QueryResult, DriverExecuteError>> {
         let Pager::Paged {
             paging_response,
@@ -263,9 +283,7 @@ impl Pager {
             PagingStateResponse::NoMorePages => return None,
         };
 
-        let result = session
-            .execute_single_page(state, Arc::clone(prepared))
-            .await;
+        let result = fetch_page(Arc::clone(session), state, Arc::clone(prepared), mode).await;
 
         let (query_result, new_paging_response) = match result {
             Ok(v) => v,
@@ -275,5 +293,24 @@ impl Pager {
         *paging_response = new_paging_response;
 
         Some(Ok(query_result))
+    }
+
+    /// Fetches the next page, or returns `None` if no more pages exist.
+    ///
+    /// The page is bound to `row_factory` when it is handed to Python.
+    pub(crate) async fn fetch_next_pending_page(
+        mut self,
+        row_factory: PyRowFactory,
+        mode: TaskExecutionMode,
+    ) -> PyResult<Option<PendingRequestResult>> {
+        let Some(query_result) = self.fetch_next_page(mode).await else {
+            return Ok(None);
+        };
+
+        Ok(Some(PendingRequestResult::new(
+            query_result?,
+            self,
+            row_factory,
+        )))
     }
 }

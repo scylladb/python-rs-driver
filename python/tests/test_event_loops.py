@@ -283,10 +283,10 @@ def test_loop_that_cannot_be_weakly_referenced_panics(session: Session) -> None:
     """
     paged = Statement("SELECT * FROM system_schema.columns")
     paged.page_size = 1
-    first_page = _run_on_new_loop(lambda: session.execute(paged))
-    assert first_page.has_more_pages()
+    result = _run_on_new_loop(lambda: session.execute(paged))
+    assert result.first_page.has_more_pages
 
-    future = first_page.all()
+    future = result.all()
     asyncio.events._set_running_loop(UnweakrefableLoop())  # type: ignore[arg-type]
     try:
         with pytest.raises(BaseException, match="cannot be weakly referenced") as excinfo:
