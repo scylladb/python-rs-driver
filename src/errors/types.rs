@@ -2,12 +2,10 @@
 #![allow(clippy::clone_on_copy)]
 
 use pyo3::prelude::*;
-use scylla::errors::OperationType;
-use scylla::errors::WriteType;
-use scylla_cql::frame::response::CqlResponseKind;
+use scylla::errors::{CqlResponseKind, OperationType, WriteType};
 
 #[pyclass(
-    module = "scylla.policies.retry",
+    module = "scylla.errors",
     name = "WriteType",
     frozen,
     from_py_object,
@@ -59,7 +57,7 @@ impl From<PyWriteType> for WriteType {
 }
 
 #[pyclass(
-    module = "scylla.policies.retry",
+    module = "scylla.errors",
     name = "OperationType",
     frozen,
     from_py_object,
@@ -93,7 +91,7 @@ impl From<PyOperationType> for OperationType {
 }
 
 #[pyclass(
-    module = "scylla.policies.retry",
+    module = "scylla.errors",
     name = "CqlResponseKind",
     frozen,
     from_py_object,

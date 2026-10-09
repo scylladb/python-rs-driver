@@ -95,7 +95,7 @@ pub(crate) fn speculative_execution(_py: Python<'_>, module: &Bound<'_, PyModule
 
 /// Errors that can occur while extracting a speculative execution policy from a Python object.
 #[derive(Debug, thiserror::Error)]
-pub enum DriverSpeculativeExecutionPolicyError {
+pub(crate) enum DriverSpeculativeExecutionPolicyError {
     #[error(
         "invalid speculative execution policy '{type_name}': expected an instance of 'SimpleSpeculativeExecutionPolicy'"
     )]

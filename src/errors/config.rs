@@ -7,7 +7,7 @@ use crate::utils::AddressParseError;
 /// Errors related to invalid session configuration.
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum DriverSessionConfigError {
+pub(crate) enum DriverSessionConfigError {
     #[error(
         "Invalid port range: start port must be less than or equal to end port, and both ports must be greater than or equal to 1024"
     )]
@@ -82,7 +82,7 @@ impl From<DriverSessionConfigError> for PyErr {
 /// Errors related to invalid statement configuration.
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum DriverStatementConfigError {
+pub(crate) enum DriverStatementConfigError {
     /// The provided request timeout is not a non-negative finite number of seconds.
     #[error("timeout must be a non-negative, finite number (in seconds), got {value}")]
     InvalidRequestTimeout { value: f64 },

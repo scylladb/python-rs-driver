@@ -824,7 +824,7 @@ pub(crate) fn load_balancing(_py: Python<'_>, module: &Bound<'_, PyModule>) -> P
 
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum DriverLoadBalancingPolicyError {
+pub(crate) enum DriverLoadBalancingPolicyError {
     #[error(
         "Invalid load balancing policy '{type_name}': Object does not implement the \
          LoadBalancingPolicy protocol (missing required 'pick_targets' method)."
@@ -866,7 +866,7 @@ impl From<DriverLoadBalancingPolicyError> for PyErr {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum TargetConversionError {
+pub(crate) enum TargetConversionError {
     #[error("invalid target node '{type_name}': expected a Node or a host id (uuid.UUID)")]
     InvalidNode { type_name: String },
 
