@@ -227,7 +227,7 @@ pub(crate) fn add_submodule(
 
 /// Error type for address parsing failures.
 #[derive(Debug, thiserror::Error)]
-pub enum AddressParseError {
+pub(crate) enum AddressParseError {
     /// The Python object is not a valid address type (str, tuple(str, int), tuple(IpAddr, int)).
     #[error(
         "Invalid address type: expected str | tuple(str, int) | tuple(ipaddress, int) or a sequence of these, got {type_name}"
@@ -283,7 +283,7 @@ impl From<AddressParseError> for PyErr {
 
 /// Error type for duration parsing failures.
 #[derive(Debug, thiserror::Error)]
-pub enum DurationParseError {
+pub(crate) enum DurationParseError {
     /// The Python object is neither a `datetime.timedelta` nor a non-negative finite float.
     #[error(
         "Expected a datetime.timedelta or a non-negative finite float (seconds), got: {type_name}"
