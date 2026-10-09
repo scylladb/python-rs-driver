@@ -10,6 +10,7 @@ mod attrs;
 pub(crate) mod config;
 pub(crate) mod execution;
 pub(crate) mod request;
+pub(crate) mod types;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
 pub(crate) use macros::py_err;
@@ -397,5 +398,8 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "SpeculativeExecutionPolicyError",
         py.get_type::<SpeculativeExecutionPolicyError>(),
     )?;
+    module.add_class::<types::PyCqlResponseKind>()?;
+    module.add_class::<types::PyOperationType>()?;
+    module.add_class::<types::PyWriteType>()?;
     Ok(())
 }
