@@ -11,13 +11,13 @@ use crate::errors::{
 /// Errors that can occur during serialization of Python values into CQL values.
 #[derive(Debug)]
 #[must_use]
-pub struct DriverSerializationError {
+pub(crate) struct DriverSerializationError {
     pub kind: SerializationErrorKind,
     pub location: Option<ParameterReference>,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SerializationErrorKind {
+pub(crate) enum SerializationErrorKind {
     /// Represents a segment in the path to the value that failed to serialize.
     #[error("Unsupported CQL type: {cql}")]
     UnsupportedType { cql: Box<str> },
@@ -39,7 +39,7 @@ pub enum SerializationErrorKind {
 
 /// References a parameter that failed to serialize, either by index or by name.
 #[derive(Debug, thiserror::Error)]
-pub enum ParameterReference {
+pub(crate) enum ParameterReference {
     #[error("parameter_index={0}")]
     Index(usize),
     #[error("parameter={0}")]
@@ -47,7 +47,7 @@ pub enum ParameterReference {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum TypeExpected {
+pub(crate) enum TypeExpected {
     /// Expected a list of values for a CQL list or set.
     #[error("list")]
     List,

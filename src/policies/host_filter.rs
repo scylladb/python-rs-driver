@@ -285,7 +285,7 @@ pub(crate) fn host_filter(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyRe
 
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum DriverHostFilterError {
+pub(crate) enum DriverHostFilterError {
     #[error("Invalid address in host filter allow list: {source}")]
     InvalidAddress { source: std::io::Error },
 }

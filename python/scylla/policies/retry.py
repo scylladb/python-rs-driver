@@ -1,19 +1,14 @@
 from typing import Protocol, runtime_checkable
 
 from .._rust.policies.retry import (  # pyright: ignore[reportMissingModuleSource]
-    CqlResponseKind,
-    DbError,
     DefaultRetryPolicy,
     DefaultRetrySession,
     DowngradingConsistencyRetryPolicy,
     DowngradingConsistencyRetrySession,
     FallthroughRetryPolicy,
     FallthroughRetrySession,
-    OperationType,
-    RequestAttemptError,
     RequestInfo,
     RetryDecision,
-    WriteType,
 )
 
 
@@ -31,19 +26,14 @@ class RetryPolicy(Protocol):
 
 
 __all__ = [
-    "CqlResponseKind",
-    "DbError",
     "DefaultRetryPolicy",
     "DefaultRetrySession",
     "DowngradingConsistencyRetryPolicy",
     "DowngradingConsistencyRetrySession",
     "FallthroughRetryPolicy",
     "FallthroughRetrySession",
-    "OperationType",
-    "RequestAttemptError",
     "RequestInfo",
     "RetryDecision",
     "RetryPolicy",
     "RetrySession",
-    "WriteType",
 ]
