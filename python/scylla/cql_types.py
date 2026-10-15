@@ -14,13 +14,15 @@ Every public name starts with ``Cql``; the rest of the name tells what it is:
 - ``CqlEmpty`` is the value read from a column that holds CQL's empty value.
   It is read-only: the driver does not accept it when writing.
 
-``Duration`` is the one exception to the ``Cql`` prefix, because
-``CqlDuration`` is the type descriptor. It is the value of a CQL ``duration``
-column. Writing also accepts ``dateutil.relativedelta.relativedelta``.
+``Date`` and ``Duration`` are exceptions to the ``Cql`` prefix, because
+``CqlDate`` and ``CqlDuration`` are the type descriptors. They are the values
+of CQL ``date`` and ``duration`` columns. Writing also accepts
+``datetime.date`` for ``date`` and ``dateutil.relativedelta.relativedelta``
+for ``duration``.
 """
 
 import ipaddress
-from datetime import date, datetime, time
+from datetime import datetime, time
 from decimal import Decimal
 from typing import TYPE_CHECKING, TypeAlias
 from uuid import UUID
@@ -56,7 +58,7 @@ from ._rust.cluster.metadata import (  # pyright: ignore[reportMissingModuleSour
     CqlVarint,
     CqlVector,
 )
-from ._rust.types import CqlEmpty, Duration  # pyright: ignore[reportMissingModuleSource]
+from ._rust.types import CqlEmpty, Date, Duration  # pyright: ignore[reportMissingModuleSource]
 
 if TYPE_CHECKING:
     CqlScalarValue: TypeAlias = (
@@ -97,7 +99,7 @@ if TYPE_CHECKING:
         | ipaddress.IPv6Address
         # CQL:
         # - Date
-        | date
+        | Date
         # CQL:
         # - Timestamp
         | datetime
@@ -137,7 +139,7 @@ else:
         | UUID
         | ipaddress.IPv4Address
         | ipaddress.IPv6Address
-        | date
+        | Date
         | datetime
         | time
         | Duration
@@ -181,5 +183,6 @@ __all__ = [
     "CqlValue",
     "CqlVarint",
     "CqlVector",
+    "Date",
     "Duration",
 ]

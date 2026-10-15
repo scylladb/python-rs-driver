@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import connect
-from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Duration
+from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Date, Duration
 from scylla.errors import DeserializationError, RowIterationError
 from scylla.results import ColumnSpec, RowBuilder, RowFactory
 from scylla.session import Session
@@ -491,7 +491,7 @@ async def test_timeuuid_deserialization(
     assert row["value"] == value
 
 
-# Verifies correct deserialization of CQL date into Python date objects
+# Verifies correct deserialization of CQL date into Date
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
@@ -499,6 +499,7 @@ async def test_timeuuid_deserialization(
     [
         (1, datetime.date(2024, 5, 10)),
         (2, datetime.date(1999, 12, 31)),
+        (3, datetime.date(1970, 1, 1)),
     ],
 )
 async def test_date_deserialization(session: Session, table_factory: TableFactory, row_id: int, value: datetime.date):
@@ -511,11 +512,9 @@ async def test_date_deserialization(session: Session, table_factory: TableFactor
         value_sql=f"'{value.isoformat()}'",
     )
 
-    # Type checks
-    assert isinstance(row["value"], datetime.date)
-
-    # Value correctness
-    assert row["value"] == value
+    assert isinstance(row["value"], Date)
+    assert row["value"] == Date.from_date(value)
+    assert row["value"].to_date() == value
 
 
 # Verifies correct deserialization of CQL ascii into Python strings
@@ -1107,21 +1106,12 @@ async def test_empty_values_deserialization(
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-@pytest.mark.xfail(
-    reason=(
-        "Conversion from CqlDate to Python date is currently fallible. "
-        "CQL date supports a wider range than Python datetime.date. "
-        "This test documents the failure for extreme values and serves "
-        "as a regression test once conversion logic is fixed."
-    ),
-)
 @pytest.mark.parametrize(
-    "row_id,value_sql",
+    "row_id,value_sql,expected_days",
     [
-        # CQL date is stored as unsigned days since epoch (1970-01-01).
-        # These values correspond to u32::MIN and u32::MAX on the Rust side.
-        (1, "0"),  # CqlDate(u32::MIN)
-        (2, "4294967295"),  # CqlDate(u32::MAX)
+        # CQL date is stored as unsigned days with 1970-01-01 at 2^31.
+        (1, "0", -(2**31)),
+        (2, "4294967295", 2**31 - 1),
     ],
 )
 async def test_date_deserialization_extreme_ranges(
@@ -1129,6 +1119,7 @@ async def test_date_deserialization_extreme_ranges(
     table_factory: TableFactory,
     row_id: int,
     value_sql: str,
+    expected_days: int,
 ):
     row = await insert_and_fetch_single_row(
         session=session,
@@ -1139,10 +1130,9 @@ async def test_date_deserialization_extreme_ranges(
         value_sql=value_sql,
     )
 
-    # Expected behavior after fix:
-    # - Either successfully return a Python date
-    # - Or raise a well-defined, documented exception
-    assert isinstance(row["value"], datetime.date)
+    assert row["value"] == Date(expected_days)
+    with pytest.raises(ValueError):
+        row["value"].to_date()
 
 
 @pytest.mark.asyncio

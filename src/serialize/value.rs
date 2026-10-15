@@ -1,5 +1,5 @@
 use crate::serialize::error::{DriverSerializationError, TypeExpected};
-use crate::types::{DurationValue, has_uniform_sign};
+use crate::types::{DateValue, DurationValue, has_uniform_sign};
 
 use std::any::Any;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -27,7 +27,7 @@ use scylla::serialize::value::{
     SetOrListSerializationErrorKind, TupleTypeCheckErrorKind, UdtTypeCheckErrorKind,
 };
 use scylla::serialize::writers::{CellWriter, WrittenCellProof};
-use scylla::value::{Counter, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
+use scylla::value::{Counter, CqlDate, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
 
 use scylla_cql::serialize::value::{
     VectorSerializationErrorKind, serialize_next_constant_length_elem_unstable,
@@ -176,7 +176,10 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             }
 
             // Datatime types.
-            NativeType::Date => self.serialize_native::<NaiveDate>(typ, cell_writer),
+            NativeType::Date => match self.cast::<DateValue>() {
+                Ok(date) => CqlDate::from(*date.get()).serialize(typ, cell_writer),
+                Err(_) => self.serialize_native::<NaiveDate>(typ, cell_writer),
+            },
             NativeType::Duration => {
                 let duration = match self.cast::<DurationValue>() {
                     Ok(duration) => CqlDuration::from(*duration.get()),
@@ -354,6 +357,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             "bytes" => BYTES_COLUMNS,
             "Decimal" => DECIMAL_COLUMNS,
             "Duration" | "relativedelta" => DURATION_COLUMNS,
+            "Date" | "date" => DATE_COLUMNS,
             "datetime" => DATETIME_COLUMNS,
             "IPv4Address" | "IPv6Address" => IP_COLUMNS,
             "time" => TIME_COLUMNS,
@@ -837,8 +841,11 @@ static BYTES_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::
 static DURATION_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Duration)];
 
 // List of CQL column types used to provide clear error messages
-// indicating which CQL types are compatible with Python `datetime.date`
-// and `datetime.datetime` types.
+// indicating which CQL types are compatible with Python `Date` and `datetime.date` types.
+static DATE_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Date)];
+
+// List of CQL column types used to provide clear error messages
+// indicating which CQL types are compatible with Python `datetime.datetime` type.
 static DATETIME_COLUMNS: &[ColumnType<'static>] = &[
     ColumnType::Native(NativeType::Date),
     ColumnType::Native(NativeType::Timestamp),

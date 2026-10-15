@@ -25,7 +25,7 @@ The table below shows the default Python objects returned by the driver when rea
 | `inet` | `ipaddress.IPv4Address` or `ipaddress.IPv6Address` | `ipaddress.IPv4Address` or `ipaddress.IPv6Address` |
 | `uuid` | `uuid.UUID` | `uuid.UUID` |
 | `timeuuid` | `uuid.UUID` | `uuid.UUID` |
-| `date` | `datetime.date` | `datetime.date` |
+| `date` | `scylla.cql_types.Date` | `scylla.cql_types.Date` or `datetime.date` |
 | `time` | `datetime.time` | `datetime.time` |
 | `timestamp` | `datetime.datetime` in UTC | `datetime.datetime` in UTC |
 | `duration` | `scylla.cql_types.Duration` | `scylla.cql_types.Duration` or `dateutil.relativedelta.relativedelta` (requires `python-dateutil`) |
