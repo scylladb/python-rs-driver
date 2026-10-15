@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import connect
-from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Date, Duration
+from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Date, Duration, Time
 from scylla.errors import DeserializationError, RowIterationError
 from scylla.results import ColumnSpec, RowBuilder, RowFactory
 from scylla.session import Session
@@ -663,21 +663,23 @@ async def test_timestamp_deserialization(
     assert row["value"] == value
 
 
-# Verifies correct deserialization of CQL time into Python time objects
+# Verifies correct deserialization of CQL time into Time
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
-    "row_id,value",
+    "row_id,value_sql,expected",
     [
-        (1, time(1, 30, 45, 500000)),  # 01:30:45.500
-        (2, time(10, 15, 5, 123000)),  # 10:15:05.123
+        (1, "'01:30:45.500'", Time.from_time(time(1, 30, 45, 500000))),
+        (2, "'10:15:05.123'", Time.from_time(time(10, 15, 5, 123000))),
+        (3, "'23:59:59.999999999'", Time(86_399_999_999_999)),
     ],
 )
 async def test_time_deserialization(
     session: Session,
     table_factory: TableFactory,
     row_id: int,
-    value: time,
+    value_sql: str,
+    expected: Time,
 ):
     row = await insert_and_fetch_single_row(
         session,
@@ -685,11 +687,11 @@ async def test_time_deserialization(
         schema="id int PRIMARY KEY, value time",
         table_name="time_table",
         row_id=row_id,
-        value_sql=f"'{value.isoformat()}'",
+        value_sql=value_sql,
     )
 
-    assert isinstance(row["value"], time)
-    assert row["value"] == value
+    assert isinstance(row["value"], Time)
+    assert row["value"] == expected
 
 
 # Verifies correct deserialization of CQL duration into Duration

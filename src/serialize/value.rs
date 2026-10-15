@@ -1,5 +1,5 @@
 use crate::serialize::error::{DriverSerializationError, TypeExpected};
-use crate::types::{DateValue, DurationValue, has_uniform_sign};
+use crate::types::{DateValue, DurationValue, TimeValue, has_uniform_sign};
 
 use std::any::Any;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -188,13 +188,14 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 duration.serialize(typ, cell_writer)
             }
             NativeType::Time => {
-                let value = self
-                    .extract::<NaiveTime>()
-                    .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?;
-
-                let time: CqlTime = value
-                    .try_into()
-                    .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?;
+                let time = match self.cast::<TimeValue>() {
+                    Ok(time) => CqlTime::from(*time.get()),
+                    Err(_) => self
+                        .extract::<NaiveTime>()
+                        .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?
+                        .try_into()
+                        .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?,
+                };
 
                 time.serialize(typ, cell_writer)
             }
@@ -360,7 +361,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             "Date" | "date" => DATE_COLUMNS,
             "datetime" => DATETIME_COLUMNS,
             "IPv4Address" | "IPv6Address" => IP_COLUMNS,
-            "time" => TIME_COLUMNS,
+            "Time" | "time" => TIME_COLUMNS,
             "UUID" => UUID_COLUMNS,
 
             _ => {
@@ -857,7 +858,7 @@ static DATETIME_COLUMNS: &[ColumnType<'static>] = &[
 static IP_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Inet)];
 
 // List of CQL column types used to provide clear error messages
-// indicating which CQL types are compatible with Python `datetime.time` type.
+// indicating which CQL types are compatible with Python `Time` and `datetime.time` types.
 static TIME_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Time)];
 
 // List of CQL column types used to provide clear error messages
