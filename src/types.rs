@@ -1,6 +1,8 @@
 use pyo3::IntoPyObjectExt;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
+use scylla_cql::value::CqlDuration;
 
 static UNSET_INSTANCE: PyOnceLock<Py<UnsetType>> = PyOnceLock::new();
 
@@ -80,9 +82,85 @@ impl CqlEmpty {
     }
 }
 
+#[pyclass(
+    module = "scylla.cql_types",
+    name = "Duration",
+    frozen,
+    eq,
+    hash,
+    skip_from_py_object
+)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DurationValue {
+    #[pyo3(get)]
+    months: i32,
+    #[pyo3(get)]
+    days: i32,
+    #[pyo3(get)]
+    nanoseconds: i64,
+}
+
+/// CQL rejects a duration whose fields have different signs.
+pub(crate) fn has_uniform_sign(months: i32, days: i32, nanoseconds: i64) -> bool {
+    let non_negative = months >= 0 && days >= 0 && nanoseconds >= 0;
+    let non_positive = months <= 0 && days <= 0 && nanoseconds <= 0;
+    non_negative || non_positive
+}
+
+#[pymethods]
+impl DurationValue {
+    #[new]
+    #[pyo3(signature = (months = 0, days = 0, nanoseconds = 0))]
+    fn new(months: i32, days: i32, nanoseconds: i64) -> PyResult<Self> {
+        if !has_uniform_sign(months, days, nanoseconds) {
+            return Err(PyValueError::new_err(
+                "All Duration fields must have the same sign.",
+            ));
+        }
+
+        Ok(Self {
+            months,
+            days,
+            nanoseconds,
+        })
+    }
+
+    fn __getnewargs__(&self) -> (i32, i32, i64) {
+        (self.months, self.days, self.nanoseconds)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Duration(months={}, days={}, nanoseconds={})",
+            self.months, self.days, self.nanoseconds
+        )
+    }
+}
+
+impl From<CqlDuration> for DurationValue {
+    fn from(d: CqlDuration) -> Self {
+        Self {
+            months: d.months,
+            days: d.days,
+            nanoseconds: d.nanoseconds,
+        }
+    }
+}
+
+impl From<DurationValue> for CqlDuration {
+    fn from(d: DurationValue) -> Self {
+        Self {
+            months: d.months,
+            days: d.days,
+            nanoseconds: d.nanoseconds,
+        }
+    }
+}
+
 #[pymodule]
 pub(crate) fn types(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<UnsetType>()?;
     module.add_class::<CqlEmpty>()?;
+    module.add_class::<DurationValue>()?;
     Ok(())
 }

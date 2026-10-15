@@ -1,6 +1,6 @@
-use crate::deserialize::conversion::{CqlDurationWrapper, CqlVarintWrapper};
+use crate::deserialize::conversion::CqlVarintWrapper;
 use crate::deserialize::error::DriverDeserializationError;
-use crate::types::CqlEmpty;
+use crate::types::{CqlEmpty, DurationValue};
 use crate::utils::PyValueOrError;
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveTime, Utc};
@@ -429,12 +429,11 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }
-                    // CQL Duration → Python dateutil.relativedelta.relativedelta
+                    // CQL Duration → Python scylla.cql_types.Duration
                     NativeType::Duration => {
-                        let d: CqlDurationWrapper = CqlDuration::deserialize(typ, Some(v))
-                            .map_err(DriverDeserializationError::scylla_decode_failed)?
-                            .into();
-                        d.into_pyobject(py)
+                        let d = CqlDuration::deserialize(typ, Some(v))
+                            .map_err(DriverDeserializationError::scylla_decode_failed)?;
+                        Bound::new(py, DurationValue::from(d))
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }

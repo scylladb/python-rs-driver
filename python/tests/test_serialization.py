@@ -1,4 +1,5 @@
 import ipaddress
+import pickle
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -10,6 +11,7 @@ import pytest_asyncio
 from dateutil.relativedelta import relativedelta
 from helpers.ddl import ddl
 from helpers.session import connect
+from scylla.cql_types import Duration
 
 # SerializationError is never raised directly, but it shapes the error message.
 # We import ExecuteError which is raised for serialization issues during query execution.
@@ -185,15 +187,20 @@ async def test_double_serialization(session: Session, table_factory: TableFactor
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
-    "val",
+    "val,expected",
     [
-        relativedelta(months=2, days=5, microseconds=36),
-        # relativedelta stores these as years=1, months=2, days=1, hours=1, seconds=5.
-        relativedelta(months=14, hours=25, seconds=5),
-        relativedelta(weeks=2, minutes=90),
+        (Duration(months=14, days=40, nanoseconds=7), Duration(months=14, days=40, nanoseconds=7)),
+        (Duration(months=-1, days=-2, nanoseconds=-3), Duration(months=-1, days=-2, nanoseconds=-3)),
+        (relativedelta(months=2, days=5, microseconds=36), Duration(months=2, days=5, nanoseconds=36_000)),
+        # relativedelta stores this as years=1, months=2, days=1, hours=1, seconds=5.
+        (relativedelta(months=14, hours=25, seconds=5), Duration(months=14, days=1, nanoseconds=3_605_000_000_000)),
+        (relativedelta(weeks=2, minutes=90), Duration(months=0, days=14, nanoseconds=5_400_000_000_000)),
+        (relativedelta(hours=1, minutes=-30), Duration(months=0, days=0, nanoseconds=1_800_000_000_000)),
     ],
 )
-async def test_duration_serialization(session: Session, table_factory: TableFactory, val: relativedelta):
+async def test_duration_serialization(
+    session: Session, table_factory: TableFactory, val: Duration | relativedelta, expected: Duration
+):
     table = await table_factory(
         "id int PRIMARY KEY, col duration",
         "duration_table",
@@ -204,7 +211,33 @@ async def test_duration_serialization(session: Session, table_factory: TableFact
     row = await result.first_row()
 
     assert row is not None
-    assert row["col"] == val
+    assert row["col"] == expected
+
+
+def test_duration_value_semantics():
+    d = Duration(months=1, days=2, nanoseconds=3)
+
+    assert (d.months, d.days, d.nanoseconds) == (1, 2, 3)
+    assert Duration() == Duration(0, 0, 0)
+    assert d == Duration(1, 2, 3)
+    assert d != Duration(1, 2, 4)
+    assert hash(d) == hash(Duration(1, 2, 3))
+    assert repr(d) == "Duration(months=1, days=2, nanoseconds=3)"
+    assert pickle.loads(pickle.dumps(d)) == d
+
+
+@pytest.mark.parametrize(
+    "kwargs,error",
+    [
+        ({"months": 1, "days": -1}, ValueError),
+        ({"days": -1, "nanoseconds": 1}, ValueError),
+        ({"months": 2**31}, OverflowError),
+        ({"nanoseconds": 2**63}, OverflowError),
+    ],
+)
+def test_duration_rejects_invalid_parts(kwargs: dict[str, int], error: type[Exception]):
+    with pytest.raises(error):
+        Duration(**kwargs)
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,5 @@
 use crate::serialize::error::{DriverSerializationError, TypeExpected};
+use crate::types::{DurationValue, has_uniform_sign};
 
 use std::any::Any;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -176,9 +177,13 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
 
             // Datatime types.
             NativeType::Date => self.serialize_native::<NaiveDate>(typ, cell_writer),
-            NativeType::Duration => self
-                .relativedelta_to_duration(typ)?
-                .serialize(typ, cell_writer),
+            NativeType::Duration => {
+                let duration = match self.cast::<DurationValue>() {
+                    Ok(duration) => CqlDuration::from(*duration.get()),
+                    Err(_) => self.relativedelta_to_duration(typ)?,
+                };
+                duration.serialize(typ, cell_writer)
+            }
             NativeType::Time => {
                 let value = self
                     .extract::<NaiveTime>()
@@ -348,7 +353,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             "str" => STRING_COLUMNS,
             "bytes" => BYTES_COLUMNS,
             "Decimal" => DECIMAL_COLUMNS,
-            "relativedelta" => RELATIVEDELTA_COLUMNS,
+            "Duration" | "relativedelta" => DURATION_COLUMNS,
             "datetime" => DATETIME_COLUMNS,
             "IPv4Address" | "IPv6Address" => IP_COLUMNS,
             "time" => TIME_COLUMNS,
@@ -383,13 +388,6 @@ impl<'a, 'py> SerializeValue for PyAnyWrapper<'a, 'py> {
 
         self.serialize_arbitrary_value(typ, cell_writer)
     }
-}
-
-/// CQL rejects a duration whose fields have different signs.
-fn has_uniform_sign(months: i32, days: i32, nanoseconds: i64) -> bool {
-    let non_negative = months >= 0 && days >= 0 && nanoseconds >= 0;
-    let non_positive = months <= 0 && days <= 0 && nanoseconds <= 0;
-    non_negative || non_positive
 }
 
 fn serialize_sequence<'t, 'b, 'py, T: Any>(
@@ -835,8 +833,8 @@ static BOOL_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::B
 static BYTES_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Blob)];
 
 // List of CQL column types used to provide clear error messages
-// indicating which CQL types are compatible with Python `relativedelta` type.
-static RELATIVEDELTA_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Duration)];
+// indicating which CQL types are compatible with Python `Duration` and `relativedelta` types.
+static DURATION_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Duration)];
 
 // List of CQL column types used to provide clear error messages
 // indicating which CQL types are compatible with Python `datetime.date`

@@ -9,10 +9,9 @@ from typing import Any, cast
 
 import pytest
 import pytest_asyncio
-from dateutil.relativedelta import relativedelta
 from helpers.ddl import ddl
 from helpers.session import connect
-from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue
+from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Duration
 from scylla.errors import DeserializationError, RowIterationError
 from scylla.results import ColumnSpec, RowBuilder, RowFactory
 from scylla.session import Session
@@ -694,29 +693,23 @@ async def test_time_deserialization(
     assert row["value"] == value
 
 
-# Verifies correct deserialization of CQL duration into relativedelta
+# Verifies correct deserialization of CQL duration into Duration
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
     "row_id,expected,value_literal",
     [
-        (
-            1,
-            relativedelta(months=2, days=5, microseconds=36),
-            "2mo5d36000ns",
-        ),
-        (
-            2,
-            relativedelta(months=11, days=0, microseconds=123_456),
-            "11mo0d123456000ns",
-        ),
+        (1, Duration(months=2, days=5, nanoseconds=36_000), "2mo5d36000ns"),
+        (2, Duration(months=11, days=0, nanoseconds=123_456_000), "11mo0d123456000ns"),
+        (3, Duration(months=14, days=40, nanoseconds=7), "14mo40d7ns"),
+        (4, Duration(months=-1, days=-2, nanoseconds=-3), "-1mo2d3ns"),
     ],
 )
 async def test_duration_deserialization(
     session: Session,
     table_factory: TableFactory,
     row_id: int,
-    expected: relativedelta,
+    expected: Duration,
     value_literal: str,
 ):
     row = await insert_and_fetch_single_row(
@@ -728,7 +721,7 @@ async def test_duration_deserialization(
         value_sql=value_literal,
     )
 
-    assert isinstance(row["value"], relativedelta)
+    assert isinstance(row["value"], Duration)
     assert row["value"] == expected
 
 

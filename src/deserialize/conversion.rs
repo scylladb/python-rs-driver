@@ -1,13 +1,6 @@
-use pyo3::intern;
-use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyAnyMethods, PyDict, PyDictMethods, PyInt, PyType};
-use pyo3::{Bound, IntoPyObject, Py, PyAny, PyErr, PyResult, Python};
-use scylla_cql::value::{CqlDuration, CqlVarintBorrowed};
-
-fn get_relative_delta_cls(py: Python<'_>) -> PyResult<&Bound<'_, PyType>> {
-    static RELATIVEDELTA_CLS: PyOnceLock<Py<PyType>> = PyOnceLock::new();
-    RELATIVEDELTA_CLS.import(py, "dateutil.relativedelta", "relativedelta")
-}
+use pyo3::types::PyInt;
+use pyo3::{Bound, IntoPyObject, PyErr, Python};
+use scylla_cql::value::CqlVarintBorrowed;
 
 pub(crate) struct CqlVarintWrapper<'b> {
     val: CqlVarintBorrowed<'b>,
@@ -58,7 +51,8 @@ impl<'py> IntoPyObject<'py> for CqlVarintWrapper<'_> {
         // PyLong_FromNativeBytes is not in the limited API yet.
         #[cfg(Py_LIMITED_API)]
         {
-            use pyo3::types::PyBytes;
+            use pyo3::intern;
+            use pyo3::types::{PyAnyMethods, PyBytes, PyDict, PyDictMethods};
 
             let bytes_obj = PyBytes::new(py, bytes);
             let kwargs = PyDict::new(py);
@@ -74,32 +68,5 @@ impl<'py> IntoPyObject<'py> for CqlVarintWrapper<'_> {
                     .cast_into_unchecked())
             }
         }
-    }
-}
-
-pub(crate) struct CqlDurationWrapper {
-    val: CqlDuration,
-}
-
-impl From<CqlDuration> for CqlDurationWrapper {
-    fn from(val: CqlDuration) -> Self {
-        Self { val }
-    }
-}
-
-impl<'py> IntoPyObject<'py> for CqlDurationWrapper {
-    type Target = PyAny;
-    type Output = Bound<'py, Self::Target>;
-    type Error = PyErr;
-
-    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let cls = get_relative_delta_cls(py)?;
-        let duration = &self.val;
-        let kwargs = PyDict::new(py);
-        kwargs.set_item(intern!(py, "months"), duration.months)?;
-        kwargs.set_item(intern!(py, "days"), duration.days)?;
-        kwargs.set_item(intern!(py, "microseconds"), duration.nanoseconds / 1000)?;
-
-        cls.call((), Some(&kwargs))
     }
 }
