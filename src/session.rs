@@ -9,10 +9,11 @@ use crate::batch::PyBatch;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::PendingRequestResult;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
+use crate::core::traces::{PendingQueryTrace, fetch_trace};
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::{
     DriverExecuteError, DriverMetadataRefreshError, DriverPrepareError, DriverSchemaAgreementError,
-    DriverUseKeyspaceError,
+    DriverTraceError, DriverUseKeyspaceError,
 };
 use crate::future::{DriverFuture, boxed_py_future};
 use crate::policies::load_balancing::PyTargetPolicy;
@@ -55,7 +56,7 @@ impl PySession {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (statement, values=None, /, *, factory=None, paging_state=None, paged=true, target=None))]
+    #[pyo3(signature = (statement, values=None, /, *, factory=None, paging_state=None, paged=true, target=None, trace=None))]
     fn execute(
         &self,
         py: Python<'_>,
@@ -65,6 +66,7 @@ impl PySession {
         paging_state: Option<Py<PyPagingState>>,
         paged: bool,
         target: Option<PyTargetPolicy>,
+        trace: Option<bool>,
     ) -> PyResult<DriverFuture<PendingRequestResult, DriverExecuteError>> {
         // Why not accept PyValueList instead of Option<PyValueList>?
         // It would require us to use `Default::default` as default value in
@@ -77,6 +79,9 @@ impl PySession {
 
         if let Some(target) = target {
             statement.set_target(target);
+        }
+        if let Some(trace) = trace {
+            statement.set_tracing(trace);
         }
 
         let request = self
@@ -95,20 +100,35 @@ impl PySession {
         DriverFuture::spawn_on_tokio(py, boxed_py_future(self.core.clone().prepare(statement)))
     }
 
-    #[pyo3(signature = (batch, /, *,  factory=None, target=None))]
+    #[pyo3(signature = (batch, /, *,  factory=None, target=None, trace=None))]
     fn batch(
         &self,
         py: Python<'_>,
         batch: &Bound<'_, PyBatch>,
         factory: Option<PyRowFactory>,
         target: Option<PyTargetPolicy>,
+        trace: Option<bool>,
     ) -> PyResult<DriverFuture<PendingRequestResult, DriverExecuteError>> {
         let mut batch = batch.get().snapshot(py);
         if let Some(target) = target {
             batch.set_target(target);
         }
+        if let Some(trace) = trace {
+            batch.set_tracing(trace);
+        }
 
         DriverFuture::spawn_on_tokio(py, boxed_py_future(self.core.clone().batch(batch, factory)))
+    }
+
+    fn fetch_query_trace(
+        &self,
+        py: Python<'_>,
+        trace_id: Uuid,
+    ) -> PyResult<DriverFuture<PendingQueryTrace, DriverTraceError>> {
+        DriverFuture::spawn_on_tokio(
+            py,
+            boxed_py_future(fetch_trace(Arc::clone(&self.core.inner), trace_id)),
+        )
     }
 
     fn await_schema_agreement(

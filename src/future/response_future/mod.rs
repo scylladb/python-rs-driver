@@ -531,7 +531,7 @@ impl PyResponseFuture {
         self.inner.shared.lock_py_attached(py).tracing_ids.clone()
     }
 
-    // TODO: implement with tracing support (#156).
+    // TODO: implement with legacy tracing support (#243).
     #[pyo3(signature = (max_wait=None, query_cl=None))]
     fn get_query_trace(
         &self,
@@ -544,7 +544,7 @@ impl PyResponseFuture {
         ))
     }
 
-    // TODO: implement with tracing support (#156).
+    // TODO: implement with legacy tracing support (#243).
     #[pyo3(signature = (max_wait_per=None, query_cl=None))]
     fn get_all_query_traces(
         &self,

@@ -1,8 +1,10 @@
+import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any, final
 
 from scylla.future import DriverFuture
 from scylla.results import ColumnSpec, RowBuilder
+from scylla.tracing import QueryTrace
 
 class RowFactory:
     """
@@ -191,6 +193,26 @@ class Page:
             A future resolving to the next page, or `None` if this is the last page.
         """
 
+    @property
+    def trace_id(self) -> uuid.UUID | None:
+        """
+        The tracing id of the request that fetched this page.
+
+        `None` if the request was not traced.
+        """
+
+    def fetch_query_trace(self) -> DriverFuture[QueryTrace | None]:
+        """
+        Fetches the trace of the request that fetched this page.
+
+        Resolves to `None` if the request was not traced.
+
+        Raises
+        ------
+        TraceUnavailable
+            If the driver cannot fetch the trace.
+        """
+
 class RequestResult:
     """
     Result of a whole query, across all of its pages.
@@ -248,6 +270,42 @@ class RequestResult:
     def first_page_warnings(self) -> tuple[str, ...]:
         """
         Warnings the server sent with the first page. Empty if there are none.
+        """
+
+    @property
+    def trace_ids(self) -> list[uuid.UUID]:
+        """
+        The tracing ids of all traced requests made for this result.
+
+        The ids are in the order in which the responses arrived. The list starts
+        with the id of the first page. Each page that a read of this result
+        fetches adds its id. This includes `all()`, `first_row()`, `async for`,
+        `pages()` and `Page.fetch_next_page()`. If a later read fetches the same
+        page again, that request adds a new id.
+
+        The list is empty if the requests were not traced.
+        """
+
+    def fetch_first_page_query_trace(self) -> DriverFuture[QueryTrace | None]:
+        """
+        Fetches the trace of the request that fetched the first page.
+
+        Resolves to `None` if the request was not traced.
+
+        Raises
+        ------
+        TraceUnavailable
+            If the driver cannot fetch the trace.
+        """
+
+    def fetch_all_query_traces(self) -> DriverFuture[list[QueryTrace]]:
+        """
+        Fetches the traces of all ids in `trace_ids`, in the same order.
+
+        Raises
+        ------
+        TraceUnavailable
+            If the driver cannot fetch one of the traces.
         """
 
 class AsyncRowsIterator(AsyncIterator[Any]):

@@ -1,12 +1,15 @@
 use crate::TaskExecutionMode;
 use crate::cluster::metadata::query_metadata::column_spec_tuple;
 use crate::core::results::{PageCore, PendingRequestResult};
+use crate::core::traces::PendingQueryTrace;
+use crate::errors::execution::DriverTraceError;
 use crate::future::{DriverFuture, boxed_py_future};
 use crate::results::iterators::SinglePageIterator;
 use crate::results::paging_state::PyPagingState;
+use crate::utils::cached_option;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyTuple;
-use pyo3::{Bound, IntoPyObject, Py, PyErr, PyResult, Python, pyclass, pymethods};
+use pyo3::{Bound, IntoPyObject, Py, PyAny, PyErr, PyResult, Python, pyclass, pymethods};
 
 /// A single page of a query result.
 ///
@@ -23,6 +26,8 @@ pub(crate) struct Page {
 
     /// Cached Python-side server warnings.
     warnings: PyOnceLock<Py<PyTuple>>,
+
+    py_trace_id: PyOnceLock<Option<Py<PyAny>>>,
 }
 
 impl From<PageCore> for Page {
@@ -31,6 +36,7 @@ impl From<PageCore> for Page {
             core,
             columns: PyOnceLock::new(),
             warnings: PyOnceLock::new(),
+            py_trace_id: PyOnceLock::new(),
         }
     }
 }
@@ -102,6 +108,34 @@ impl Page {
                     .map(PendingPage))
             }),
         )
+    }
+
+    /// The tracing id of the request that fetched this page.
+    ///
+    /// `None` if the request was not traced.
+    #[getter]
+    fn trace_id(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        cached_option(py, &self.py_trace_id, || self.core.trace_id())
+    }
+
+    /// Fetches the trace of the request that fetched this page.
+    ///
+    /// Resolves to `None` if the request was not traced.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TraceUnavailable` if the driver cannot fetch the trace.
+    pub(crate) fn fetch_query_trace(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<DriverFuture<Option<PendingQueryTrace>, DriverTraceError>> {
+        match self.core.trace_id() {
+            Some(trace_id) => DriverFuture::spawn_on_tokio(
+                py,
+                boxed_py_future(self.core.fetch_query_trace(trace_id)),
+            ),
+            None => DriverFuture::ready(py, Ok(py.None())),
+        }
     }
 }
 

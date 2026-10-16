@@ -1,4 +1,6 @@
-use crate::enums::{PyCompression, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay};
+use crate::enums::{
+    PyCompression, PyConsistency, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay,
+};
 use crate::errors::config::DriverSessionConfigError;
 use crate::errors::execution::DriverSessionConnectionError;
 use crate::execution_profile::PyExecutionProfile;
@@ -16,6 +18,7 @@ use scylla::authentication::PlainTextAuthenticator;
 use scylla::client::session::{SessionConfig, TlsContext};
 use scylla::routing::ShardAwarePortRange;
 use std::net::IpAddr;
+use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -180,6 +183,42 @@ impl SessionBuilder {
             inner.config.schema_agreement_interval = timeout.0;
         }
 
+        slf
+    }
+
+    fn tracing_info_fetch_attempts<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        attempts: NonZeroU32,
+    ) -> PyRef<'py, Self> {
+        {
+            let mut inner = slf.inner.lock_py_attached(py).unwrap();
+            inner.config.tracing_info_fetch_attempts = attempts;
+        }
+        slf
+    }
+
+    fn tracing_info_fetch_interval<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        interval: PyDuration,
+    ) -> PyRef<'py, Self> {
+        {
+            let mut inner = slf.inner.lock_py_attached(py).unwrap();
+            inner.config.tracing_info_fetch_interval = interval.0;
+        }
+        slf
+    }
+
+    fn tracing_info_fetch_consistency<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        consistency: PyConsistency,
+    ) -> PyRef<'py, Self> {
+        {
+            let mut inner = slf.inner.lock_py_attached(py).unwrap();
+            inner.config.tracing_info_fetch_consistency = consistency.into();
+        }
         slf
     }
 
@@ -606,6 +645,21 @@ impl PySessionBuilderConfig {
     #[getter]
     fn schema_agreement_interval(&self) -> Duration {
         self.config.schema_agreement_interval
+    }
+
+    #[getter]
+    fn tracing_info_fetch_attempts(&self) -> NonZeroU32 {
+        self.config.tracing_info_fetch_attempts
+    }
+
+    #[getter]
+    fn tracing_info_fetch_interval(&self) -> Duration {
+        self.config.tracing_info_fetch_interval
+    }
+
+    #[getter]
+    fn tracing_info_fetch_consistency(&self) -> PyConsistency {
+        self.config.tracing_info_fetch_consistency.into()
     }
 
     #[getter]

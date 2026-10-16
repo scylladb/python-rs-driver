@@ -3,8 +3,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
+use pyo3::type_object::PyTypeCheck;
 use pyo3::{
-    Borrowed, Bound, IntoPyObject, PyErr, PyResult, Python,
+    Borrowed, Bound, BoundObject, IntoPyObject, PyErr, PyResult, Python,
     types::{PyAnyMethods, PyModule, PyModuleMethods, PyString},
 };
 
@@ -356,4 +358,52 @@ pub(crate) fn thread_is_attached() -> bool {
         let current = pyo3::ffi::compat::PyThreadState_GetUnchecked();
         !current.is_null() && current == pyo3::ffi::PyGILState_GetThisThreadState()
     }
+}
+
+// TODO: reuse these caching helpers in the whole driver.
+// https://github.com/scylladb/python-rs-driver/issues/228
+
+/// Converts the value on the first call, and returns the same Python object on every later call.
+pub(crate) fn cached<'py, T, V>(
+    py: Python<'py>,
+    cache: &PyOnceLock<Py<T>>,
+    value: impl FnOnce() -> V,
+) -> PyResult<Py<T>>
+where
+    T: PyTypeCheck,
+    V: IntoPyObject<'py>,
+    PyErr: From<V::Error>,
+{
+    let object = cache.get_or_try_init(py, || to_python(py, value()))?;
+    Ok(object.clone_ref(py))
+}
+
+/// Like [`cached`], for a value that can be missing: `None` stays `None`.
+pub(crate) fn cached_option<'py, T, V>(
+    py: Python<'py>,
+    cache: &PyOnceLock<Option<Py<T>>>,
+    value: impl FnOnce() -> Option<V>,
+) -> PyResult<Option<Py<T>>>
+where
+    T: PyTypeCheck,
+    V: IntoPyObject<'py>,
+    PyErr: From<V::Error>,
+{
+    let object =
+        cache.get_or_try_init(py, || value().map(|value| to_python(py, value)).transpose())?;
+    Ok(object.as_ref().map(|object| object.clone_ref(py)))
+}
+
+fn to_python<'py, T, V>(py: Python<'py>, value: V) -> PyResult<Py<T>>
+where
+    T: PyTypeCheck,
+    V: IntoPyObject<'py>,
+    PyErr: From<V::Error>,
+{
+    Ok(value
+        .into_pyobject(py)?
+        .into_bound()
+        .into_any()
+        .cast_into::<T>()?
+        .unbind())
 }

@@ -10,3 +10,4 @@
 
 pub(crate) mod results;
 pub(crate) mod session;
+pub(crate) mod traces;

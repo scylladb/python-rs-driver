@@ -4,8 +4,8 @@ use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 use crate::errors::{
     BadKeyspaceNameError, ExecuteError, KeyspaceNameMismatchError, MetadataRefreshError,
     PrepareError, RequestError, RequestTimeoutError, RuntimeTaskJoinFailedError,
-    SchemaAgreementError, SessionConnectionError, StatementConversionError, get_type_name,
-    with_cause,
+    SchemaAgreementError, SessionConnectionError, StatementConversionError, TraceUnavailable,
+    get_type_name, with_cause,
 };
 
 /* Connection errors */
@@ -302,6 +302,44 @@ impl From<DriverMetadataRefreshError> for PyErr {
 impl From<tokio::task::JoinError> for DriverMetadataRefreshError {
     fn from(err: tokio::task::JoinError) -> Self {
         DriverMetadataRefreshError::runtime_task_join_failed(err)
+    }
+}
+
+/// Errors that can occur when the driver fetches a query trace.
+#[derive(Debug, thiserror::Error)]
+#[must_use]
+pub enum DriverTraceError {
+    /// The Rust driver failed to fetch the trace, or the trace was not available yet.
+    #[error("Failed to fetch the query trace: {source}")]
+    RustDriverTracingError {
+        source: Box<scylla::errors::TracingError>,
+    },
+    /// The Tokio runtime task fetching the trace failed to join.
+    #[error("Internal driver error: runtime error while fetching a query trace: {message}")]
+    RuntimeTaskJoinFailed { message: Box<str> },
+}
+
+impl DriverTraceError {
+    /* Constructors */
+
+    pub(crate) fn rust_driver_tracing_error(source: scylla::errors::TracingError) -> Self {
+        Self::RustDriverTracingError {
+            source: Box::new(source),
+        }
+    }
+}
+
+impl From<DriverTraceError> for PyErr {
+    fn from(e: DriverTraceError) -> PyErr {
+        TraceUnavailable::new_err(e.to_string())
+    }
+}
+
+impl From<tokio::task::JoinError> for DriverTraceError {
+    fn from(err: tokio::task::JoinError) -> Self {
+        Self::RuntimeTaskJoinFailed {
+            message: err.to_string().into_boxed_str(),
+        }
     }
 }
 

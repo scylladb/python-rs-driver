@@ -49,3 +49,8 @@ class Batch:
     load_balancing_policy: LoadBalancingPolicy | None
     retry_policy: RetryPolicy | None
     is_idempotent: bool
+    tracing: bool
+    """
+    If `True`, the server traces each execution of this batch.
+    The `trace` argument of `Session.batch()` overrides it for one execution.
+    """

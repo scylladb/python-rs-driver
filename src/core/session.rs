@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::batch::BatchState;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::{Pager, PendingRequestResult};
+use crate::core::traces::TraceLog;
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::{
     DriverExecuteError, DriverMetadataRefreshError, DriverPrepareError, DriverSchemaAgreementError,
@@ -167,9 +168,10 @@ impl SessionCore {
                 .await
                 .map_err(DriverExecuteError::rust_driver_execution_error)?;
 
+            let traces = TraceLog::new(result.tracing_id());
             Ok(PendingRequestResult::new(
                 result,
-                Pager::unpaged(),
+                Pager::unpaged(self.inner, traces),
                 effective_factory,
             ))
         }
@@ -240,7 +242,12 @@ impl SessionCore {
                 .map_err(DriverExecuteError::rust_driver_execution_error),
         }?;
 
-        Ok(PendingRequestResult::new(result, Pager::unpaged(), factory))
+        let traces = TraceLog::new(result.tracing_id());
+        Ok(PendingRequestResult::new(
+            result,
+            Pager::unpaged(self.inner, traces),
+            factory,
+        ))
     }
 
     async fn execute_paged(
@@ -258,9 +265,10 @@ impl SessionCore {
         )
         .await?;
 
+        let traces = TraceLog::new(result.tracing_id());
         Ok(PendingRequestResult::new(
             result,
-            Pager::paged(paging_response, self.inner, prepared),
+            Pager::paged(paging_response, self.inner, prepared, traces),
             factory,
         ))
     }
@@ -359,11 +367,23 @@ impl StatementKind {
             Self::Unprepared(statement) => statement.set_load_balancing_policy(Some(policy)),
         }
     }
+
+    /// Turns tracing on or off for one execution.
+    pub(crate) fn set_tracing(&mut self, should_trace: bool) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_tracing(should_trace),
+            Self::Unprepared(statement) => statement.set_tracing(should_trace),
+        }
+    }
 }
 
 impl ExecutableStatement {
     pub(crate) fn set_target(&mut self, target: PyTargetPolicy) {
         self.kind.set_target(target);
+    }
+
+    pub(crate) fn set_tracing(&mut self, should_trace: bool) {
+        self.kind.set_tracing(should_trace);
     }
 
     pub(crate) fn into_parts(self) -> (StatementKind, Option<PyRowFactory>) {

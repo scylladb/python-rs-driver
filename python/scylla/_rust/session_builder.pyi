@@ -17,6 +17,7 @@ from scylla.session import (
     Session,
     WriteCoalescingDelay,
 )
+from scylla.statement import Consistency
 from scylla.tls import TlsConfig, TlsContext
 
 class SessionBuilderConfig:
@@ -69,6 +70,12 @@ class SessionBuilderConfig:
     def metadata_request_serverside_timeout(self) -> timedelta | None: ...
     @property
     def schema_agreement_interval(self) -> timedelta: ...
+    @property
+    def tracing_info_fetch_attempts(self) -> int: ...
+    @property
+    def tracing_info_fetch_interval(self) -> timedelta: ...
+    @property
+    def tracing_info_fetch_consistency(self) -> Consistency: ...
     @property
     def schema_agreement_timeout(self) -> timedelta: ...
     @property
@@ -323,6 +330,30 @@ class SessionBuilder:
         Returns
         -------
         SessionBuilder
+        """
+
+    def tracing_info_fetch_attempts(self, attempts: int) -> SessionBuilder:
+        """
+        Sets how many times the driver tries to read a query trace.
+
+        The server writes a trace some time after it sends the response. Thus
+        `Session.fetch_query_trace()` reads it again until it is available.
+        The default is 10. The number must be greater than zero.
+        """
+
+    def tracing_info_fetch_interval(self, interval: timedelta | float) -> SessionBuilder:
+        """
+        Sets the time between two attempts to read a query trace.
+
+        The default is 3 milliseconds. A ``float`` is a number of seconds.
+        Cassandra can need a longer interval than ScyllaDB.
+        """
+
+    def tracing_info_fetch_consistency(self, consistency: Consistency) -> SessionBuilder:
+        """
+        Sets the consistency level of the queries that read a query trace.
+
+        The default is ``Consistency.One``.
         """
 
     def tcp_nodelay(self, nodelay: bool) -> SessionBuilder:

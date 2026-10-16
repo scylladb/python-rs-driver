@@ -22,6 +22,7 @@ PUBLIC_MODULES = [
     "scylla.session",
     "scylla.statement",
     "scylla.tls",
+    "scylla.tracing",
     "scylla.cql_types",
 ]
 

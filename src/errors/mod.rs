@@ -79,6 +79,8 @@ create_exception!(scylla.errors, SpeculativeExecutionPolicyError, ScyllaError);
 
 create_exception!(scylla.errors, QueryMetadataError, ScyllaError);
 
+create_exception!(scylla.errors, TraceUnavailable, ScyllaError);
+
 // Policy: DriverError types are pure Rust and contain PyErr only as source
 // in cases where the error originated from Python code (e.g. during extraction or user callbacks).
 // Conversion to PyErr happens at the boundary (e.g. in #[pymethods] implementations)
@@ -201,6 +203,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     )?;
     module.add("RetryPolicyError", py.get_type::<RetryPolicyError>())?;
     module.add("QueryMetadataError", py.get_type::<QueryMetadataError>())?;
+    module.add("TraceUnavailable", py.get_type::<TraceUnavailable>())?;
     module.add(
         "FutureCancelledError",
         py.get_type::<FutureCancelledError>(),

@@ -8,5 +8,6 @@ TBD.
    :glob:
 
    logging
+   tracing
 
 ```

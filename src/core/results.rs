@@ -7,13 +7,15 @@ use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 use scylla_cql::frame::response::result::ColumnSpec;
+use uuid::Uuid;
 
 use crate::TaskExecutionMode;
 use crate::core::session::{BoundStatement, fetch_page};
+use crate::core::traces::{PendingQueryTrace, TraceLog, fetch_trace};
 use crate::deserialize::error::DriverRowIterationError;
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::deserialize::rows::{ResolvedPage, RowsIteratorKind};
-use crate::errors::execution::DriverExecuteError;
+use crate::errors::execution::{DriverExecuteError, DriverTraceError};
 use crate::results::RequestResult;
 
 /// One page of a query result, together with the pager positioned after it.
@@ -44,6 +46,30 @@ impl PageCore {
 
     pub(crate) fn page(&self) -> &ResolvedPage {
         &self.page
+    }
+
+    /// The tracing id of the request that fetched this page.
+    pub(crate) fn trace_id(&self) -> Option<Uuid> {
+        self.page.query_result().tracing_id()
+    }
+
+    pub(crate) fn traces(&self) -> &TraceLog {
+        self.query_pager.traces()
+    }
+
+    pub(crate) fn session(&self) -> &Arc<Session> {
+        self.query_pager.session()
+    }
+
+    /// Fetches the trace of this page's request.
+    pub(crate) fn fetch_query_trace(
+        &self,
+        trace_id: Uuid,
+    ) -> impl Future<Output = Result<Option<PendingQueryTrace>, DriverTraceError>> + Send + 'static
+    {
+        let session = Arc::clone(self.query_pager.session());
+
+        async move { fetch_trace(session, trace_id).await.map(Some) }
     }
 
     /// Specifications of the page's columns, or `None` for a result without rows.
@@ -244,41 +270,64 @@ pub(crate) async fn next_row_with_paging(
 /// Responsible for handling pagination state transitions and retrieving
 /// subsequent pages from paginated query results.
 #[derive(Clone)]
-pub(crate) enum Pager {
+pub(crate) struct Pager {
+    session: Arc<Session>,
+    /// Gets the tracing id of every page this pager fetches.
+    traces: TraceLog,
+    state: PagerState,
+}
+
+#[derive(Clone)]
+enum PagerState {
     Unpaged,
     Paged {
         paging_response: PagingStateResponse,
-        session: Arc<Session>,
         prepared: Arc<BoundStatement>,
     },
 }
 
 impl Pager {
-    pub(crate) fn unpaged() -> Self {
-        Pager::Unpaged
-    }
-
-    /// A pager with no pages left to fetch.
-    pub(crate) fn exhausted() -> Self {
-        Pager::Unpaged
+    pub(crate) fn unpaged(session: Arc<Session>, traces: TraceLog) -> Self {
+        Self {
+            session,
+            traces,
+            state: PagerState::Unpaged,
+        }
     }
 
     pub(crate) fn paged(
         paging_response: PagingStateResponse,
         session: Arc<Session>,
         prepared: Arc<BoundStatement>,
+        traces: TraceLog,
     ) -> Self {
-        Pager::Paged {
-            paging_response,
+        Self {
             session,
-            prepared,
+            traces,
+            state: PagerState::Paged {
+                paging_response,
+                prepared,
+            },
         }
+    }
+
+    pub(crate) fn session(&self) -> &Arc<Session> {
+        &self.session
+    }
+
+    pub(crate) fn traces(&self) -> &TraceLog {
+        &self.traces
+    }
+
+    /// Leaves no pages to fetch.
+    pub(crate) fn exhaust(&mut self) {
+        self.state = PagerState::Unpaged;
     }
 
     pub(crate) fn has_more_pages(&self) -> bool {
         matches!(
-            self,
-            Pager::Paged {
+            self.state,
+            PagerState::Paged {
                 paging_response: PagingStateResponse::HasMorePages { .. },
                 ..
             }
@@ -286,16 +335,16 @@ impl Pager {
     }
 
     pub(crate) fn paging_state(&self) -> Option<PagingState> {
-        match self {
-            Pager::Paged {
+        match &self.state {
+            PagerState::Paged {
                 paging_response: PagingStateResponse::HasMorePages { state },
                 ..
             } => Some(state.clone()),
-            Pager::Paged {
+            PagerState::Paged {
                 paging_response: PagingStateResponse::NoMorePages,
                 ..
             } => None,
-            Pager::Unpaged => None,
+            PagerState::Unpaged => None,
         }
     }
 
@@ -304,11 +353,10 @@ impl Pager {
         &mut self,
         mode: TaskExecutionMode,
     ) -> Option<Result<QueryResult, DriverExecuteError>> {
-        let Pager::Paged {
+        let PagerState::Paged {
             paging_response,
-            session,
             prepared,
-        } = self
+        } = &mut self.state
         else {
             return None;
         };
@@ -318,7 +366,7 @@ impl Pager {
             PagingStateResponse::NoMorePages => return None,
         };
 
-        let result = fetch_page(Arc::clone(session), state, Arc::clone(prepared), mode).await;
+        let result = fetch_page(Arc::clone(&self.session), state, Arc::clone(prepared), mode).await;
 
         let (query_result, new_paging_response) = match result {
             Ok(v) => v,
@@ -326,6 +374,7 @@ impl Pager {
         };
 
         *paging_response = new_paging_response;
+        self.traces.record(query_result.tracing_id());
 
         Some(Ok(query_result))
     }

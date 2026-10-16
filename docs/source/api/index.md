@@ -21,6 +21,7 @@ The root also exports `Batch`, `BatchType`, `PreparedStatement`, `RequestResult`
 | [`scylla.auth`](reference/scylla/auth/index) | `Authenticator` and `AuthenticatorProvider` for custom authentication. Plain username and password needs nothing from here, see `SessionBuilder.user()`. |
 | [`scylla.tls`](reference/scylla/tls/index) | Encrypting connections to the cluster. `TlsContext` holds the certificates and the `VerifyMode`, and is passed to `SessionBuilder.tls_context()`; `TlsConfig` is the snapshot the builder keeps. |
 | [`scylla.errors`](reference/scylla/errors/index) | Every exception the driver raises. |
+| [`scylla.tracing`](reference/scylla/tracing/index) | Query traces. `QueryTrace` and its `TraceEvent` steps, returned by the `fetch_query_trace()` methods. |
 | [`scylla.routing`](reference/scylla/routing/index) | `Token`, `ReplicaLocator`, `Shard` and `Target`, for code that cares which node a request goes to. |
 | [`scylla.future`](reference/scylla/future/index) | `DriverFuture`, the awaitable returned by the driver. It also offers callbacks and a blocking `result()` for code that is not async. |
 | [`scylla.legacy`](reference/scylla/legacy/index) | The `cassandra-driver` compatible API, for code written against it. For now `ResponseFuture`, which delivers the result of a request through a blocking `result()` or through callbacks, page by page, and `QueryExhausted`, raised when no pages are left. |
@@ -37,6 +38,7 @@ reference/scylla/policies/index
 reference/scylla/auth/index
 reference/scylla/tls/index
 reference/scylla/errors/index
+reference/scylla/tracing/index
 reference/scylla/routing/index
 reference/scylla/future/index
 reference/scylla/legacy/index

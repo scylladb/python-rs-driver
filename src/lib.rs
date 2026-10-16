@@ -24,6 +24,7 @@ mod execution_profile;
 mod future;
 mod legacy;
 mod policies;
+mod query_trace;
 mod results;
 mod routing;
 mod serialize;
@@ -164,5 +165,6 @@ fn scylla(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     add_submodule(py, module, "tls", tls::tls)?;
     add_submodule(py, module, "future", future::future)?;
     add_submodule(py, module, "legacy", legacy::legacy)?;
+    add_submodule(py, module, "tracing", query_trace::query_trace)?;
     Ok(())
 }

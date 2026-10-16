@@ -54,6 +54,8 @@ pub(crate) trait ConfigurableStatement {
     fn get_request_timeout(&self) -> Option<Duration>;
     fn set_is_idempotent(&mut self, is_idempotent: bool);
     fn get_is_idempotent(&self) -> bool;
+    fn set_tracing(&mut self, should_trace: bool);
+    fn get_tracing(&self) -> bool;
     fn set_retry_policy(&mut self, policy: Option<Arc<dyn RetryPolicy>>);
     fn set_load_balancing_policy(&mut self, policy: Option<Arc<dyn LoadBalancingPolicy>>);
     fn set_execution_profile_handle(&mut self, handle: Option<ExecutionProfileHandle>);
@@ -91,6 +93,12 @@ macro_rules! impl_configurable_statement {
             }
             fn get_is_idempotent(&self) -> bool {
                 <$ty>::get_is_idempotent(self)
+            }
+            fn set_tracing(&mut self, should_trace: bool) {
+                <$ty>::set_tracing(self, should_trace)
+            }
+            fn get_tracing(&self) -> bool {
+                <$ty>::get_tracing(self)
             }
             fn set_retry_policy(&mut self, policy: Option<Arc<dyn RetryPolicy>>) {
                 <$ty>::set_retry_policy(self, policy)
@@ -280,6 +288,14 @@ impl<S: ConfigurableStatement> StatementOptions<S> {
 
     pub(crate) fn set_is_idempotent(&mut self, is_idempotent: bool) {
         self.inner.set_is_idempotent(is_idempotent);
+    }
+
+    pub(crate) fn tracing(&self) -> bool {
+        self.inner.get_tracing()
+    }
+
+    pub(crate) fn set_tracing(&mut self, should_trace: bool) {
+        self.inner.set_tracing(should_trace);
     }
 }
 
@@ -481,6 +497,20 @@ macro_rules! statement_pymethods {
                     o.set_is_idempotent(is_idempotent)
                 });
             }
+
+            #[getter]
+            fn get_tracing(&self, py: ::pyo3::Python<'_>) -> bool {
+                <Self as $crate::statement::StatementClass>::with_options(self, py, |o| {
+                    o.tracing()
+                })
+            }
+
+            #[setter]
+            fn set_tracing(&self, py: ::pyo3::Python<'_>, tracing: bool) {
+                <Self as $crate::statement::StatementClass>::with_options(self, py, |o| {
+                    o.set_tracing(tracing)
+                });
+            }
         }
     };
 }
@@ -506,6 +536,8 @@ pub(crate) struct PyPreparedStatement {
     bind_columns: PyOnceLock<Py<PyTuple>>,
     /// Cached Python-side partition key indexes of the bind variables.
     partition_key_indexes: PyOnceLock<Py<PyTuple>>,
+    /// Cached Python-side tracing ids of the prepare requests.
+    prepare_trace_ids: PyOnceLock<Py<PyTuple>>,
 
     /// Cached Python-side result column specifications, with the `ColumnSpecsGuard` they were
     /// built from. The guard is kept alive to avoid ABA on the pointer comparison below.
@@ -520,6 +552,7 @@ impl PyPreparedStatement {
             query_id: PyOnceLock::new(),
             bind_columns: PyOnceLock::new(),
             partition_key_indexes: PyOnceLock::new(),
+            prepare_trace_ids: PyOnceLock::new(),
             result_columns: Mutex::new(None),
         }
     }
@@ -594,6 +627,18 @@ statement_pymethods!(PyPreparedStatement, DriverStatementConfigError, {
             partition_key_index_tuple(py, self.snapshot(py).get_variable_pk_indexes())
         })?;
         Ok(indexes.clone_ref(py))
+    }
+
+    /// The tracing ids of the requests that prepared this statement, one for each node.
+    ///
+    /// Empty if the preparation was not traced.
+    #[getter]
+    fn get_prepare_trace_ids(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
+        let ids = self.prepare_trace_ids.get_or_try_init(py, || {
+            let ids = self.with_options(py, |o| o.inner.get_prepare_tracing_ids().to_vec());
+            PyTuple::new(py, ids).map(Bound::unbind)
+        })?;
+        Ok(ids.clone_ref(py))
     }
 
     /// Specifications of the columns this statement returns.

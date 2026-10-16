@@ -6,6 +6,7 @@ from scylla.future import DriverFuture
 from scylla.results import PagingState, RequestResult, RowFactoryLike
 from scylla.routing import Target
 from scylla.statement import Batch, PreparedStatement, Statement
+from scylla.tracing import QueryTrace
 
 class Session:
     """
@@ -57,6 +58,7 @@ class Session:
         paging_state: PagingState | None = None,
         paged: bool = True,
         target: Target | Node | uuid.UUID | None = None,
+        trace: bool | None = None,
     ) -> DriverFuture[RequestResult]:
         """
         Execute a query and return results.
@@ -92,6 +94,11 @@ class Session:
 
             A pinned request has nowhere to fall back to, so it either reaches the
             given target or fails.
+        trace : bool | None, optional
+            If `True`, the server traces this execution. If `False`, the server
+            does not trace it. If `None`, the `tracing` attribute of the statement
+            decides. Default is None. The tracing ids are in
+            `RequestResult.trace_ids` and `Page.trace_id`.
 
         Returns
         -------
@@ -106,6 +113,7 @@ class Session:
         *,
         factory: RowFactoryLike | None = None,
         target: Target | Node | uuid.UUID | None = None,
+        trace: bool | None = None,
     ) -> DriverFuture[RequestResult]:
         """
         Execute a batch statement, which can contain many `Statement` and `PreparedStatement` objects.
@@ -132,6 +140,10 @@ class Session:
 
             A pinned request has nowhere to fall back to, so it either reaches the
             given target or fails.
+        trace : bool | None, optional
+            If `True`, the server traces this execution. If `False`, the server
+            does not trace it. If `None`, the `tracing` attribute of the batch
+            decides. Default is None.
 
         Returns
         -------
@@ -141,6 +153,21 @@ class Session:
             For LWT batches, the result contains rows with a boolean `[applied]` column.
             In each returned row, columns other than `[applied]` contain either the current
             values of that row (if the condition was not met) or `None` values (if it was met).
+        """
+
+    def fetch_query_trace(self, trace_id: uuid.UUID) -> DriverFuture[QueryTrace]:
+        """
+        Fetches the trace of the request with this tracing id.
+
+        The server writes a trace some time after it sends the response. Thus the
+        driver tries again until the trace is available. `SessionBuilder` sets the
+        number of attempts, the interval between them, and their consistency level.
+
+        Raises
+        ------
+        TraceUnavailable
+            If the trace is not available after all attempts, or if the driver
+            cannot read it.
         """
 
     def await_schema_agreement(self) -> DriverFuture[uuid.UUID]:

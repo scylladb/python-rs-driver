@@ -121,7 +121,7 @@ impl AsyncIteratorState {
     /// Ends the iteration, like a Python generator that raised.
     fn finish(&mut self) {
         self.rows_iterator = RowsIteratorKind::NonRows;
-        self.query_pager = Pager::exhausted();
+        self.query_pager.exhaust();
     }
 }
 

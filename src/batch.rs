@@ -62,6 +62,11 @@ impl BatchState {
             .inner
             .set_load_balancing_policy(Some(target.into_inner()));
     }
+
+    /// Turns tracing on or off for one execution.
+    pub(crate) fn set_tracing(&mut self, should_trace: bool) {
+        self.options.inner.set_tracing(should_trace);
+    }
 }
 
 #[pyclass(module = "scylla.statement", name = "Batch", frozen)]
