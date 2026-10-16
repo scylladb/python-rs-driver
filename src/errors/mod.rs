@@ -1,10 +1,17 @@
 use pyo3::create_exception;
-use pyo3::exceptions::PyException;
+use pyo3::exceptions::{PyException, PyTimeoutError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
+#[macro_use]
+mod macros;
+
+mod attrs;
 pub(crate) mod config;
 pub(crate) mod execution;
+pub(crate) mod request;
+
+pub(crate) use attrs::{ToPyAttr, with_attrs};
 
 /* Python exception classes */
 
@@ -27,11 +34,77 @@ create_exception!(scylla.errors, SessionConfigError, ScyllaError);
 
 create_exception!(scylla.errors, StatementConversionError, ScyllaError);
 
-create_exception!(scylla.errors, ExecuteError, ScyllaError);
+create_exception!(scylla.errors, InternalDriverError, ScyllaError);
 
-create_exception!(scylla.errors, PrepareError, ScyllaError);
+/* Invalid input, rejected before sending - retrying won't help */
 
-create_exception!(scylla.errors, SchemaAgreementError, ScyllaError);
+create_exception_multi!(scylla.errors, BadQuery, (ScyllaError, PyValueError));
+create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
+create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
+create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
+create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
+
+/* Failures while executing a request */
+
+create_exception!(scylla.errors, ExecutionError, ScyllaError);
+create_exception_multi!(
+    scylla.errors,
+    OperationTimedOut,
+    (ExecutionError, PyTimeoutError)
+);
+create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
+create_exception!(scylla.errors, MetadataError, ExecutionError);
+create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
+
+create_exception!(scylla.errors, ConnectionPoolError, ExecutionError);
+create_exception!(scylla.errors, ConnectionPoolBroken, ConnectionPoolError);
+create_exception!(
+    scylla.errors,
+    ConnectionPoolInitializing,
+    ConnectionPoolError
+);
+create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
+
+create_exception!(scylla.errors, PrepareError, ExecutionError);
+create_exception!(scylla.errors, RepreparedIdChanged, PrepareError);
+create_exception!(scylla.errors, RepreparedIdMissingInBatch, PrepareError);
+
+create_exception!(scylla.errors, RequestFailedError, ExecutionError);
+create_exception!(scylla.errors, BrokenConnection, RequestFailedError);
+create_exception!(scylla.errors, ConnectionBusy, RequestFailedError);
+create_exception!(scylla.errors, NonfinishedPagingState, RequestFailedError);
+create_exception!(scylla.errors, ProtocolError, RequestFailedError);
+create_exception!(scylla.errors, ResponseParseError, ProtocolError);
+create_exception!(scylla.errors, RequestSerializationError, ProtocolError);
+create_exception!(scylla.errors, UnexpectedResponse, ProtocolError);
+
+/* Errors returned by the database */
+
+create_exception!(scylla.errors, DatabaseError, RequestFailedError);
+
+create_exception!(scylla.errors, Unavailable, DatabaseError);
+create_exception!(scylla.errors, ReadTimeout, DatabaseError);
+create_exception!(scylla.errors, WriteTimeout, DatabaseError);
+create_exception!(scylla.errors, ReadFailure, DatabaseError);
+create_exception!(scylla.errors, WriteFailure, DatabaseError);
+create_exception!(scylla.errors, FunctionFailure, DatabaseError);
+create_exception!(scylla.errors, Overloaded, DatabaseError);
+create_exception!(scylla.errors, IsBootstrapping, DatabaseError);
+create_exception!(scylla.errors, TruncateError, DatabaseError);
+create_exception!(scylla.errors, RateLimitReached, DatabaseError);
+create_exception!(scylla.errors, CqlSyntaxError, DatabaseError);
+create_exception!(scylla.errors, InvalidRequest, DatabaseError);
+create_exception!(scylla.errors, Unauthorized, DatabaseError);
+create_exception!(scylla.errors, ServerConfigError, DatabaseError);
+create_exception!(scylla.errors, AlreadyExists, DatabaseError);
+create_exception!(scylla.errors, AuthenticationFailed, DatabaseError);
+create_exception!(scylla.errors, ServerError, DatabaseError);
+create_exception!(scylla.errors, ServerProtocolError, DatabaseError);
+create_exception!(scylla.errors, Unprepared, DatabaseError);
+create_exception!(scylla.errors, UnknownDatabaseError, DatabaseError);
+
+/* Other errors */
+
 create_exception!(scylla.errors, MetadataRefreshError, ScyllaError);
 create_exception!(scylla.errors, StatementConfigError, ScyllaError);
 
@@ -133,17 +206,93 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "StatementConversionError",
         py.get_type::<StatementConversionError>(),
     )?;
-    module.add("PrepareError", py.get_type::<PrepareError>())?;
+    module.add("InternalDriverError", py.get_type::<InternalDriverError>())?;
+    module.add("BadQuery", py.get_type::<BadQuery>())?;
+    module.add("ValuesTooLongForKey", py.get_type::<ValuesTooLongForKey>())?;
+    module.add(
+        "TooManyStatementsInBatch",
+        py.get_type::<TooManyStatementsInBatch>(),
+    )?;
+    module.add(
+        "PartitionKeyExtractionFailed",
+        py.get_type::<PartitionKeyExtractionFailed>(),
+    )?;
+    module.add(
+        "PagingStateNotAllowed",
+        py.get_type::<PagingStateNotAllowed>(),
+    )?;
+    module.add("ExecutionError", py.get_type::<ExecutionError>())?;
+    module.add("OperationTimedOut", py.get_type::<OperationTimedOut>())?;
+    module.add("NoHostAvailable", py.get_type::<NoHostAvailable>())?;
+    module.add("MetadataError", py.get_type::<MetadataError>())?;
     module.add(
         "SchemaAgreementError",
         py.get_type::<SchemaAgreementError>(),
+    )?;
+    module.add("ConnectionPoolError", py.get_type::<ConnectionPoolError>())?;
+    module.add(
+        "ConnectionPoolBroken",
+        py.get_type::<ConnectionPoolBroken>(),
+    )?;
+    module.add(
+        "ConnectionPoolInitializing",
+        py.get_type::<ConnectionPoolInitializing>(),
+    )?;
+    module.add(
+        "NodeDisabledByHostFilter",
+        py.get_type::<NodeDisabledByHostFilter>(),
+    )?;
+    module.add("PrepareError", py.get_type::<PrepareError>())?;
+    module.add("RepreparedIdChanged", py.get_type::<RepreparedIdChanged>())?;
+    module.add(
+        "RepreparedIdMissingInBatch",
+        py.get_type::<RepreparedIdMissingInBatch>(),
+    )?;
+    module.add("RequestFailedError", py.get_type::<RequestFailedError>())?;
+    module.add("BrokenConnection", py.get_type::<BrokenConnection>())?;
+    module.add("ConnectionBusy", py.get_type::<ConnectionBusy>())?;
+    module.add(
+        "NonfinishedPagingState",
+        py.get_type::<NonfinishedPagingState>(),
+    )?;
+    module.add("ProtocolError", py.get_type::<ProtocolError>())?;
+    module.add("ResponseParseError", py.get_type::<ResponseParseError>())?;
+    module.add(
+        "RequestSerializationError",
+        py.get_type::<RequestSerializationError>(),
+    )?;
+    module.add("UnexpectedResponse", py.get_type::<UnexpectedResponse>())?;
+    module.add("DatabaseError", py.get_type::<DatabaseError>())?;
+    module.add("Unavailable", py.get_type::<Unavailable>())?;
+    module.add("ReadTimeout", py.get_type::<ReadTimeout>())?;
+    module.add("WriteTimeout", py.get_type::<WriteTimeout>())?;
+    module.add("ReadFailure", py.get_type::<ReadFailure>())?;
+    module.add("WriteFailure", py.get_type::<WriteFailure>())?;
+    module.add("FunctionFailure", py.get_type::<FunctionFailure>())?;
+    module.add("Overloaded", py.get_type::<Overloaded>())?;
+    module.add("IsBootstrapping", py.get_type::<IsBootstrapping>())?;
+    module.add("TruncateError", py.get_type::<TruncateError>())?;
+    module.add("RateLimitReached", py.get_type::<RateLimitReached>())?;
+    module.add("CqlSyntaxError", py.get_type::<CqlSyntaxError>())?;
+    module.add("InvalidRequest", py.get_type::<InvalidRequest>())?;
+    module.add("Unauthorized", py.get_type::<Unauthorized>())?;
+    module.add("ServerConfigError", py.get_type::<ServerConfigError>())?;
+    module.add("AlreadyExists", py.get_type::<AlreadyExists>())?;
+    module.add(
+        "AuthenticationFailed",
+        py.get_type::<AuthenticationFailed>(),
+    )?;
+    module.add("ServerError", py.get_type::<ServerError>())?;
+    module.add("ServerProtocolError", py.get_type::<ServerProtocolError>())?;
+    module.add("Unprepared", py.get_type::<Unprepared>())?;
+    module.add(
+        "UnknownDatabaseError",
+        py.get_type::<UnknownDatabaseError>(),
     )?;
     module.add(
         "MetadataRefreshError",
         py.get_type::<MetadataRefreshError>(),
     )?;
-    module.add("ExecuteError", py.get_type::<ExecuteError>())?;
-    module.add("RowFactoryError", py.get_type::<RowFactoryError>())?;
     module.add(
         "StatementConfigError",
         py.get_type::<StatementConfigError>(),
@@ -195,6 +344,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     )?;
     module.add("HostFilterError", py.get_type::<HostFilterError>())?;
     module.add("TlsError", py.get_type::<TlsError>())?;
+    module.add("RowFactoryError", py.get_type::<RowFactoryError>())?;
     module.add(
         "LoadBalancingPolicyError",
         py.get_type::<LoadBalancingPolicyError>(),
