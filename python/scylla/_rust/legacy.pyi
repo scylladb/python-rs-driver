@@ -1,7 +1,9 @@
 from collections.abc import Callable, Iterable, Iterator
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
+from scylla._rust.types import UnsetType
 from scylla.cluster import Node
 from scylla.cql_types import CqlColumnType
 from scylla.results import ColumnSpec, PagingState, RowFactoryLike
@@ -21,6 +23,7 @@ class LegacySession:
         self,
         query: PreparedStatement | Statement | Batch | str,
         parameters: Any | None = None,
+        timeout: timedelta | float | None | UnsetType = ...,
         trace: bool | None = None,
         execution_profile: ExecutionProfile | None = None,
         paging_state: PagingState | bytes | None = None,
@@ -29,6 +32,7 @@ class LegacySession:
         """
         Execute ``query`` and block for its :class:`ResultSet`.
 
+        ``timeout`` defaults to the execution profile's; ``None`` disables it.
         ``trace`` overrides the ``tracing`` attribute of the statement; ``None`` keeps it.
         ``host`` pins the request to one node (and optionally shard).
         """
@@ -38,6 +42,7 @@ class LegacySession:
         query: PreparedStatement | Statement | Batch | str,
         parameters: Any | None = None,
         trace: bool | None = None,
+        timeout: timedelta | float | None | UnsetType = ...,
         execution_profile: ExecutionProfile | None = None,
         paging_state: PagingState | bytes | None = None,
         host: Target | Node | UUID | None = None,

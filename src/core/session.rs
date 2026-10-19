@@ -378,6 +378,13 @@ impl StatementKind {
         }
     }
 
+    pub(crate) fn set_request_timeout(&mut self, timeout: Duration) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_request_timeout(Some(timeout)),
+            Self::Unprepared(statement) => statement.set_request_timeout(Some(timeout)),
+        }
+    }
+
     pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
         match self {
             Self::Prepared(prepared) => prepared.set_execution_profile_handle(Some(handle)),
@@ -414,6 +421,10 @@ impl ExecutableStatement {
 
     pub(crate) fn into_parts(self) -> (StatementKind, Option<PyRowFactory>) {
         (self.kind, self.row_factory)
+    }
+
+    pub(crate) fn set_request_timeout(&mut self, timeout: Duration) {
+        self.kind.set_request_timeout(timeout);
     }
 
     pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
