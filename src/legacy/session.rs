@@ -8,7 +8,7 @@ use pyo3::exceptions::{PyNotImplementedError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
 use pyo3::types::PyBytes;
-use scylla::client::execution_profile::ExecutionProfileHandle;
+use scylla::client::execution_profile::{ExecutionProfile, ExecutionProfileHandle};
 use scylla::client::session::Session;
 use scylla::errors::SchemaAgreementError;
 use scylla::statement::Statement;
@@ -34,10 +34,12 @@ use crate::utils::{PyDuration, WithOriginalPyObject};
 struct SessionSettings {
     row_factory: Option<WithOriginalPyObject<PyRowFactory>>,
     fetch_size: FetchSize,
+    /// For a request given no `timeout` whose statement has none of its own.
+    timeout: RequestTimeout,
 }
 
 impl SessionSettings {
-    /// Applies `profile` and the fetch size to `query`.
+    /// Applies the default timeout, `profile` and the fetch size to `query`.
     /// Returns the row factory and whether the request pages.
     fn configure_request(
         &self,
@@ -45,6 +47,11 @@ impl SessionSettings {
         query: &mut LegacyQuery,
         profile: Option<&Py<PyExecutionProfile>>,
     ) -> (Option<WithOriginalPyObject<PyRowFactory>>, bool) {
+        if let Some(d) = self.timeout.duration()
+            && query.request_timeout().is_none()
+        {
+            query.set_request_timeout(d);
+        }
         let factory = match profile {
             Some(profile) => {
                 let profile = profile.get();
@@ -90,8 +97,16 @@ impl PyLegacySession {
             settings: Mutex::new(SessionSettings {
                 row_factory: None,
                 fetch_size: FetchSize::Driver,
+                timeout: RequestTimeout::Default,
             }),
         })
+    }
+
+    fn default_profile(&self) -> ExecutionProfile {
+        self.core
+            .inner
+            .get_default_execution_profile_handle()
+            .to_profile()
     }
 }
 
@@ -118,6 +133,7 @@ impl PyLegacySession {
 
         // The future keeps `query` as extracted; the overrides go on a copy.
         let mut executable = query.extracted.clone();
+        // Before configure_request, so that this argument wins over the session's default_timeout.
         if let Some(d) = timeout.duration() {
             executable.set_request_timeout(d);
         }
@@ -313,6 +329,24 @@ impl PyLegacySession {
         };
         self.settings.lock_py_attached(py).unwrap().fetch_size = fetch_size;
         Ok(())
+    }
+
+    /// Timeout in seconds of a request given none whose statement has none of
+    /// its own: the one set here, else the default profile's. `None` for no timeout.
+    #[getter]
+    fn get_default_timeout(&self, py: Python<'_>) -> Option<f64> {
+        let timeout = match self.settings.lock_py_attached(py).unwrap().timeout {
+            RequestTimeout::Default => self.default_profile().get_request_timeout(),
+            RequestTimeout::Never => None,
+            RequestTimeout::After(d) => Some(d),
+        };
+        timeout.map(|d| d.as_secs_f64())
+    }
+
+    /// Seconds, `None` for no timeout, or `UNSET` to fall back to the default profile's.
+    #[setter]
+    fn set_default_timeout(&self, py: Python<'_>, timeout: RequestTimeout) {
+        self.settings.lock_py_attached(py).unwrap().timeout = timeout;
     }
 }
 

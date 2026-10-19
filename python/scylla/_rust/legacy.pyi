@@ -108,6 +108,18 @@ class LegacySession:
         legacy driver did. Raises ``ValueError`` otherwise.
         """
 
+    @property
+    def default_timeout(self) -> float | None:
+        """
+        Timeout in seconds of a request given none whose statement has none of its
+        own: the one set here, else the default execution profile's. ``None`` for
+        no timeout.
+        """
+
+    @default_timeout.setter
+    def default_timeout(self, timeout: timedelta | float | None | UnsetType) -> None:
+        """Seconds, ``None`` for no timeout, or ``UNSET`` to fall back to the default profile's."""
+
 class QueryExhausted(Exception):
     """
     Raised by `ResponseFuture.start_fetching_next_page()` when there are no more pages.
