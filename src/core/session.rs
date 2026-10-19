@@ -1,8 +1,10 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
 use pyo3::types::PyString;
+use scylla::client::execution_profile::ExecutionProfileHandle;
 use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
 use scylla::statement::batch::BatchStatement;
@@ -375,6 +377,22 @@ impl StatementKind {
             Self::Unprepared(statement) => statement.set_tracing(should_trace),
         }
     }
+
+    /// The statement's own timeout; `None` defers to its execution profile.
+    pub(crate) fn request_timeout(&self) -> Option<Duration> {
+        match self {
+            Self::Prepared(prepared) => prepared.get_request_timeout(),
+            Self::Unprepared(statement) => statement.get_request_timeout(),
+        }
+    }
+
+    /// The statement's own execution profile; `None` defers to the session's default.
+    pub(crate) fn execution_profile_handle(&self) -> Option<&ExecutionProfileHandle> {
+        match self {
+            Self::Prepared(prepared) => prepared.get_execution_profile_handle(),
+            Self::Unprepared(statement) => statement.get_execution_profile_handle(),
+        }
+    }
 }
 
 impl ExecutableStatement {
@@ -388,6 +406,14 @@ impl ExecutableStatement {
 
     pub(crate) fn into_parts(self) -> (StatementKind, Option<PyRowFactory>) {
         (self.kind, self.row_factory)
+    }
+
+    pub(crate) fn request_timeout(&self) -> Option<Duration> {
+        self.kind.request_timeout()
+    }
+
+    pub(crate) fn execution_profile_handle(&self) -> Option<&ExecutionProfileHandle> {
+        self.kind.execution_profile_handle()
     }
 
     /// Whether the statement sets its own page size.

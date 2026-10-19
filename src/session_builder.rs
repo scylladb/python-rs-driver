@@ -1,3 +1,4 @@
+use crate::RUNTIME;
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{
     PyCompression, PyConsistency, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay,
@@ -5,7 +6,8 @@ use crate::enums::{
 use crate::errors::config::DriverSessionConfigError;
 use crate::errors::execution::DriverSessionConnectionError;
 use crate::execution_profile::PyExecutionProfile;
-use crate::future::{DriverFuture, boxed_py_future};
+use crate::future::{DriverFuture, boxed_py_future, catch_unwind};
+use crate::legacy::PyLegacySession;
 use crate::policies::address_translator::PyAddressTranslator;
 use crate::policies::authenticator_provider::PyAuthenticatorProvider;
 use crate::policies::host_filter::PyHostFilter;
@@ -509,6 +511,17 @@ impl SessionBuilder {
                 }
             }),
         )
+    }
+
+    /// Blocks until connected, returning the legacy (`cassandra-driver` compatible) session.
+    fn connect_legacy(&self, py: Python<'_>) -> PyResult<PyLegacySession> {
+        let (config, default_row_factory) = self.connect_params(py);
+
+        let connect = scylla::client::session::Session::connect(config);
+        let session = RUNTIME
+            .block_on(py, catch_unwind(connect))?
+            .map_err(DriverSessionConnectionError::new_session_error)?;
+        PyLegacySession::new(Arc::new(session), default_row_factory)
     }
 }
 

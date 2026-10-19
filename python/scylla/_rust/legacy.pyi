@@ -4,6 +4,29 @@ from uuid import UUID
 
 from scylla.cql_types import CqlColumnType
 from scylla.results import ColumnSpec, PagingState, RowFactoryLike
+from scylla.statement import Batch, PreparedStatement, Statement
+
+class LegacySession:
+    """
+    The legacy (``cassandra-driver`` compatible) session: blocking ``execute()``,
+    ``execute_async()`` returning a :class:`ResponseFuture`.
+
+    Created with ``SessionBuilder.connect_legacy()``.
+    """
+
+    def execute(
+        self,
+        query: PreparedStatement | Statement | Batch | str,
+        parameters: Any | None = None,
+    ) -> ResultSet:
+        """Execute ``query`` and block for its :class:`ResultSet`."""
+
+    def execute_async(
+        self,
+        query: PreparedStatement | Statement | Batch | str,
+        parameters: Any | None = None,
+    ) -> ResponseFuture:
+        """Execute ``query`` and return the :class:`ResponseFuture` delivering its result."""
 
 class QueryExhausted(Exception):
     """
