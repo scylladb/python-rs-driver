@@ -17,6 +17,11 @@ class LegacySession:
     and ``prepare()``, ``execute_async()`` returning a :class:`ResponseFuture`.
 
     Created with ``SessionBuilder.connect_legacy()``.
+
+    As in the legacy driver, session defaults and execution profiles do not mix.
+    A session built with ``SessionBuilder.execution_profile()`` raises
+    ``ValueError`` when ``row_factory`` or ``default_timeout`` is set. After one
+    of them is set, the ``execution_profile`` argument raises ``ValueError``.
     """
 
     def execute(
