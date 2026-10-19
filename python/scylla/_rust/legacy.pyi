@@ -89,6 +89,12 @@ class LegacySession:
         """
 
     @property
+    def row_factory(self) -> RowFactoryLike | None:
+        """Row factory of requests that do not set one; ``None`` for the driver default."""
+
+    @row_factory.setter
+    def row_factory(self, row_factory: RowFactoryLike | None) -> None: ...
+    @property
     def default_fetch_size(self) -> int | None:
         """
         Page size of requests whose statement sets none: the driver default until

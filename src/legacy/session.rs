@@ -32,6 +32,7 @@ use crate::utils::{PyDuration, WithOriginalPyObject};
 
 /// The session settings that can change after connect.
 struct SessionSettings {
+    row_factory: Option<WithOriginalPyObject<PyRowFactory>>,
     fetch_size: FetchSize,
 }
 
@@ -48,9 +49,9 @@ impl SessionSettings {
             Some(profile) => {
                 let profile = profile.get();
                 query.set_execution_profile_handle(profile.inner.clone().into_handle());
-                profile.row_factory.as_ref()
+                profile.row_factory.as_ref().or(self.row_factory.as_ref())
             }
-            None => None,
+            None => self.row_factory.as_ref(),
         };
         let paged = match self.fetch_size {
             FetchSize::Driver => true,
@@ -87,6 +88,7 @@ impl PyLegacySession {
         Ok(Self {
             core: SessionCore::new(inner, default_row_factory)?,
             settings: Mutex::new(SessionSettings {
+                row_factory: None,
                 fetch_size: FetchSize::Driver,
             }),
         })
@@ -258,6 +260,29 @@ impl PyLegacySession {
     #[getter]
     fn cluster(&self, py: Python<'_>) -> PyResult<Py<PyClusterState>> {
         self.core.cluster_state(py)
+    }
+
+    /// Row factory of requests that do not set one; `None` for the driver default.
+    #[getter]
+    fn get_row_factory(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        let settings = self.settings.lock_py_attached(py).unwrap();
+        settings
+            .row_factory
+            .as_ref()
+            .map(|f| f.original.clone_ref(py))
+    }
+
+    #[setter]
+    fn set_row_factory(
+        &self,
+        py: Python<'_>,
+        row_factory: Option<WithOriginalPyObject<PyRowFactory>>,
+    ) {
+        // Dropped once the lock is released: dropping it may run Python code.
+        let _previous = std::mem::replace(
+            &mut self.settings.lock_py_attached(py).unwrap().row_factory,
+            row_factory,
+        );
     }
 
     /// Page size of requests whose statement sets none: the driver default until
