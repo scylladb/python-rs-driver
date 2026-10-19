@@ -62,6 +62,15 @@ class LegacySession:
     ) -> PreparedStatement:
         """Prepare ``query``, blocking until the server answers."""
 
+    def wait_for_schema_agreement(self, wait_time: None = None, scope: None = None) -> bool:
+        """
+        Block until every reachable node reports the same schema version.
+
+        Returns ``False`` if the nodes do not agree within the session's schema
+        agreement timeout. ``wait_time`` and ``scope`` raise
+        ``NotImplementedError`` when given.
+        """
+
     def set_keyspace(self, keyspace: str) -> None:
         """Set the keyspace of every connection, blocking until done. Case-sensitive."""
 

@@ -8,13 +8,14 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use scylla::client::execution_profile::ExecutionProfileHandle;
 use scylla::client::session::Session;
+use scylla::errors::SchemaAgreementError;
 use scylla_cql::frame::request::query::PagingState;
 
 use crate::RUNTIME;
 use crate::batch::{BatchState, PyBatch};
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
 use crate::deserialize::row_factory::PyRowFactory;
-use crate::errors::execution::DriverStatementConversionError;
+use crate::errors::execution::{DriverSchemaAgreementError, DriverStatementConversionError};
 use crate::execution_profile::PyExecutionProfile;
 use crate::future::{LegacyRequestFuture, PyResponseFuture, catch_unwind};
 use crate::legacy::PyResultSet;
@@ -164,6 +165,30 @@ impl PyLegacySession {
 
         let prepared = self.core.clone().prepare(query);
         Ok(RUNTIME.block_on(py, catch_unwind(prepared))??)
+    }
+
+    /// Blocks until every reachable node reports the same schema version. `False`
+    /// when they do not agree within the session's schema agreement timeout.
+    #[pyo3(signature = (wait_time=None, scope=None))]
+    fn wait_for_schema_agreement(
+        &self,
+        py: Python<'_>,
+        wait_time: Option<Bound<'_, PyAny>>,
+        scope: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        error_if_present("wait_time", wait_time)?;
+        error_if_present("scope", scope)?;
+
+        let agreement = self.core.clone().await_schema_agreement();
+        match RUNTIME.block_on(py, catch_unwind(agreement))? {
+            Ok(_) => Ok(true),
+            Err(DriverSchemaAgreementError::RustDriverSchemaAgreementError { source })
+                if matches!(*source, SchemaAgreementError::Timeout(_)) =>
+            {
+                Ok(false)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Sets the keyspace of every connection, blocking until done.
