@@ -1,6 +1,7 @@
 //! `LegacySession`: the blocking, callback-driven session of the legacy driver.
 
 use std::num::NonZeroI32;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ use crate::cluster::state::PyClusterState;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{PyConsistency, PySerialConsistency};
+use crate::errors::ScyllaError;
 use crate::errors::execution::{DriverSchemaAgreementError, DriverStatementConversionError};
 use crate::execution_profile::PyExecutionProfile;
 use crate::future::{LegacyRequestFuture, PyResponseFuture, catch_unwind};
@@ -156,6 +158,7 @@ impl ConfigMode {
 pub(crate) struct PyLegacySession {
     core: SessionCore,
     settings: Mutex<SessionSettings>,
+    is_shutdown: AtomicBool,
 }
 
 impl PyLegacySession {
@@ -175,7 +178,17 @@ impl PyLegacySession {
                     ConfigMode::Uncommitted
                 },
             }),
+            is_shutdown: AtomicBool::new(false),
         })
+    }
+
+    /// Refuses a request once the session was shut down, as the legacy driver
+    /// did by closing its pools.
+    fn reject_if_shutdown(&self) -> PyResult<()> {
+        if self.is_shutdown.load(Ordering::Relaxed) {
+            return Err(ScyllaError::new_err("the session has been shut down"));
+        }
+        Ok(())
     }
 
     /// Reads a legacy default; `None` outside legacy mode.
@@ -216,6 +229,7 @@ impl PyLegacySession {
     ) -> PyResult<Py<PyResponseFuture>> {
         error_if_present("custom_payload", custom_payload)?;
         error_if_present("execute_as", execute_as)?;
+        self.reject_if_shutdown()?;
 
         // The future keeps `query` as extracted; the overrides go on a copy.
         let mut executable = query.extracted.clone();
@@ -316,6 +330,7 @@ impl PyLegacySession {
     ) -> PyResult<PyPreparedStatement> {
         error_if_present("custom_payload", custom_payload)?;
         error_if_present("keyspace", keyspace)?;
+        self.reject_if_shutdown()?;
 
         let prepared = self.core.clone().prepare(query);
         Ok(RUNTIME.block_on(py, catch_unwind(prepared))??)
@@ -347,6 +362,8 @@ impl PyLegacySession {
 
     /// Sets the keyspace of every connection, blocking until done.
     fn set_keyspace(&self, py: Python<'_>, keyspace: String) -> PyResult<()> {
+        self.reject_if_shutdown()?;
+
         let request = self.core.clone().use_keyspace(keyspace, true);
         RUNTIME.block_on(py, catch_unwind(request))??;
         Ok(())
@@ -514,6 +531,20 @@ impl PyLegacySession {
         Err(PyNotImplementedError::new_err(
             "Named execution profiles are not implemented.",
         ))
+    }
+
+    #[getter]
+    fn is_shutdown(&self) -> bool {
+        self.is_shutdown.load(Ordering::Relaxed)
+    }
+
+    /// Marks the session shut down: later requests are refused, but the
+    /// connections only close once the last reference is dropped.
+    ///
+    /// TODO: implement a proper shutdown, here and on `Session`, closing the
+    /// connections instead of waiting for the last reference to go away.
+    fn shutdown(&self) {
+        self.is_shutdown.store(true, Ordering::Relaxed);
     }
 }
 

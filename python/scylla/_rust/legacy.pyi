@@ -80,6 +80,14 @@ class LegacySession:
     def set_keyspace(self, keyspace: str) -> None:
         """Set the keyspace of every connection, blocking until done. Case-sensitive."""
 
+    def shutdown(self) -> None:
+        """
+        Mark the session shut down: ``execute``, ``execute_async`` and ``prepare``
+        then raise.
+        """
+
+    @property
+    def is_shutdown(self) -> bool: ...
     @property
     def keyspace(self) -> str | None:
         """The keyspace in use, if any."""
