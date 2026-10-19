@@ -11,8 +11,8 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import connect
-from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Date, Duration, Time
-from scylla.errors import DeserializationError, RowIterationError
+from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Date, Duration, Time, Timestamp
+from scylla.errors import RowIterationError
 from scylla.results import ColumnSpec, RowBuilder, RowFactory
 from scylla.session import Session
 
@@ -625,7 +625,7 @@ async def test_varint_deserialization_parametrized(
     assert row["value"] == value
 
 
-# Verifies correct deserialization of CQL timestamp into timezone-aware datetime
+# Verifies correct deserialization of CQL timestamp into Timestamp
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
@@ -659,8 +659,9 @@ async def test_timestamp_deserialization(
         value_sql=str(value_ms),
     )
 
-    assert isinstance(row["value"], datetime.datetime)
-    assert row["value"] == value
+    assert isinstance(row["value"], Timestamp)
+    assert row["value"] == Timestamp(value_ms)
+    assert row["value"].to_datetime() == value
 
 
 # Verifies correct deserialization of CQL time into Time
@@ -1138,26 +1139,19 @@ async def test_date_deserialization_extreme_ranges(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason=(
-        "CQL timestamp values may exceed the range supported by "
-        "Python datetime / chrono. Deserialization overflows for "
-        "extreme timestamps and currently fails."
-    ),
-)
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
-    "row_id,value_sql",
+    "row_id,milliseconds",
     [
-        (1, 10**16),  # far future → overflow
-        (2, -(10**16)),  # far past → overflow
+        (1, 10**16),  # far future
+        (2, -(10**16)),  # far past
     ],
 )
-async def test_timestamp_overflow(
+async def test_timestamp_outside_datetime_range(
     session: Session,
     table_factory: TableFactory,
     row_id: int,
-    value_sql: str,
+    milliseconds: int,
 ):
     row = await insert_and_fetch_single_row(
         session=session,
@@ -1165,10 +1159,12 @@ async def test_timestamp_overflow(
         schema="id int PRIMARY KEY, value timestamp",
         table_name="timestamp_overflow_table",
         row_id=row_id,
-        value_sql=value_sql,
+        value_sql=str(milliseconds),
     )
 
-    assert isinstance(row["value"], datetime.datetime)
+    assert row["value"] == Timestamp(milliseconds)
+    with pytest.raises(ValueError):
+        row["value"].to_datetime()
 
 
 @pytest.mark.asyncio
@@ -1200,24 +1196,6 @@ async def test_request_result_first_page_columns_for_non_rows(session: Session, 
 
     assert result.first_page_columns == ()
     assert result.first_page.columns == ()
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_db
-async def test_timestamp_overflow_raises_deserialization_error(session: Session, table_factory: TableFactory):
-    table = await table_factory(
-        "id int PRIMARY KEY, value timestamp",
-        "timestamp_overflow_table",
-    )
-
-    await session.execute(f"INSERT INTO {table} (id, value) VALUES (1, {10**16})")
-
-    result = await session.execute(f"SELECT * FROM {table} WHERE id = 1")
-
-    with pytest.raises(DeserializationError) as exc_info:
-        await result.first_row()
-
-    assert "column" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio

@@ -19,10 +19,12 @@ because ``CqlDate``, ``CqlTime`` and ``CqlDuration`` are the type descriptors.
 They are the values of CQL ``date``, ``time`` and ``duration`` columns.
 Writing also accepts ``datetime.date`` for ``date``, ``datetime.time`` for
 ``time`` and ``dateutil.relativedelta.relativedelta`` for ``duration``.
+
+``Timestamp`` is the same kind of exception, for CQL ``timestamp`` columns.
+Writing also accepts ``datetime.datetime``.
 """
 
 import ipaddress
-from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, TypeAlias
 from uuid import UUID
@@ -58,7 +60,7 @@ from ._rust.cluster.metadata import (  # pyright: ignore[reportMissingModuleSour
     CqlVarint,
     CqlVector,
 )
-from ._rust.types import CqlEmpty, Date, Duration, Time  # pyright: ignore[reportMissingModuleSource]
+from ._rust.types import CqlEmpty, Date, Duration, Time, Timestamp  # pyright: ignore[reportMissingModuleSource]
 
 if TYPE_CHECKING:
     CqlScalarValue: TypeAlias = (
@@ -102,7 +104,7 @@ if TYPE_CHECKING:
         | Date
         # CQL:
         # - Timestamp
-        | datetime
+        | Timestamp
         # CQL:
         # - Time
         | Time
@@ -140,7 +142,7 @@ else:
         | ipaddress.IPv4Address
         | ipaddress.IPv6Address
         | Date
-        | datetime
+        | Timestamp
         | Time
         | Duration
         | CqlEmpty
@@ -186,4 +188,5 @@ __all__ = [
     "Date",
     "Duration",
     "Time",
+    "Timestamp",
 ]

@@ -1,9 +1,8 @@
 use crate::deserialize::conversion::CqlVarintWrapper;
 use crate::deserialize::error::DriverDeserializationError;
-use crate::types::{CqlEmpty, DateValue, DurationValue, TimeValue};
+use crate::types::{CqlEmpty, DateValue, DurationValue, TimeValue, TimestampValue};
 use crate::utils::PyValueOrError;
 use bigdecimal::BigDecimal;
-use chrono::{DateTime, Utc};
 use pyo3::prelude::{PyDictMethods, PyListMethods, PySetMethods};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{
@@ -402,15 +401,11 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }
-                    // CQL Timestamp → Python datetime.datetime (UTC)
+                    // CQL Timestamp → Python scylla.cql_types.Timestamp
                     NativeType::Timestamp => {
-                        let t: DateTime<Utc> = CqlTimestamp::deserialize(typ, Some(v))
-                            .map_err(DriverDeserializationError::scylla_decode_failed)?
-                            .try_into()
-                            .map_err(DeserializationError::new)
+                        let t = CqlTimestamp::deserialize(typ, Some(v))
                             .map_err(DriverDeserializationError::scylla_decode_failed)?;
-
-                        t.into_pyobject(py)
+                        Bound::new(py, TimestampValue::from(t))
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }

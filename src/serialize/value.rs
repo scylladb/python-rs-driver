@@ -1,5 +1,5 @@
 use crate::serialize::error::{DriverSerializationError, TypeExpected};
-use crate::types::{DateValue, DurationValue, TimeValue, has_uniform_sign};
+use crate::types::{DateValue, DurationValue, TimeValue, TimestampValue, has_uniform_sign};
 
 use std::any::Any;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -200,11 +200,13 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 time.serialize(typ, cell_writer)
             }
             NativeType::Timestamp => {
-                let value = self
-                    .extract::<DateTime<Utc>>()
-                    .map_err(|_| self.mismatched_type_error::<CqlTimestamp>(typ))?;
-
-                let timestamp: CqlTimestamp = value.into();
+                let timestamp = match self.cast::<TimestampValue>() {
+                    Ok(timestamp) => CqlTimestamp::from(*timestamp.get()),
+                    Err(_) => self
+                        .extract::<DateTime<Utc>>()
+                        .map_err(|_| self.mismatched_type_error::<CqlTimestamp>(typ))?
+                        .into(),
+                };
 
                 timestamp.serialize(typ, cell_writer)
             }
@@ -360,6 +362,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             "Duration" | "relativedelta" => DURATION_COLUMNS,
             "Date" | "date" => DATE_COLUMNS,
             "datetime" => DATETIME_COLUMNS,
+            "Timestamp" => TIMESTAMP_COLUMNS,
             "IPv4Address" | "IPv6Address" => IP_COLUMNS,
             "Time" | "time" => TIME_COLUMNS,
             "UUID" => UUID_COLUMNS,
@@ -851,6 +854,10 @@ static DATETIME_COLUMNS: &[ColumnType<'static>] = &[
     ColumnType::Native(NativeType::Date),
     ColumnType::Native(NativeType::Timestamp),
 ];
+
+// List of CQL column types used to provide clear error messages
+// indicating which CQL types are compatible with Python `Timestamp` type.
+static TIMESTAMP_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Timestamp)];
 
 // List of CQL column types used to provide clear error messages
 // indicating which CQL types are compatible with Python `ipaddress.IPv4Address`

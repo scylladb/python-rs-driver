@@ -1,9 +1,9 @@
-use chrono::{NaiveDate, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, Utc};
 use pyo3::IntoPyObjectExt;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use scylla_cql::value::{CqlDate, CqlDuration, CqlTime};
+use scylla_cql::value::{CqlDate, CqlDuration, CqlTime, CqlTimestamp};
 
 static UNSET_INSTANCE: PyOnceLock<Py<UnsetType>> = PyOnceLock::new();
 
@@ -334,6 +334,77 @@ impl From<TimeValue> for CqlTime {
     }
 }
 
+#[pyclass(
+    module = "scylla.cql_types",
+    name = "Timestamp",
+    frozen,
+    eq,
+    ord,
+    hash,
+    skip_from_py_object
+)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TimestampValue {
+    #[pyo3(get)]
+    milliseconds: i64,
+}
+
+#[pymethods]
+impl TimestampValue {
+    #[new]
+    fn new(milliseconds: i64) -> Self {
+        Self { milliseconds }
+    }
+
+    #[staticmethod]
+    fn from_datetime(datetime: DateTime<FixedOffset>) -> Self {
+        CqlTimestamp::from(datetime.with_timezone(&Utc)).into()
+    }
+
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "pymethods cannot take self by value"
+    )]
+    fn to_datetime(&self) -> PyResult<DateTime<Utc>> {
+        self.utc_datetime().ok_or_else(|| {
+            PyValueError::new_err("The timestamp is outside the range of datetime.datetime.")
+        })
+    }
+
+    fn __getnewargs__(&self) -> (i64,) {
+        (self.milliseconds,)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Timestamp(milliseconds={})", self.milliseconds)
+    }
+
+    fn __str__(&self) -> String {
+        match self.utc_datetime() {
+            Some(datetime) => datetime.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            None => self.milliseconds.to_string(),
+        }
+    }
+}
+
+impl TimestampValue {
+    fn utc_datetime(self) -> Option<DateTime<Utc>> {
+        CqlTimestamp::from(self).try_into().ok()
+    }
+}
+
+impl From<CqlTimestamp> for TimestampValue {
+    fn from(t: CqlTimestamp) -> Self {
+        Self { milliseconds: t.0 }
+    }
+}
+
+impl From<TimestampValue> for CqlTimestamp {
+    fn from(t: TimestampValue) -> Self {
+        Self(t.milliseconds)
+    }
+}
+
 #[pymodule]
 pub(crate) fn types(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<UnsetType>()?;
@@ -341,5 +412,6 @@ pub(crate) fn types(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add_class::<DurationValue>()?;
     module.add_class::<DateValue>()?;
     module.add_class::<TimeValue>()?;
+    module.add_class::<TimestampValue>()?;
     Ok(())
 }

@@ -145,3 +145,56 @@ class Time:
     def __gt__(self, other: Time) -> bool: ...
     def __ge__(self, other: Time) -> bool: ...
     def __hash__(self) -> int: ...
+
+class Timestamp:
+    """
+    Value for a CQL ``timestamp`` column.
+
+    A CQL timestamp can be far outside the range of ``datetime.datetime``.
+    ``Timestamp`` holds every CQL timestamp without loss. Reading returns it,
+    and writing accepts it.
+
+    Parameters
+    ----------
+    milliseconds : int
+        Number of milliseconds after 1970-01-01 00:00:00 UTC. A negative
+        value is a time before that. Must fit in a signed 64-bit integer.
+
+    Raises
+    ------
+    OverflowError
+        If ``milliseconds`` does not fit in a signed 64-bit integer.
+    """
+
+    def __init__(self, milliseconds: int) -> None: ...
+    @staticmethod
+    def from_datetime(datetime: datetime.datetime) -> Timestamp:
+        """
+        Make a ``Timestamp`` from a timezone-aware ``datetime.datetime``.
+
+        The datetime can be in any time zone. The result has millisecond
+        precision. The microseconds after the last full millisecond are lost.
+
+        Raises
+        ------
+        TypeError
+            If the datetime has no time zone.
+        """
+    def to_datetime(self) -> datetime.datetime:
+        """
+        Convert the value to a ``datetime.datetime`` in UTC.
+
+        Raises
+        ------
+        ValueError
+            If the timestamp is outside the range of ``datetime.datetime``.
+        """
+    @property
+    def milliseconds(self) -> int:
+        """Number of milliseconds after 1970-01-01 00:00:00 UTC."""
+    def __eq__(self, other: object) -> bool: ...
+    def __lt__(self, other: Timestamp) -> bool: ...
+    def __le__(self, other: Timestamp) -> bool: ...
+    def __gt__(self, other: Timestamp) -> bool: ...
+    def __ge__(self, other: Timestamp) -> bool: ...
+    def __hash__(self) -> int: ...
