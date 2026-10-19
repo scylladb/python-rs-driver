@@ -43,16 +43,20 @@ impl PyLegacySession {
 #[pymethods]
 impl PyLegacySession {
     /// Sends `query` and returns the `ResponseFuture` delivering its result.
-    #[pyo3(signature = (query, parameters=None, paging_state=None))]
+    #[pyo3(signature = (query, parameters=None, trace=None, paging_state=None))]
     fn execute_async(
         &self,
         py: Python<'_>,
         query: WithOriginalPyObject<LegacyQuery>,
         parameters: Option<PyValueList>,
+        trace: Option<bool>,
         paging_state: Option<LegacyPagingState>,
     ) -> PyResult<Py<PyResponseFuture>> {
-        // The future keeps `query` as extracted; the request takes a copy.
-        let executable = query.extracted.clone();
+        // The future keeps `query` as extracted; the overrides go on a copy.
+        let mut executable = query.extracted.clone();
+        if let Some(trace) = trace {
+            executable.set_tracing(trace);
+        }
         let timeout_secs = executable
             .effective_timeout(&self.core.inner)
             .map(|d| d.as_secs_f64());
@@ -84,15 +88,16 @@ impl PyLegacySession {
     }
 
     /// Sends `query` and blocks for its `ResultSet`.
-    #[pyo3(signature = (query, parameters=None, paging_state=None))]
+    #[pyo3(signature = (query, parameters=None, trace=None, paging_state=None))]
     fn execute(
         &self,
         py: Python<'_>,
         query: WithOriginalPyObject<LegacyQuery>,
         parameters: Option<PyValueList>,
+        trace: Option<bool>,
         paging_state: Option<LegacyPagingState>,
     ) -> PyResult<Py<PyResultSet>> {
-        let future = self.execute_async(py, query, parameters, paging_state)?;
+        let future = self.execute_async(py, query, parameters, trace, paging_state)?;
         PyResponseFuture::result(future, py)
     }
 }
@@ -104,7 +109,15 @@ pub(crate) enum LegacyQuery {
     Statement(ExecutableStatement),
 }
 
+/// Per-execution overrides, applied to whichever kind of request this is.
 impl LegacyQuery {
+    fn set_tracing(&mut self, tracing: bool) {
+        match self {
+            Self::Batch(batch) => batch.options.inner.set_tracing(tracing),
+            Self::Statement(statement) => statement.set_tracing(tracing),
+        }
+    }
+
     /// The request's own timeout; `None` defers to its execution profile.
     fn request_timeout(&self) -> Option<Duration> {
         match self {

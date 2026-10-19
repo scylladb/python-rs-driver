@@ -18,14 +18,20 @@ class LegacySession:
         self,
         query: PreparedStatement | Statement | Batch | str,
         parameters: Any | None = None,
+        trace: bool | None = None,
         paging_state: PagingState | bytes | None = None,
     ) -> ResultSet:
-        """Execute ``query`` and block for its :class:`ResultSet`."""
+        """
+        Execute ``query`` and block for its :class:`ResultSet`.
+
+        ``trace`` overrides the ``tracing`` attribute of the statement; ``None`` keeps it.
+        """
 
     def execute_async(
         self,
         query: PreparedStatement | Statement | Batch | str,
         parameters: Any | None = None,
+        trace: bool | None = None,
         paging_state: PagingState | bytes | None = None,
     ) -> ResponseFuture:
         """Execute ``query`` and return the :class:`ResponseFuture` delivering its result."""
