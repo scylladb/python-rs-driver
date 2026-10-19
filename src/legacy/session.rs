@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyNotImplementedError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use scylla::client::execution_profile::ExecutionProfileHandle;
@@ -47,18 +47,23 @@ impl PyLegacySession {
 impl PyLegacySession {
     /// Sends `query` and returns the `ResponseFuture` delivering its result.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (query, parameters=None, trace=None, timeout=RequestTimeout::Default, execution_profile=None, paging_state=None, host=None))]
+    #[pyo3(signature = (query, parameters=None, trace=None, custom_payload=None, timeout=RequestTimeout::Default, execution_profile=None, paging_state=None, host=None, execute_as=None))]
     fn execute_async(
         &self,
         py: Python<'_>,
         query: WithOriginalPyObject<LegacyQuery>,
         parameters: Option<PyValueList>,
         trace: Option<bool>,
+        custom_payload: Option<Bound<'_, PyAny>>,
         timeout: RequestTimeout,
         execution_profile: Option<Py<PyExecutionProfile>>,
         paging_state: Option<LegacyPagingState>,
         host: Option<PyTargetPolicy>,
+        execute_as: Option<Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyResponseFuture>> {
+        error_if_present("custom_payload", custom_payload)?;
+        error_if_present("execute_as", execute_as)?;
+
         // The factory itself is for the request; the object as set is for the future to report.
         let mut request_factory = None;
         let mut row_factory = None;
@@ -114,7 +119,7 @@ impl PyLegacySession {
 
     /// Sends `query` and blocks for its `ResultSet`.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (query, parameters=None, timeout=RequestTimeout::Default, trace=None, execution_profile=None, paging_state=None, host=None))]
+    #[pyo3(signature = (query, parameters=None, timeout=RequestTimeout::Default, trace=None, custom_payload=None, execution_profile=None, paging_state=None, host=None, execute_as=None))]
     fn execute(
         &self,
         py: Python<'_>,
@@ -122,19 +127,23 @@ impl PyLegacySession {
         parameters: Option<PyValueList>,
         timeout: RequestTimeout,
         trace: Option<bool>,
+        custom_payload: Option<Bound<'_, PyAny>>,
         execution_profile: Option<Py<PyExecutionProfile>>,
         paging_state: Option<LegacyPagingState>,
         host: Option<PyTargetPolicy>,
+        execute_as: Option<Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyResultSet>> {
         let future = self.execute_async(
             py,
             query,
             parameters,
             trace,
+            custom_payload,
             timeout,
             execution_profile,
             paging_state,
             host,
+            execute_as,
         )?;
         PyResponseFuture::result(future, py)
     }
@@ -276,5 +285,15 @@ impl<'py> FromPyObject<'_, 'py> for LegacyPagingState {
         Err(PyTypeError::new_err(
             "paging_state must be a PagingState or bytes",
         ))
+    }
+}
+
+/// Rejects a legacy argument this driver has no equivalent for, if given.
+fn error_if_present(name: &str, value: Option<Bound<'_, PyAny>>) -> PyResult<()> {
+    match value {
+        None => Ok(()),
+        Some(_) => Err(PyNotImplementedError::new_err(format!(
+            "{name} is not supported by this driver"
+        ))),
     }
 }
