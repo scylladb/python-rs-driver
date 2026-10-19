@@ -11,7 +11,7 @@ use pyo3::types::PyBytes;
 use scylla::client::execution_profile::{ExecutionProfile, ExecutionProfileHandle};
 use scylla::client::session::Session;
 use scylla::errors::SchemaAgreementError;
-use scylla::statement::Statement;
+use scylla::statement::{Consistency, Statement};
 use scylla_cql::frame::request::query::PagingState;
 
 use crate::RUNTIME;
@@ -19,6 +19,7 @@ use crate::batch::{BatchState, PyBatch};
 use crate::cluster::state::PyClusterState;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
 use crate::deserialize::row_factory::PyRowFactory;
+use crate::enums::PyConsistency;
 use crate::errors::execution::{DriverSchemaAgreementError, DriverStatementConversionError};
 use crate::execution_profile::PyExecutionProfile;
 use crate::future::{LegacyRequestFuture, PyResponseFuture, catch_unwind};
@@ -95,6 +96,8 @@ enum ConfigMode {
 struct LegacyDefaults {
     row_factory: Option<WithOriginalPyObject<PyRowFactory>>,
     timeout: RequestTimeout,
+    /// `None` defers to the execution profile.
+    consistency: Option<Consistency>,
 }
 
 impl LegacyDefaults {
@@ -104,6 +107,11 @@ impl LegacyDefaults {
             && query.request_timeout().is_none()
         {
             query.set_request_timeout(d);
+        }
+        if let Some(consistency) = self.consistency
+            && query.consistency().is_none()
+        {
+            query.set_consistency(consistency);
         }
     }
 }
@@ -423,6 +431,34 @@ impl PyLegacySession {
         legacy.timeout = timeout;
         Ok(())
     }
+
+    /// Consistency of a request whose statement sets none: the one set here, else
+    /// the default profile's.
+    #[getter]
+    fn get_default_consistency_level(&self, py: Python<'_>) -> PyConsistency {
+        self.legacy_default(py, |s| s.consistency)
+            .flatten()
+            .unwrap_or_else(|| self.default_profile().get_consistency())
+            .into()
+    }
+
+    /// A consistency, or `UNSET` to fall back to the default profile's.
+    #[setter]
+    fn set_default_consistency_level(
+        &self,
+        py: Python<'_>,
+        consistency: MaybeUnset<PyConsistency>,
+    ) -> PyResult<()> {
+        let mut settings = self.settings.lock_py_attached(py).unwrap();
+        let legacy = settings
+            .mode
+            .legacy_defaults_mut("default_consistency_level")?;
+        legacy.consistency = match consistency {
+            MaybeUnset::Set(consistency) => Some(consistency.into()),
+            MaybeUnset::Unset => None,
+        };
+        Ok(())
+    }
 }
 
 /// What `execute_async` accepts: a batch, or anything executable as one statement.
@@ -488,6 +524,21 @@ impl LegacyQuery {
         match self {
             Self::Batch(batch) => batch.options.inner.get_request_timeout(),
             Self::Statement(statement) => statement.request_timeout(),
+        }
+    }
+
+    fn set_consistency(&mut self, consistency: Consistency) {
+        match self {
+            Self::Batch(batch) => batch.options.inner.set_consistency(consistency),
+            Self::Statement(statement) => statement.set_consistency(consistency),
+        }
+    }
+
+    /// The request's own consistency; `None` defers to its execution profile.
+    fn consistency(&self) -> Option<Consistency> {
+        match self {
+            Self::Batch(batch) => batch.options.inner.get_consistency(),
+            Self::Statement(statement) => statement.consistency(),
         }
     }
 

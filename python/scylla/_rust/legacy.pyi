@@ -9,7 +9,7 @@ from scylla.cql_types import CqlColumnType
 from scylla.results import ColumnSpec, PagingState, RowFactoryLike
 from scylla.routing import Target
 from scylla.session import ExecutionProfile
-from scylla.statement import Batch, PreparedStatement, Statement
+from scylla.statement import Batch, Consistency, PreparedStatement, Statement
 
 class LegacySession:
     """
@@ -20,8 +20,9 @@ class LegacySession:
 
     As in the legacy driver, session defaults and execution profiles do not mix.
     A session built with ``SessionBuilder.execution_profile()`` raises
-    ``ValueError`` when ``row_factory`` or ``default_timeout`` is set. After one
-    of them is set, the ``execution_profile`` argument raises ``ValueError``.
+    ``ValueError`` when a session default (``row_factory``, ``default_timeout``,
+    ``default_consistency_level``) is set. After one of them is set, the
+    ``execution_profile`` argument raises ``ValueError``.
     """
 
     def execute(
@@ -124,6 +125,17 @@ class LegacySession:
     @default_timeout.setter
     def default_timeout(self, timeout: timedelta | float | None | UnsetType) -> None:
         """Seconds, ``None`` for no timeout, or ``UNSET`` to fall back to the default profile's."""
+
+    @property
+    def default_consistency_level(self) -> Consistency:
+        """
+        Consistency of a request whose statement sets none: the one set here, else
+        the default execution profile's.
+        """
+
+    @default_consistency_level.setter
+    def default_consistency_level(self, consistency: Consistency | UnsetType) -> None:
+        """A consistency, or ``UNSET`` to fall back to the default profile's."""
 
 class QueryExhausted(Exception):
     """

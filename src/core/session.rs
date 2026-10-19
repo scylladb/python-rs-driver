@@ -7,6 +7,7 @@ use pyo3::types::PyString;
 use scylla::client::execution_profile::ExecutionProfileHandle;
 use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
+use scylla::statement::Consistency;
 use scylla::statement::batch::BatchStatement;
 use scylla::statement::prepared::PreparedStatement;
 use scylla::statement::unprepared::Statement;
@@ -399,11 +400,26 @@ impl StatementKind {
         }
     }
 
+    pub(crate) fn set_consistency(&mut self, consistency: Consistency) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_consistency(consistency),
+            Self::Unprepared(statement) => statement.set_consistency(consistency),
+        }
+    }
+
     /// The statement's own timeout; `None` defers to its execution profile.
     pub(crate) fn request_timeout(&self) -> Option<Duration> {
         match self {
             Self::Prepared(prepared) => prepared.get_request_timeout(),
             Self::Unprepared(statement) => statement.get_request_timeout(),
+        }
+    }
+
+    /// The statement's own consistency; `None` defers to its execution profile.
+    pub(crate) fn consistency(&self) -> Option<Consistency> {
+        match self {
+            Self::Prepared(prepared) => prepared.get_consistency(),
+            Self::Unprepared(statement) => statement.get_consistency(),
         }
     }
 
@@ -442,8 +458,16 @@ impl ExecutableStatement {
         self.kind.set_execution_profile_handle(handle);
     }
 
+    pub(crate) fn set_consistency(&mut self, consistency: Consistency) {
+        self.kind.set_consistency(consistency);
+    }
+
     pub(crate) fn request_timeout(&self) -> Option<Duration> {
         self.kind.request_timeout()
+    }
+
+    pub(crate) fn consistency(&self) -> Option<Consistency> {
+        self.kind.consistency()
     }
 
     pub(crate) fn execution_profile_handle(&self) -> Option<&ExecutionProfileHandle> {
