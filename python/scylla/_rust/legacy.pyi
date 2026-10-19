@@ -148,6 +148,12 @@ class LegacySession:
     def default_serial_consistency_level(self, serial: SerialConsistency | None | UnsetType) -> None:
         """A serial consistency, ``None`` for none, or ``UNSET`` to fall back to the default profile's."""
 
+    def get_execution_profile(self, name: Any) -> ExecutionProfile:
+        """Not implemented yet; raises ``NotImplementedError``."""
+
+    def execution_profile_clone_update(self, ep: Any, **kwargs: Any) -> ExecutionProfile:
+        """Not implemented yet; raises ``NotImplementedError``."""
+
 class QueryExhausted(Exception):
     """
     Raised by `ResponseFuture.start_fetching_next_page()` when there are no more pages.

@@ -7,7 +7,7 @@ use std::time::Duration;
 use pyo3::exceptions::{PyNotImplementedError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyDict};
 use scylla::client::execution_profile::{ExecutionProfile, ExecutionProfileHandle};
 use scylla::client::session::Session;
 use scylla::errors::SchemaAgreementError;
@@ -493,6 +493,27 @@ impl PyLegacySession {
             MaybeUnset::Unset => None,
         };
         Ok(())
+    }
+
+    // TODO: implement with named execution profiles (#33).
+    fn get_execution_profile(&self, name: Bound<'_, PyAny>) -> PyResult<()> {
+        let _ = name;
+        Err(PyNotImplementedError::new_err(
+            "Named execution profiles are not implemented.",
+        ))
+    }
+
+    // TODO: implement with named execution profiles (#33).
+    #[pyo3(signature = (ep, **kwargs))]
+    fn execution_profile_clone_update(
+        &self,
+        ep: Bound<'_, PyAny>,
+        kwargs: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let _ = (ep, kwargs);
+        Err(PyNotImplementedError::new_err(
+            "Named execution profiles are not implemented.",
+        ))
     }
 }
 
