@@ -13,6 +13,7 @@ use scylla_cql::frame::request::query::PagingState;
 
 use crate::RUNTIME;
 use crate::batch::{BatchState, PyBatch};
+use crate::cluster::state::PyClusterState;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::{DriverSchemaAgreementError, DriverStatementConversionError};
@@ -196,6 +197,18 @@ impl PyLegacySession {
         let request = self.core.clone().use_keyspace(keyspace, true);
         RUNTIME.block_on(py, catch_unwind(request))??;
         Ok(())
+    }
+
+    /// The keyspace in use, if any.
+    #[getter]
+    fn keyspace(&self) -> Option<String> {
+        self.core.inner.get_keyspace().map(|k| k.to_string())
+    }
+
+    /// A snapshot of the cluster state, in place of the legacy `Cluster` object; read it again to see changes.
+    #[getter]
+    fn cluster(&self, py: Python<'_>) -> PyResult<Py<PyClusterState>> {
+        self.core.cluster_state(py)
     }
 }
 
