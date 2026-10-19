@@ -17,6 +17,7 @@ use crate::errors::execution::DriverStatementConversionError;
 use crate::execution_profile::PyExecutionProfile;
 use crate::future::{LegacyRequestFuture, PyResponseFuture};
 use crate::legacy::PyResultSet;
+use crate::policies::load_balancing::PyTargetPolicy;
 use crate::results::PyPagingState;
 use crate::serialize::value_list::PyValueList;
 use crate::utils::WithOriginalPyObject;
@@ -44,7 +45,8 @@ impl PyLegacySession {
 #[pymethods]
 impl PyLegacySession {
     /// Sends `query` and returns the `ResponseFuture` delivering its result.
-    #[pyo3(signature = (query, parameters=None, trace=None, execution_profile=None, paging_state=None))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (query, parameters=None, trace=None, execution_profile=None, paging_state=None, host=None))]
     fn execute_async(
         &self,
         py: Python<'_>,
@@ -53,6 +55,7 @@ impl PyLegacySession {
         trace: Option<bool>,
         execution_profile: Option<Py<PyExecutionProfile>>,
         paging_state: Option<LegacyPagingState>,
+        host: Option<PyTargetPolicy>,
     ) -> PyResult<Py<PyResponseFuture>> {
         // The factory itself is for the request; the object as set is for the future to report.
         let mut request_factory = None;
@@ -70,6 +73,9 @@ impl PyLegacySession {
                 request_factory = Some(factory.extracted.clone());
                 row_factory = Some(factory.original.clone_ref(py));
             }
+        }
+        if let Some(target) = host {
+            executable.set_target(target);
         }
         let timeout_secs = executable
             .effective_timeout(&self.core.inner)
@@ -102,7 +108,8 @@ impl PyLegacySession {
     }
 
     /// Sends `query` and blocks for its `ResultSet`.
-    #[pyo3(signature = (query, parameters=None, trace=None, execution_profile=None, paging_state=None))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (query, parameters=None, trace=None, execution_profile=None, paging_state=None, host=None))]
     fn execute(
         &self,
         py: Python<'_>,
@@ -111,6 +118,7 @@ impl PyLegacySession {
         trace: Option<bool>,
         execution_profile: Option<Py<PyExecutionProfile>>,
         paging_state: Option<LegacyPagingState>,
+        host: Option<PyTargetPolicy>,
     ) -> PyResult<Py<PyResultSet>> {
         let future = self.execute_async(
             py,
@@ -119,6 +127,7 @@ impl PyLegacySession {
             trace,
             execution_profile,
             paging_state,
+            host,
         )?;
         PyResponseFuture::result(future, py)
     }
@@ -147,6 +156,13 @@ impl LegacyQuery {
                 .inner
                 .set_execution_profile_handle(Some(handle)),
             Self::Statement(statement) => statement.set_execution_profile_handle(handle),
+        }
+    }
+
+    fn set_target(&mut self, target: PyTargetPolicy) {
+        match self {
+            Self::Batch(batch) => batch.set_target(target),
+            Self::Statement(statement) => statement.set_target(target),
         }
     }
 
