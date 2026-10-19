@@ -385,6 +385,13 @@ impl StatementKind {
         }
     }
 
+    pub(crate) fn set_page_size(&mut self, page_size: i32) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_page_size(page_size),
+            Self::Unprepared(statement) => statement.set_page_size(page_size),
+        }
+    }
+
     pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
         match self {
             Self::Prepared(prepared) => prepared.set_execution_profile_handle(Some(handle)),
@@ -427,6 +434,10 @@ impl ExecutableStatement {
         self.kind.set_request_timeout(timeout);
     }
 
+    pub(crate) fn set_page_size(&mut self, page_size: i32) {
+        self.kind.set_page_size(page_size);
+    }
+
     pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
         self.kind.set_execution_profile_handle(handle);
     }
@@ -440,7 +451,6 @@ impl ExecutableStatement {
     }
 
     /// Whether the statement sets its own page size.
-    #[expect(dead_code, reason = "LegacySession reads it; it lands in a later PR")]
     pub(crate) fn is_page_size_set(&self) -> bool {
         self.is_page_size_set
     }

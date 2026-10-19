@@ -88,6 +88,20 @@ class LegacySession:
         changes, read this property again.
         """
 
+    @property
+    def default_fetch_size(self) -> int | None:
+        """
+        Page size of requests whose statement sets none: the driver default until
+        set, ``None`` once paging was disabled for them.
+        """
+
+    @default_fetch_size.setter
+    def default_fetch_size(self, fetch_size: int | None) -> None:
+        """
+        A positive page size, or ``None`` to run such requests unpaged, as the
+        legacy driver did. Raises ``ValueError`` otherwise.
+        """
+
 class QueryExhausted(Exception):
     """
     Raised by `ResponseFuture.start_fetching_next_page()` when there are no more pages.
