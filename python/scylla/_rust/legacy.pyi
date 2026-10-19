@@ -1,6 +1,6 @@
 from collections.abc import Callable, Iterable, Iterator
 from datetime import timedelta
-from typing import Any
+from typing import Any, Self
 from uuid import UUID
 
 from scylla._rust.types import UnsetType
@@ -85,6 +85,10 @@ class LegacySession:
         Mark the session shut down: ``execute``, ``execute_async`` and ``prepare``
         then raise.
         """
+
+    def __enter__(self) -> Self: ...
+    def __exit__(self, *args: object) -> None:
+        """Call :meth:`shutdown`. An exception raised in the ``with`` block propagates."""
 
     @property
     def is_shutdown(self) -> bool: ...

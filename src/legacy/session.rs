@@ -8,7 +8,7 @@ use std::time::Duration;
 use pyo3::exceptions::{PyNotImplementedError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3::types::{PyBytes, PyDict, PyTuple};
 use scylla::client::execution_profile::{ExecutionProfile, ExecutionProfileHandle};
 use scylla::client::session::Session;
 use scylla::errors::SchemaAgreementError;
@@ -545,6 +545,16 @@ impl PyLegacySession {
     /// connections instead of waiting for the last reference to go away.
     fn shutdown(&self) {
         self.is_shutdown.store(true, Ordering::Relaxed);
+    }
+
+    fn __enter__(slf: Py<Self>) -> Py<Self> {
+        slf
+    }
+
+    /// Shuts the session down when a `with` block exits; an exception raised in it propagates.
+    #[pyo3(signature = (*_args))]
+    fn __exit__(&self, _args: &Bound<'_, PyTuple>) {
+        self.shutdown();
     }
 }
 
