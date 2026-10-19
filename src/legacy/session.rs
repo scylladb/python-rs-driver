@@ -5,8 +5,10 @@ use std::time::Duration;
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use scylla::client::execution_profile::ExecutionProfileHandle;
 use scylla::client::session::Session;
+use scylla_cql::frame::request::query::PagingState;
 
 use crate::batch::{BatchState, PyBatch};
 use crate::core::session::{ExecutableStatement, SessionCore};
@@ -14,6 +16,7 @@ use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::DriverStatementConversionError;
 use crate::future::{LegacyRequestFuture, PyResponseFuture};
 use crate::legacy::PyResultSet;
+use crate::results::PyPagingState;
 use crate::serialize::value_list::PyValueList;
 use crate::utils::WithOriginalPyObject;
 
@@ -40,12 +43,13 @@ impl PyLegacySession {
 #[pymethods]
 impl PyLegacySession {
     /// Sends `query` and returns the `ResponseFuture` delivering its result.
-    #[pyo3(signature = (query, parameters=None))]
+    #[pyo3(signature = (query, parameters=None, paging_state=None))]
     fn execute_async(
         &self,
         py: Python<'_>,
         query: WithOriginalPyObject<LegacyQuery>,
         parameters: Option<PyValueList>,
+        paging_state: Option<LegacyPagingState>,
     ) -> PyResult<Py<PyResponseFuture>> {
         // The future keeps `query` as extracted; the request takes a copy.
         let executable = query.extracted.clone();
@@ -60,6 +64,9 @@ impl PyLegacySession {
                         "parameters cannot be passed with a Batch; bind values per statement",
                     ));
                 }
+                if paging_state.is_some() {
+                    return Err(PyTypeError::new_err("a Batch cannot be paged"));
+                }
 
                 Box::pin(self.core.clone().batch(batch, None))
             }
@@ -68,7 +75,7 @@ impl PyLegacySession {
                 statement,
                 parameters.unwrap_or_default(),
                 None,
-                None,
+                paging_state.map(|state| state.0),
                 true,
             )?),
         };
@@ -77,14 +84,15 @@ impl PyLegacySession {
     }
 
     /// Sends `query` and blocks for its `ResultSet`.
-    #[pyo3(signature = (query, parameters=None))]
+    #[pyo3(signature = (query, parameters=None, paging_state=None))]
     fn execute(
         &self,
         py: Python<'_>,
         query: WithOriginalPyObject<LegacyQuery>,
         parameters: Option<PyValueList>,
+        paging_state: Option<LegacyPagingState>,
     ) -> PyResult<Py<PyResultSet>> {
-        let future = self.execute_async(py, query, parameters)?;
+        let future = self.execute_async(py, query, parameters, paging_state)?;
         PyResponseFuture::result(future, py)
     }
 }
@@ -141,5 +149,24 @@ impl<'py> FromPyObject<'_, 'py> for LegacyQuery {
         }
 
         Ok(Self::Statement(ExecutableStatement::extract(obj)?))
+    }
+}
+
+/// The `paging_state` argument: a `PagingState`, or its raw bytes as the legacy driver kept them.
+struct LegacyPagingState(PagingState);
+
+impl<'py> FromPyObject<'_, 'py> for LegacyPagingState {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        if let Ok(state) = obj.cast::<PyPagingState>() {
+            return Ok(Self(state.get().inner().clone()));
+        }
+        if let Ok(bytes) = obj.cast::<PyBytes>() {
+            return Ok(Self(PagingState::new_from_raw_bytes(bytes.as_bytes())));
+        }
+        Err(PyTypeError::new_err(
+            "paging_state must be a PagingState or bytes",
+        ))
     }
 }
