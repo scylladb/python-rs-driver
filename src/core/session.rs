@@ -7,10 +7,10 @@ use pyo3::types::PyString;
 use scylla::client::execution_profile::ExecutionProfileHandle;
 use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
-use scylla::statement::Consistency;
 use scylla::statement::batch::BatchStatement;
 use scylla::statement::prepared::PreparedStatement;
 use scylla::statement::unprepared::Statement;
+use scylla::statement::{Consistency, SerialConsistency};
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 use scylla_cql::serialize::row::SerializedValues;
 use uuid::Uuid;
@@ -353,6 +353,8 @@ pub(crate) struct ExecutableStatement {
     /// The Rust driver cannot tell an explicit page size from its default. The
     /// legacy session applies its own default only to a statement without one.
     is_page_size_set: bool,
+    /// The Rust driver cannot tell an explicit "no serial consistency" from unset.
+    is_serial_consistency_set: bool,
 }
 
 #[derive(Clone)]
@@ -404,6 +406,13 @@ impl StatementKind {
         match self {
             Self::Prepared(prepared) => prepared.set_consistency(consistency),
             Self::Unprepared(statement) => statement.set_consistency(consistency),
+        }
+    }
+
+    pub(crate) fn set_serial_consistency(&mut self, serial: Option<SerialConsistency>) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_serial_consistency(serial),
+            Self::Unprepared(statement) => statement.set_serial_consistency(serial),
         }
     }
 
@@ -462,6 +471,11 @@ impl ExecutableStatement {
         self.kind.set_consistency(consistency);
     }
 
+    pub(crate) fn set_serial_consistency(&mut self, serial: Option<SerialConsistency>) {
+        self.kind.set_serial_consistency(serial);
+        self.is_serial_consistency_set = true;
+    }
+
     pub(crate) fn request_timeout(&self) -> Option<Duration> {
         self.kind.request_timeout()
     }
@@ -478,6 +492,11 @@ impl ExecutableStatement {
     pub(crate) fn is_page_size_set(&self) -> bool {
         self.is_page_size_set
     }
+
+    /// Whether the statement sets its own serial consistency, `None` included.
+    pub(crate) fn is_serial_consistency_set(&self) -> bool {
+        self.is_serial_consistency_set
+    }
 }
 
 impl<'py> FromPyObject<'_, 'py> for ExecutableStatement {
@@ -491,6 +510,7 @@ impl<'py> FromPyObject<'_, 'py> for ExecutableStatement {
                     kind: StatementKind::Prepared(o.inner.clone()),
                     row_factory: o.settings.row_factory(),
                     is_page_size_set: o.is_page_size_set,
+                    is_serial_consistency_set: o.is_serial_consistency_set,
                 }));
         }
 
@@ -502,6 +522,7 @@ impl<'py> FromPyObject<'_, 'py> for ExecutableStatement {
                 kind: StatementKind::Unprepared(text.into()),
                 row_factory: None,
                 is_page_size_set: false,
+                is_serial_consistency_set: false,
             });
         }
 
@@ -512,6 +533,7 @@ impl<'py> FromPyObject<'_, 'py> for ExecutableStatement {
                     kind: StatementKind::Unprepared(o.inner.clone()),
                     row_factory: o.settings.row_factory(),
                     is_page_size_set: o.is_page_size_set,
+                    is_serial_consistency_set: o.is_serial_consistency_set,
                 }));
         }
 

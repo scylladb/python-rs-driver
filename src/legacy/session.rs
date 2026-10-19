@@ -11,7 +11,7 @@ use pyo3::types::PyBytes;
 use scylla::client::execution_profile::{ExecutionProfile, ExecutionProfileHandle};
 use scylla::client::session::Session;
 use scylla::errors::SchemaAgreementError;
-use scylla::statement::{Consistency, Statement};
+use scylla::statement::{Consistency, SerialConsistency, Statement};
 use scylla_cql::frame::request::query::PagingState;
 
 use crate::RUNTIME;
@@ -19,7 +19,7 @@ use crate::batch::{BatchState, PyBatch};
 use crate::cluster::state::PyClusterState;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
 use crate::deserialize::row_factory::PyRowFactory;
-use crate::enums::PyConsistency;
+use crate::enums::{PyConsistency, PySerialConsistency};
 use crate::errors::execution::{DriverSchemaAgreementError, DriverStatementConversionError};
 use crate::execution_profile::PyExecutionProfile;
 use crate::future::{LegacyRequestFuture, PyResponseFuture, catch_unwind};
@@ -98,6 +98,8 @@ struct LegacyDefaults {
     timeout: RequestTimeout,
     /// `None` defers to the execution profile.
     consistency: Option<Consistency>,
+    /// `None` defers to the execution profile; `Some(None)` sends no serial consistency.
+    serial_consistency: Option<Option<SerialConsistency>>,
 }
 
 impl LegacyDefaults {
@@ -112,6 +114,11 @@ impl LegacyDefaults {
             && query.consistency().is_none()
         {
             query.set_consistency(consistency);
+        }
+        if let Some(serial) = self.serial_consistency
+            && !query.is_serial_consistency_set()
+        {
+            query.set_serial_consistency(serial);
         }
     }
 }
@@ -459,6 +466,34 @@ impl PyLegacySession {
         };
         Ok(())
     }
+
+    /// Serial consistency of a request whose statement sets none: the one set
+    /// here, else the default profile's. `None` for no serial consistency.
+    #[getter]
+    fn get_default_serial_consistency_level(&self, py: Python<'_>) -> Option<PySerialConsistency> {
+        self.legacy_default(py, |s| s.serial_consistency)
+            .flatten()
+            .unwrap_or_else(|| self.default_profile().get_serial_consistency())
+            .map(PySerialConsistency::from)
+    }
+
+    /// A serial consistency, `None` for none, or `UNSET` to fall back to the default profile's.
+    #[setter]
+    fn set_default_serial_consistency_level(
+        &self,
+        py: Python<'_>,
+        serial: MaybeUnset<Option<PySerialConsistency>>,
+    ) -> PyResult<()> {
+        let mut settings = self.settings.lock_py_attached(py).unwrap();
+        let legacy = settings
+            .mode
+            .legacy_defaults_mut("default_serial_consistency_level")?;
+        legacy.serial_consistency = match serial {
+            MaybeUnset::Set(serial) => Some(serial.map(SerialConsistency::from)),
+            MaybeUnset::Unset => None,
+        };
+        Ok(())
+    }
 }
 
 /// What `execute_async` accepts: a batch, or anything executable as one statement.
@@ -539,6 +574,24 @@ impl LegacyQuery {
         match self {
             Self::Batch(batch) => batch.options.inner.get_consistency(),
             Self::Statement(statement) => statement.consistency(),
+        }
+    }
+
+    fn set_serial_consistency(&mut self, serial: Option<SerialConsistency>) {
+        match self {
+            Self::Batch(batch) => {
+                batch.options.inner.set_serial_consistency(serial);
+                batch.options.is_serial_consistency_set = true;
+            }
+            Self::Statement(statement) => statement.set_serial_consistency(serial),
+        }
+    }
+
+    /// Whether the request sets its own serial consistency, `None` included.
+    fn is_serial_consistency_set(&self) -> bool {
+        match self {
+            Self::Batch(batch) => batch.options.is_serial_consistency_set,
+            Self::Statement(statement) => statement.is_serial_consistency_set(),
         }
     }
 
