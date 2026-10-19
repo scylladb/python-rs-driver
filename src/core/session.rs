@@ -378,6 +378,13 @@ impl StatementKind {
         }
     }
 
+    pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_execution_profile_handle(Some(handle)),
+            Self::Unprepared(statement) => statement.set_execution_profile_handle(Some(handle)),
+        }
+    }
+
     /// The statement's own timeout; `None` defers to its execution profile.
     pub(crate) fn request_timeout(&self) -> Option<Duration> {
         match self {
@@ -395,6 +402,7 @@ impl StatementKind {
     }
 }
 
+/// Per-execution overrides of the statement's own settings.
 impl ExecutableStatement {
     pub(crate) fn set_target(&mut self, target: PyTargetPolicy) {
         self.kind.set_target(target);
@@ -406,6 +414,10 @@ impl ExecutableStatement {
 
     pub(crate) fn into_parts(self) -> (StatementKind, Option<PyRowFactory>) {
         (self.kind, self.row_factory)
+    }
+
+    pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
+        self.kind.set_execution_profile_handle(handle);
     }
 
     pub(crate) fn request_timeout(&self) -> Option<Duration> {

@@ -14,6 +14,7 @@ use crate::batch::{BatchState, PyBatch};
 use crate::core::session::{ExecutableStatement, SessionCore};
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::DriverStatementConversionError;
+use crate::execution_profile::PyExecutionProfile;
 use crate::future::{LegacyRequestFuture, PyResponseFuture};
 use crate::legacy::PyResultSet;
 use crate::results::PyPagingState;
@@ -43,19 +44,32 @@ impl PyLegacySession {
 #[pymethods]
 impl PyLegacySession {
     /// Sends `query` and returns the `ResponseFuture` delivering its result.
-    #[pyo3(signature = (query, parameters=None, trace=None, paging_state=None))]
+    #[pyo3(signature = (query, parameters=None, trace=None, execution_profile=None, paging_state=None))]
     fn execute_async(
         &self,
         py: Python<'_>,
         query: WithOriginalPyObject<LegacyQuery>,
         parameters: Option<PyValueList>,
         trace: Option<bool>,
+        execution_profile: Option<Py<PyExecutionProfile>>,
         paging_state: Option<LegacyPagingState>,
     ) -> PyResult<Py<PyResponseFuture>> {
+        // The factory itself is for the request; the object as set is for the future to report.
+        let mut request_factory = None;
+        let mut row_factory = None;
+
         // The future keeps `query` as extracted; the overrides go on a copy.
         let mut executable = query.extracted.clone();
         if let Some(trace) = trace {
             executable.set_tracing(trace);
+        }
+        if let Some(profile) = execution_profile {
+            let profile = profile.get();
+            executable.set_execution_profile_handle(profile.inner.clone().into_handle());
+            if let Some(factory) = &profile.row_factory {
+                request_factory = Some(factory.extracted.clone());
+                row_factory = Some(factory.original.clone_ref(py));
+            }
         }
         let timeout_secs = executable
             .effective_timeout(&self.core.inner)
@@ -72,32 +86,40 @@ impl PyLegacySession {
                     return Err(PyTypeError::new_err("a Batch cannot be paged"));
                 }
 
-                Box::pin(self.core.clone().batch(batch, None))
+                Box::pin(self.core.clone().batch(batch, request_factory))
             }
 
             LegacyQuery::Statement(statement) => Box::pin(self.core.clone().execute(
                 statement,
                 parameters.unwrap_or_default(),
-                None,
+                request_factory,
                 paging_state.map(|state| state.0),
                 true,
             )?),
         };
 
-        PyResponseFuture::spawn(py, request, query, timeout_secs, None)
+        PyResponseFuture::spawn(py, request, query, timeout_secs, row_factory)
     }
 
     /// Sends `query` and blocks for its `ResultSet`.
-    #[pyo3(signature = (query, parameters=None, trace=None, paging_state=None))]
+    #[pyo3(signature = (query, parameters=None, trace=None, execution_profile=None, paging_state=None))]
     fn execute(
         &self,
         py: Python<'_>,
         query: WithOriginalPyObject<LegacyQuery>,
         parameters: Option<PyValueList>,
         trace: Option<bool>,
+        execution_profile: Option<Py<PyExecutionProfile>>,
         paging_state: Option<LegacyPagingState>,
     ) -> PyResult<Py<PyResultSet>> {
-        let future = self.execute_async(py, query, parameters, trace, paging_state)?;
+        let future = self.execute_async(
+            py,
+            query,
+            parameters,
+            trace,
+            execution_profile,
+            paging_state,
+        )?;
         PyResponseFuture::result(future, py)
     }
 }
@@ -115,6 +137,16 @@ impl LegacyQuery {
         match self {
             Self::Batch(batch) => batch.options.inner.set_tracing(tracing),
             Self::Statement(statement) => statement.set_tracing(tracing),
+        }
+    }
+
+    fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
+        match self {
+            Self::Batch(batch) => batch
+                .options
+                .inner
+                .set_execution_profile_handle(Some(handle)),
+            Self::Statement(statement) => statement.set_execution_profile_handle(handle),
         }
     }
 
