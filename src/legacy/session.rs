@@ -10,21 +10,23 @@ use scylla::client::execution_profile::ExecutionProfileHandle;
 use scylla::client::session::Session;
 use scylla_cql::frame::request::query::PagingState;
 
+use crate::RUNTIME;
 use crate::batch::{BatchState, PyBatch};
-use crate::core::session::{ExecutableStatement, SessionCore};
+use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::errors::execution::DriverStatementConversionError;
 use crate::execution_profile::PyExecutionProfile;
-use crate::future::{LegacyRequestFuture, PyResponseFuture};
+use crate::future::{LegacyRequestFuture, PyResponseFuture, catch_unwind};
 use crate::legacy::PyResultSet;
 use crate::policies::load_balancing::PyTargetPolicy;
 use crate::results::PyPagingState;
 use crate::serialize::value_list::PyValueList;
+use crate::statement::PyPreparedStatement;
 use crate::types::MaybeUnset;
 use crate::utils::{PyDuration, WithOriginalPyObject};
 
-/// The legacy (`cassandra-driver` compatible) session: blocking `execute()`,
-/// `execute_async()` returning a `ResponseFuture`.
+/// The legacy (`cassandra-driver` compatible) session: blocking `execute()`
+/// and `prepare()`, `execute_async()` returning a `ResponseFuture`.
 ///
 /// A facade over [`SessionCore`] like `Session`.
 #[pyclass(module = "scylla.legacy", name = "LegacySession", frozen)]
@@ -146,6 +148,29 @@ impl PyLegacySession {
             execute_as,
         )?;
         PyResponseFuture::result(future, py)
+    }
+
+    /// Prepares `query`, blocking until the server answers.
+    #[pyo3(signature = (query, custom_payload=None, keyspace=None))]
+    fn prepare(
+        &self,
+        py: Python<'_>,
+        query: PreparableStatement,
+        custom_payload: Option<Bound<'_, PyAny>>,
+        keyspace: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyPreparedStatement> {
+        error_if_present("custom_payload", custom_payload)?;
+        error_if_present("keyspace", keyspace)?;
+
+        let prepared = self.core.clone().prepare(query);
+        Ok(RUNTIME.block_on(py, catch_unwind(prepared))??)
+    }
+
+    /// Sets the keyspace of every connection, blocking until done.
+    fn set_keyspace(&self, py: Python<'_>, keyspace: String) -> PyResult<()> {
+        let request = self.core.clone().use_keyspace(keyspace, true);
+        RUNTIME.block_on(py, catch_unwind(request))??;
+        Ok(())
     }
 }
 

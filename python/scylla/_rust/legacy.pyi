@@ -13,8 +13,8 @@ from scylla.statement import Batch, PreparedStatement, Statement
 
 class LegacySession:
     """
-    The legacy (``cassandra-driver`` compatible) session: blocking ``execute()``,
-    ``execute_async()`` returning a :class:`ResponseFuture`.
+    The legacy (``cassandra-driver`` compatible) session: blocking ``execute()``
+    and ``prepare()``, ``execute_async()`` returning a :class:`ResponseFuture`.
 
     Created with ``SessionBuilder.connect_legacy()``.
     """
@@ -53,6 +53,17 @@ class LegacySession:
         execute_as: None = None,
     ) -> ResponseFuture:
         """Execute ``query`` and return the :class:`ResponseFuture` delivering its result."""
+
+    def prepare(
+        self,
+        query: Statement | str,
+        custom_payload: None = None,
+        keyspace: None = None,
+    ) -> PreparedStatement:
+        """Prepare ``query``, blocking until the server answers."""
+
+    def set_keyspace(self, keyspace: str) -> None:
+        """Set the keyspace of every connection, blocking until done. Case-sensitive."""
 
 class QueryExhausted(Exception):
     """
