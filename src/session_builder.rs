@@ -1,3 +1,4 @@
+use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{
     PyCompression, PyConsistency, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay,
 };
@@ -496,18 +497,7 @@ impl SessionBuilder {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<PySession, DriverSessionConnectionError>> {
-        let (config, default_row_factory) = {
-            let inner = self.inner.lock_py_attached(py).unwrap();
-            (
-                inner.config.clone(),
-                inner
-                    .execution_profile
-                    .get()
-                    .row_factory
-                    .as_ref()
-                    .map(|f| f.extracted.clone()),
-            )
-        };
+        let (config, default_row_factory) = self.connect_params(py);
 
         DriverFuture::spawn_on_tokio(
             py,
@@ -518,6 +508,22 @@ impl SessionBuilder {
                     Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
                 }
             }),
+        )
+    }
+}
+
+impl SessionBuilder {
+    /// The session config, and the row factory of the default execution profile.
+    fn connect_params(&self, py: Python<'_>) -> (SessionConfig, Option<PyRowFactory>) {
+        let inner = self.inner.lock_py_attached(py).unwrap();
+        (
+            inner.config.clone(),
+            inner
+                .execution_profile
+                .get()
+                .row_factory
+                .as_ref()
+                .map(|f| f.extracted.clone()),
         )
     }
 }
