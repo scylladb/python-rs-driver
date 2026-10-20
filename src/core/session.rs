@@ -48,8 +48,12 @@ impl SessionCore {
         default_row_factory: Option<PyRowFactory>,
         adapters: Arc<Adapters>,
     ) -> Result<Self, PyErr> {
-        let cluster_state =
-            Python::attach(|py| Py::new(py, PyClusterState::try_from(inner.get_cluster_state())?))?;
+        let cluster_state = Python::attach(|py| {
+            Py::new(
+                py,
+                PyClusterState::new(inner.get_cluster_state(), Arc::clone(&adapters))?,
+            )
+        })?;
         Ok(Self {
             cluster_state: Arc::new(Mutex::new(cluster_state)),
             inner,
@@ -223,7 +227,7 @@ impl SessionCore {
         if !Arc::ptr_eq(&rust_current_cluster_state, python_snapshot_cluster_state) {
             *py_cluster_state = Py::new(
                 py,
-                PyClusterState::try_from(self.inner.get_cluster_state())?,
+                PyClusterState::new(self.inner.get_cluster_state(), Arc::clone(&self.adapters))?,
             )?;
         }
 

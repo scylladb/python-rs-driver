@@ -538,7 +538,11 @@ impl CustomLoadBalancingPolicy {
             Arc::from_raw(incoming_ptr)
         };
 
-        let new_py_cluster_state = Py::new(py, PyClusterState::try_from(Arc::clone(&new_arc))?)?;
+        // A policy is not bound to one session, so it has no session's adapters.
+        let new_py_cluster_state = Py::new(
+            py,
+            PyClusterState::new(Arc::clone(&new_arc), Arc::default())?,
+        )?;
         *cache = Some((new_arc, new_py_cluster_state.clone_ref(py)));
 
         Ok(new_py_cluster_state)
