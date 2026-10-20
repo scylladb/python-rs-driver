@@ -1,3 +1,4 @@
+use pyo3::sync::PyOnceLock;
 use pyo3::{Py, PyClassInitializer, PyResult, Python, pyclass};
 use scylla::cluster::metadata::{CollectionType, ColumnType, NativeType};
 
@@ -10,6 +11,14 @@ macro_rules! native_type_class {
         impl $py_class {
             pub(crate) fn new() -> PyClassInitializer<Self> {
                 PyCqlNativeType::new().add_subclass(Self {})
+            }
+
+            /// The one instance, shared because the type holds no state.
+            fn shared(py: Python<'_>) -> PyResult<Py<PyCqlColumnType>> {
+                static INSTANCE: PyOnceLock<Py<PyCqlColumnType>> = PyOnceLock::new();
+                INSTANCE
+                    .get_or_try_init(py, || create_py_and_cast!(py, Self::new()))
+                    .map(|instance| instance.clone_ref(py))
             }
         }
     };
@@ -172,26 +181,26 @@ pub(crate) fn extract_column_type(
         {
             #[deny(clippy::wildcard_enum_match_arm)]
             match native_type {
-                NativeType::Ascii => create_py_and_cast!(py, PyCqlAscii::new()),
-                NativeType::BigInt => create_py_and_cast!(py, PyCqlBigInt::new()),
-                NativeType::Blob => create_py_and_cast!(py, PyCqlBlob::new()),
-                NativeType::Boolean => create_py_and_cast!(py, PyCqlBoolean::new()),
-                NativeType::Counter => create_py_and_cast!(py, PyCqlCounter::new()),
-                NativeType::Date => create_py_and_cast!(py, PyCqlDate::new()),
-                NativeType::Decimal => create_py_and_cast!(py, PyCqlDecimal::new()),
-                NativeType::Double => create_py_and_cast!(py, PyCqlDouble::new()),
-                NativeType::Duration => create_py_and_cast!(py, PyCqlDuration::new()),
-                NativeType::Float => create_py_and_cast!(py, PyCqlFloat::new()),
-                NativeType::Inet => create_py_and_cast!(py, PyCqlInet::new()),
-                NativeType::Int => create_py_and_cast!(py, PyCqlInt::new()),
-                NativeType::SmallInt => create_py_and_cast!(py, PyCqlSmallInt::new()),
-                NativeType::Text => create_py_and_cast!(py, PyCqlText::new()),
-                NativeType::Time => create_py_and_cast!(py, PyCqlTime::new()),
-                NativeType::Timestamp => create_py_and_cast!(py, PyCqlTimestamp::new()),
-                NativeType::Timeuuid => create_py_and_cast!(py, PyCqlTimeuuid::new()),
-                NativeType::TinyInt => create_py_and_cast!(py, PyCqlTinyInt::new()),
-                NativeType::Uuid => create_py_and_cast!(py, PyCqlUuid::new()),
-                NativeType::Varint => create_py_and_cast!(py, PyCqlVarint::new()),
+                NativeType::Ascii => PyCqlAscii::shared(py),
+                NativeType::BigInt => PyCqlBigInt::shared(py),
+                NativeType::Blob => PyCqlBlob::shared(py),
+                NativeType::Boolean => PyCqlBoolean::shared(py),
+                NativeType::Counter => PyCqlCounter::shared(py),
+                NativeType::Date => PyCqlDate::shared(py),
+                NativeType::Decimal => PyCqlDecimal::shared(py),
+                NativeType::Double => PyCqlDouble::shared(py),
+                NativeType::Duration => PyCqlDuration::shared(py),
+                NativeType::Float => PyCqlFloat::shared(py),
+                NativeType::Inet => PyCqlInet::shared(py),
+                NativeType::Int => PyCqlInt::shared(py),
+                NativeType::SmallInt => PyCqlSmallInt::shared(py),
+                NativeType::Text => PyCqlText::shared(py),
+                NativeType::Time => PyCqlTime::shared(py),
+                NativeType::Timestamp => PyCqlTimestamp::shared(py),
+                NativeType::Timeuuid => PyCqlTimeuuid::shared(py),
+                NativeType::TinyInt => PyCqlTinyInt::shared(py),
+                NativeType::Uuid => PyCqlUuid::shared(py),
+                NativeType::Varint => PyCqlVarint::shared(py),
                 _ => unreachable!("clippy testifies that the match is exhaustive"),
             }
         }
