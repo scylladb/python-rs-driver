@@ -231,17 +231,30 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             .map_err(|error| adapted.final_error(typ, error))
     }
 
+    /// Converts the value with its adapter, else with the `__cql_value__` method of its type.
     fn adapt(
         &self,
         typ: &ColumnType,
         context: &AdapterContext<'_>,
     ) -> Result<Option<Bound<'py, PyAny>>, SerializationError> {
-        let Some(adapter) = context.adapters.find(self.0) else {
-            return Ok(None);
+        // Called with the value as the first argument, as a method is.
+        let convert = match context.adapters.find(self.0) {
+            Some(adapter) => adapter,
+            None => match self
+                .get_type()
+                .getattr_opt(intern!(self.py(), "__cql_value__"))
+            {
+                Ok(Some(method)) => method,
+                // The type is still rejected, so its mismatch error is the useful one.
+                Ok(None) => return Ok(None),
+                Err(error) => {
+                    return Err(DriverSerializationError::python_interop_failed(error).into());
+                }
+            },
         };
         let cql_type = extract_column_type(self.py(), typ)
             .map_err(DriverSerializationError::python_interop_failed)?;
-        let adapted = adapter
+        let adapted = convert
             .call1((self.0, cql_type))
             .map_err(DriverSerializationError::python_interop_failed)?;
         Ok(Some(adapted))
