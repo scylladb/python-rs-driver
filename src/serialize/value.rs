@@ -1,3 +1,4 @@
+use crate::cluster::metadata::column_type::extract_column_type;
 use crate::cql_types::{
     PyCqlDate, PyCqlDuration, PyCqlTime, PyCqlTimestamp, aware_datetime_to_utc,
 };
@@ -56,10 +57,7 @@ enum NullWrite {
 /// Why a value was not written.
 pub(super) enum WriteError<'b> {
     /// The built-in path does not accept the Python type. The writer is unused.
-    Rejected(
-        #[expect(dead_code, reason = "the retry with an adapter reads it")] Pending<'b>,
-        Mismatch,
-    ),
+    Rejected(Pending<'b>, Mismatch),
     Failed(SerializationError),
 }
 
@@ -182,7 +180,6 @@ impl Mismatch {
 /// What the values of one row share while they are written.
 #[derive(Debug)]
 pub(super) struct AdapterContext<'a> {
-    #[expect(dead_code, reason = "the retry with an adapter reads it")]
     pub(super) adapters: &'a Adapters,
 }
 
@@ -215,14 +212,52 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         Self(inner)
     }
 
-    fn serialize_value<'b>(
+    fn serialize_with_fallback<'b>(
         &self,
         typ: &ColumnType,
         writer: Pending<'b>,
         context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.try_serialize_arbitrary_value(typ, writer, context)
-            .map_err(|error| self.final_error(typ, error))
+        match self.try_serialize_arbitrary_value(typ, writer, context) {
+            Ok(proof) => Ok(proof),
+            Err(WriteError::Rejected(writer, mismatch)) => {
+                self.serialize_adapted(typ, writer, mismatch, context)
+            }
+            Err(WriteError::Failed(error)) => Err(error),
+        }
+    }
+
+    /// Writes a rejected value after its adapter converts it. The result is not adapted again.
+    fn serialize_adapted<'b>(
+        &self,
+        typ: &ColumnType,
+        writer: Pending<'b>,
+        mismatch: Mismatch,
+        context: &AdapterContext<'_>,
+    ) -> Result<WrittenCellProof<'b>, SerializationError> {
+        let Some(adapted) = self.adapt(typ, context)? else {
+            return Err(self.mismatch_error(typ, mismatch));
+        };
+        let adapted = PyAnyWrapper::new(&adapted);
+        adapted
+            .try_serialize_arbitrary_value(typ, writer, context)
+            .map_err(|error| adapted.final_error(typ, error))
+    }
+
+    fn adapt(
+        &self,
+        typ: &ColumnType,
+        context: &AdapterContext<'_>,
+    ) -> Result<Option<Bound<'py, PyAny>>, SerializationError> {
+        let Some(adapter) = context.adapters.find(self.0) else {
+            return Ok(None);
+        };
+        let cql_type = extract_column_type(self.py(), typ)
+            .map_err(DriverSerializationError::python_interop_failed)?;
+        let adapted = adapter
+            .call1((self.0, cql_type))
+            .map_err(DriverSerializationError::python_interop_failed)?;
+        Ok(Some(adapted))
     }
 
     #[deny(clippy::wildcard_enum_match_arm)]
@@ -532,7 +567,7 @@ impl<'a, 'py> PySerializeValue for PyAnyWrapper<'a, 'py> {
         cell_writer: CellWriter<'b>,
         context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.serialize_value(typ, Pending::new(cell_writer), context)
+        self.serialize_with_fallback(typ, Pending::new(cell_writer), context)
     }
 }
 
@@ -552,7 +587,7 @@ impl SerializeValue for VectorElement<'_, '_> {
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         self.value
-            .serialize_value(typ, Pending::vector_element(cell_writer), self.context)
+            .serialize_with_fallback(typ, Pending::vector_element(cell_writer), self.context)
     }
 }
 
