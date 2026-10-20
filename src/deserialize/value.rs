@@ -1,14 +1,15 @@
 use crate::deserialize::conversion::{CqlDurationWrapper, CqlVarintWrapper};
 use crate::deserialize::error::DriverDeserializationError;
+use crate::types::CqlEmpty;
 use crate::utils::PyValueOrError;
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveTime, Utc};
-use pyo3::prelude::{PyDictMethods, PyListMethods, PyModule, PyModuleMethods, PySetMethods};
+use pyo3::prelude::{PyDictMethods, PyListMethods, PySetMethods};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{
     PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyString, PyTuple,
 };
-use pyo3::{Bound, IntoPyObject, Py, PyAny, PyResult, Python, pyclass, pymethods, pymodule};
+use pyo3::{Bound, IntoPyObject, Py, PyAny, PyResult, Python};
 use scylla::deserialize::value::FrameSliceWithMetadata;
 use scylla::deserialize::value::VectorIterator;
 use scylla::deserialize::value::{DeserializeValue, ListlikeIterator, MapIterator, UdtIterator};
@@ -98,16 +99,6 @@ impl<'frame, 'metadata, 'py> PyDeserializeValue<'frame, 'metadata, 'py> for PyDe
 
 pub(crate) struct PyDeserializedValue {
     value: Py<PyAny>,
-}
-
-#[pyclass(module = "scylla.cql_types", frozen)]
-pub struct CqlEmpty;
-
-#[pymethods]
-impl CqlEmpty {
-    fn __repr__(&self) -> &'static str {
-        "CqlEmpty"
-    }
 }
 
 struct List<T> {
@@ -564,11 +555,4 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
             )));
         }
     })
-}
-
-#[pymodule]
-pub(crate) fn value(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<CqlEmpty>()?;
-
-    Ok(())
 }

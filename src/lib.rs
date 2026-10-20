@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests;
 
-use crate::deserialize::value;
 use pyo3::prelude::*;
 use pyo3::sync::OnceExt;
 use pyo3::wrap_pyfunction;
@@ -157,7 +156,6 @@ fn scylla(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
         execution_profile::execution_profile,
     )?;
     add_submodule(py, module, "types", types::types)?;
-    add_submodule(py, module, "value", value::value)?;
     add_submodule(py, module, "batch", batch::batch)?;
     add_submodule(py, module, "policies", policies::policies)?;
     add_submodule(py, module, "cluster", cluster::cluster)?;

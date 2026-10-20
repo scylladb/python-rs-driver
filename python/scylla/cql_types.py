@@ -52,7 +52,7 @@ from ._rust.cluster.metadata import (  # pyright: ignore[reportMissingModuleSour
     CqlVarint,
     CqlVector,
 )
-from ._rust.value import CqlEmpty  # pyright: ignore[reportMissingModuleSource]
+from ._rust.types import CqlEmpty  # pyright: ignore[reportMissingModuleSource]
 
 if TYPE_CHECKING:
     from dateutil.relativedelta import relativedelta
