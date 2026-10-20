@@ -163,21 +163,6 @@ impl<'r> BatchValuesIterator<'r> for BoundBatchValuesIter<'r> {
     }
 }
 
-// The cluster state does not pass its adapters yet.
-impl SerializeRow for PyValueList {
-    fn serialize(
-        &self,
-        ctx: &RowSerializationContext<'_>,
-        row_writer: &mut RowWriter,
-    ) -> Result<(), SerializationError> {
-        BoundValuesRef::new(self, &Adapters::default()).serialize(ctx, row_writer)
-    }
-
-    fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
-    }
-}
-
 impl<'a, 'py> FromPyObject<'a, 'py> for PyValueList {
     type Error = PyErr;
 
