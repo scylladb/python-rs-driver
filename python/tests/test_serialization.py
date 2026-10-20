@@ -816,6 +816,24 @@ async def test_vector_serialization_tuple(session: Session, table_factory: Table
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+@pytest.mark.parametrize("element_type", ["float", "text"])
+async def test_vector_serialization_rejects_none_element(
+    session: Session, table_factory: TableFactory, element_type: str
+):
+    table = await table_factory(
+        f"id int PRIMARY KEY, embedding vector<{element_type}, 3>",
+        f"vector_none_{element_type}_table",
+    )
+    vector = [1.0, None, 2.0] if element_type == "float" else ["a", None, "b"]
+
+    with pytest.raises(ExecuteError) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, embedding) VALUES (?, ?)", (1, vector))
+
+    assert "vector element cannot be none" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_list_serialization(session: Session, table_factory: TableFactory):
     table = await table_factory(
         "id int PRIMARY KEY, tags list<text>, scores list<int>",

@@ -37,7 +37,17 @@ use scylla_cql::serialize::value::{
 /// A cell writer that nothing has used yet.
 ///
 /// Only the methods of [`Pending`] use it, so a rejected value is known to have written nothing.
-pub(super) struct Pending<'b>(CellWriter<'b>);
+pub(super) struct Pending<'b> {
+    cell_writer: CellWriter<'b>,
+    null: NullWrite,
+}
+
+/// Whether the slot behind a writer can hold a CQL null.
+enum NullWrite {
+    Allowed,
+    /// A vector element has no way to hold a null.
+    Rejected,
+}
 
 /// Why a value was not written.
 pub(super) enum WriteError<'b> {
@@ -51,7 +61,17 @@ pub(super) enum WriteError<'b> {
 
 impl<'b> Pending<'b> {
     pub(super) fn new(cell_writer: CellWriter<'b>) -> Self {
-        Self(cell_writer)
+        Self {
+            cell_writer,
+            null: NullWrite::Allowed,
+        }
+    }
+
+    fn vector_element(cell_writer: CellWriter<'b>) -> Self {
+        Self {
+            cell_writer,
+            null: NullWrite::Rejected,
+        }
     }
 
     fn write<T: SerializeValue + ?Sized>(
@@ -59,7 +79,9 @@ impl<'b> Pending<'b> {
         value: &T,
         typ: &ColumnType,
     ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
-        value.serialize(typ, self.0).map_err(WriteError::Failed)
+        value
+            .serialize(typ, self.cell_writer)
+            .map_err(WriteError::Failed)
     }
 
     /// Writes a converted native value, else rejects it with a mismatch against `E`.
@@ -82,13 +104,18 @@ impl<'b> Pending<'b> {
         typ: &ColumnType,
     ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
         match value {
-            Ok(value) => value.serialize_py(typ, self.0).map_err(WriteError::Failed),
+            Ok(value) => value
+                .serialize_py(typ, self.cell_writer)
+                .map_err(WriteError::Failed),
             Err(mismatch) => Err(self.reject(mismatch)),
         }
     }
 
-    fn set_null(self) -> WrittenCellProof<'b> {
-        self.0.set_null()
+    fn set_null(self) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
+        match self.null {
+            NullWrite::Allowed => Ok(self.cell_writer.set_null()),
+            NullWrite::Rejected => Err(DriverSerializationError::null_vector_element().into()),
+        }
     }
 
     fn reject(self, mismatch: Mismatch) -> WriteError<'b> {
@@ -165,6 +192,15 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         Self(inner)
     }
 
+    fn serialize_value<'b>(
+        &self,
+        typ: &ColumnType,
+        writer: Pending<'b>,
+    ) -> Result<WrittenCellProof<'b>, SerializationError> {
+        self.try_serialize_arbitrary_value(typ, writer)
+            .map_err(|error| self.final_error(typ, error))
+    }
+
     #[deny(clippy::wildcard_enum_match_arm)]
     /// Writes the value, or gives back the unused writer if its Python type is not accepted.
     fn try_serialize_arbitrary_value<'b>(
@@ -173,7 +209,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         writer: Pending<'b>,
     ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
         if self.is_none() {
-            return Ok(writer.set_null());
+            return writer.set_null();
         }
 
         match typ {
@@ -507,12 +543,13 @@ impl<'a, 'py> PySerializeValue for PyAnyWrapper<'a, 'py> {
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.try_serialize_arbitrary_value(typ, Pending::new(cell_writer))
-            .map_err(|error| self.final_error(typ, error))
+        self.serialize_value(typ, Pending::new(cell_writer))
     }
 }
 
-/// A vector element. The driver's vector helpers take a [`SerializeValue`].
+/// A vector element. It has no way to hold a null, so `None` is an error.
+///
+/// The driver's vector helpers take a [`SerializeValue`].
 struct VectorElement<'a, 'py>(PyAnyWrapper<'a, 'py>);
 
 impl SerializeValue for VectorElement<'_, '_> {
@@ -521,7 +558,8 @@ impl SerializeValue for VectorElement<'_, '_> {
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.0.serialize_py(typ, cell_writer)
+        self.0
+            .serialize_value(typ, Pending::vector_element(cell_writer))
     }
 }
 
