@@ -37,6 +37,29 @@ use scylla_cql::serialize::value::{
     serialize_next_variable_length_elem_unstable,
 };
 
+/// Why a Python value could not be converted for the built-in path.
+enum ConvertError {
+    /// The built-in path does not accept the Python type.
+    NotAccepted,
+    Failed(SerializationError),
+}
+
+impl From<DriverSerializationError> for ConvertError {
+    fn from(error: DriverSerializationError) -> Self {
+        Self::Failed(error.into())
+    }
+}
+
+impl From<RelativedeltaError> for ConvertError {
+    fn from(error: RelativedeltaError) -> Self {
+        match error {
+            RelativedeltaError::NotRelativedelta => Self::NotAccepted,
+            RelativedeltaError::Overflow => DriverSerializationError::value_overflow().into(),
+            RelativedeltaError::MixedSign => DriverSerializationError::mixed_sign_duration().into(),
+        }
+    }
+}
+
 /// Wrapper around a Python value (`PyAny`) used for Python → CQL serialization.
 ///
 /// This type performs runtime type inspection and dispatches the value to the
@@ -142,105 +165,131 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         match native_type {
             // Integer types.
-            NativeType::TinyInt => self.serialize_int::<i8>(typ, cell_writer),
-            NativeType::SmallInt => self.serialize_int::<i16>(typ, cell_writer),
-            NativeType::Int => self.serialize_int::<i32>(typ, cell_writer),
-            NativeType::BigInt => self.serialize_int::<i64>(typ, cell_writer),
-            NativeType::Counter => {
-                let value = self
-                    .cast::<PyInt>()
-                    .map_err(|_| self.mismatched_type_error::<Counter>(typ))?
-                    .extract::<i64>()
-                    .map_err(|_| DriverSerializationError::value_overflow())?;
-
-                let counter = Counter(value);
-                counter.serialize(typ, cell_writer)
+            NativeType::TinyInt => {
+                self.write_converted::<i8, i8>(typ, cell_writer, self.extract_int())
             }
-            NativeType::Varint => self.serialize_native::<BigInt>(typ, cell_writer),
+            NativeType::SmallInt => {
+                self.write_converted::<i16, i16>(typ, cell_writer, self.extract_int())
+            }
+            NativeType::Int => {
+                self.write_converted::<i32, i32>(typ, cell_writer, self.extract_int())
+            }
+            NativeType::BigInt => {
+                self.write_converted::<i64, i64>(typ, cell_writer, self.extract_int())
+            }
+            NativeType::Counter => {
+                let counter = match self.cast::<PyInt>() {
+                    Ok(int) => int
+                        .extract::<i64>()
+                        .map(Counter)
+                        .map_err(|_| DriverSerializationError::value_overflow().into()),
+                    Err(_) => Err(ConvertError::NotAccepted),
+                };
+                self.write_converted::<_, Counter>(typ, cell_writer, counter)
+            }
+            NativeType::Varint => {
+                self.write_converted::<BigInt, BigInt>(typ, cell_writer, self.extract_native())
+            }
 
             // Float types.
-            NativeType::Float => self.serialize_native::<f32>(typ, cell_writer),
-            NativeType::Double => self.serialize_native::<f64>(typ, cell_writer),
-            NativeType::Decimal => self.serialize_native::<BigDecimal>(typ, cell_writer),
+            NativeType::Float => {
+                self.write_converted::<f32, f32>(typ, cell_writer, self.extract_native())
+            }
+            NativeType::Double => {
+                self.write_converted::<f64, f64>(typ, cell_writer, self.extract_native())
+            }
+            NativeType::Decimal => self.write_converted::<BigDecimal, BigDecimal>(
+                typ,
+                cell_writer,
+                self.extract_native(),
+            ),
 
             // Boolean type.
-            NativeType::Boolean => self.serialize_native::<bool>(typ, cell_writer),
+            NativeType::Boolean => {
+                self.write_converted::<bool, bool>(typ, cell_writer, self.extract_native())
+            }
 
             // Text types.
             // TODO: Python allows strings that are not valid in Rust, conversion to `&str` is fallible.
             // This case is currently ignored and should be handled in the future. See: #41
-            NativeType::Ascii | NativeType::Text => self.serialize_native::<&str>(typ, cell_writer),
+            NativeType::Ascii | NativeType::Text => {
+                self.write_converted::<&str, &str>(typ, cell_writer, self.extract_native())
+            }
 
             // Binary data type.
             NativeType::Blob => {
-                let value = self
+                let bytes = self
                     .cast::<PyBytes>()
-                    .map_err(|_| self.mismatched_type_error::<PyBytes>(typ))?;
-
-                let bytes = value.as_bytes();
-
-                bytes.serialize(typ, cell_writer)
+                    .map(|value| value.as_bytes())
+                    .map_err(|_| ConvertError::NotAccepted);
+                self.write_converted::<_, PyBytes>(typ, cell_writer, bytes)
             }
 
             // Datatime types.
             NativeType::Date => match self.cast::<PyCqlDate>() {
                 Ok(date) => CqlDate::from(*date.get()).serialize(typ, cell_writer),
-                Err(_) => self.serialize_native::<NaiveDate>(typ, cell_writer),
+                Err(_) => self.write_converted::<NaiveDate, NaiveDate>(
+                    typ,
+                    cell_writer,
+                    self.extract_native(),
+                ),
             },
             NativeType::Duration => {
                 let duration = match self.cast::<PyCqlDuration>() {
-                    Ok(duration) => *duration.get(),
+                    Ok(duration) => Ok(*duration.get()),
                     Err(_) => self
                         .extract::<Relativedelta>()
                         .and_then(PyCqlDuration::try_from)
-                        .map_err(|err| self.relativedelta_error(err, typ))?,
+                        .map_err(ConvertError::from),
                 };
-                CqlDuration::from(duration).serialize(typ, cell_writer)
+                let duration = duration.map(CqlDuration::from);
+                self.write_converted::<_, CqlDuration>(typ, cell_writer, duration)
             }
             NativeType::Time => {
                 let time = match self.cast::<PyCqlTime>() {
-                    Ok(time) => CqlTime::from(*time.get()),
+                    Ok(time) => Ok(CqlTime::from(*time.get())),
                     Err(_) => self
                         .extract::<NaiveTime>()
-                        .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?
-                        .try_into()
-                        .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?,
+                        .ok()
+                        .and_then(|time| time.try_into().ok())
+                        .ok_or(ConvertError::NotAccepted),
                 };
-
-                time.serialize(typ, cell_writer)
+                self.write_converted::<_, CqlTime>(typ, cell_writer, time)
             }
             NativeType::Timestamp => {
                 let timestamp = match self.cast::<PyCqlTimestamp>() {
-                    Ok(timestamp) => CqlTimestamp::from(*timestamp.get()),
+                    Ok(timestamp) => Ok(CqlTimestamp::from(*timestamp.get())),
                     Err(_) => self
                         .cast::<PyDateTime>()
                         .map_err(PyErr::from)
                         .and_then(aware_datetime_to_utc)
-                        .map_err(|_| self.mismatched_type_error::<CqlTimestamp>(typ))?
-                        .into(),
+                        .map(CqlTimestamp::from)
+                        .map_err(|_| ConvertError::NotAccepted),
                 };
-
-                timestamp.serialize(typ, cell_writer)
+                self.write_converted::<_, CqlTimestamp>(typ, cell_writer, timestamp)
             }
 
             // IP address type.
             NativeType::Inet => {
-                let ip = self
-                    .ip_address()
-                    .map_err(DriverSerializationError::python_interop_failed)?
-                    .ok_or_else(|| self.mismatched_type_error::<IpAddr>(typ))?;
-
-                ip.serialize(typ, cell_writer)
+                let ip = match self.ip_address() {
+                    Ok(Some(ip)) => Ok(ip),
+                    Ok(None) => Err(ConvertError::NotAccepted),
+                    Err(err) => Err(DriverSerializationError::python_interop_failed(err).into()),
+                };
+                self.write_converted::<_, IpAddr>(typ, cell_writer, ip)
             }
 
             // UUID types.
             NativeType::Timeuuid => {
                 let uuid = self
                     .extract::<Uuid>()
-                    .map_err(|_| self.mismatched_type_error::<CqlTimeuuid>(typ))?;
-                CqlTimeuuid::from(uuid).serialize(typ, cell_writer)
+                    .map(CqlTimeuuid::from)
+                    .map_err(|_| ConvertError::NotAccepted);
+                self.write_converted::<_, CqlTimeuuid>(typ, cell_writer, uuid)
             }
-            NativeType::Uuid => self.serialize_native::<Uuid>(typ, cell_writer),
+            NativeType::Uuid => {
+                self.write_converted::<Uuid, Uuid>(typ, cell_writer, self.extract_native())
+            }
 
             _ => {
                 let name = format!("{:?}", native_type);
@@ -250,34 +299,39 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         }
     }
 
-    fn serialize_native<'b, T>(
+    /// Writes `value`, or reports a mismatch against `E` if it was not accepted.
+    fn write_converted<'b, T: SerializeValue, E: ?Sized>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
-    ) -> Result<WrittenCellProof<'b>, SerializationError>
-    where
-        T: pyo3::FromPyObject<'a, 'py> + SerializeValue,
-    {
-        self.extract::<T>()
-            .map_err(|_| self.mismatched_type_error::<T>(typ))?
-            .serialize(typ, cell_writer)
+        value: Result<T, ConvertError>,
+    ) -> Result<WrittenCellProof<'b>, SerializationError> {
+        match value {
+            Ok(value) => value.serialize(typ, cell_writer),
+            Err(ConvertError::NotAccepted) => Err(self.mismatched_type_error::<E>(typ)),
+            Err(ConvertError::Failed(error)) => Err(error),
+        }
     }
 
-    fn serialize_int<'b, T>(
-        &self,
-        typ: &ColumnType,
-        cell_writer: CellWriter<'b>,
-    ) -> Result<WrittenCellProof<'b>, SerializationError>
+    fn extract_native<T>(&self) -> Result<T, ConvertError>
     where
-        T: pyo3::FromPyObject<'a, 'py> + SerializeValue,
+        T: pyo3::FromPyObject<'a, 'py>,
+    {
+        self.extract::<T>().map_err(|_| ConvertError::NotAccepted)
+    }
+
+    fn extract_int<T>(&self) -> Result<T, ConvertError>
+    where
+        T: pyo3::FromPyObject<'a, 'py>,
     {
         // The cast to `PyInt` is performed to distinguish between two different error cases:
         // `MismatchedType` and `ValueOverflow`.
-        self.cast::<PyInt>()
-            .map_err(|_| self.mismatched_type_error::<T>(typ))?
-            .extract::<T>()
-            .map_err(|_| DriverSerializationError::value_overflow())?
-            .serialize(typ, cell_writer)
+        match self.cast::<PyInt>() {
+            Ok(int) => int
+                .extract::<T>()
+                .map_err(|_| DriverSerializationError::value_overflow().into()),
+            Err(_) => Err(ConvertError::NotAccepted),
+        }
     }
 
     /// Reads an `ipaddress.IPv4Address` or `IPv6Address`; `None` for any other type.
@@ -336,14 +390,6 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         };
 
         Ok(columns)
-    }
-
-    fn relativedelta_error(&self, err: RelativedeltaError, typ: &ColumnType) -> SerializationError {
-        match err {
-            RelativedeltaError::NotRelativedelta => self.mismatched_type_error::<CqlDuration>(typ),
-            RelativedeltaError::Overflow => DriverSerializationError::value_overflow().into(),
-            RelativedeltaError::MixedSign => DriverSerializationError::mixed_sign_duration().into(),
-        }
     }
 
     fn mismatched_type_error<T: ?Sized>(&self, typ: &ColumnType) -> SerializationError {
