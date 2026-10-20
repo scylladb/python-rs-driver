@@ -4,7 +4,7 @@ use crate::cql_types::{
 use crate::relativedelta::{Relativedelta, RelativedeltaError};
 use crate::serialize::error::{DriverValueSerializationError, TypeExpected};
 
-use std::any::Any;
+use std::any::{Any, type_name};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -62,6 +62,22 @@ impl From<RelativedeltaError> for ConvertError {
     }
 }
 
+/// What the built-in path expected instead of a rejected value.
+///
+/// The error is built only if nothing else writes the value, because building it allocates.
+pub(super) enum Mismatch {
+    /// A native CQL type. Holds the name of the Rust type the value was read as.
+    Native(&'static str),
+    Collection(TypeExpected),
+}
+
+impl Mismatch {
+    /// A mismatch against the native type `E`.
+    fn native<E: ?Sized>() -> Self {
+        Self::Native(type_name::<E>())
+    }
+}
+
 /// Writes a Python value to a CQL cell, as [`SerializeValue`] does for a Rust value.
 pub(super) trait PySerializeValue {
     fn serialize_py<'b>(
@@ -111,23 +127,17 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 typ: collection_typ,
                 ..
             } => match collection_typ {
-                CollectionType::List(_) => {
-                    let list = PyListWrapper::new(self).map_err(SerializationError::from)?;
+                CollectionType::List(_) => PyListWrapper::new(self)
+                    .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
+                    .serialize_py(typ, cell_writer),
 
-                    list.serialize_py(typ, cell_writer)
-                }
+                CollectionType::Map(_, _) => PyMapWrapper::new(self)
+                    .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
+                    .serialize_py(typ, cell_writer),
 
-                CollectionType::Map(_, _) => {
-                    let map = PyMapWrapper::new(self).map_err(SerializationError::from)?;
-
-                    map.serialize_py(typ, cell_writer)
-                }
-
-                CollectionType::Set(_) => {
-                    let set = PySetWrapper::new(self).map_err(SerializationError::from)?;
-
-                    set.serialize_py(typ, cell_writer)
-                }
+                CollectionType::Set(_) => PySetWrapper::new(self)
+                    .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
+                    .serialize_py(typ, cell_writer),
 
                 _ => {
                     let name = format!("{:?}", collection_typ);
@@ -139,34 +149,19 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             ColumnType::Vector {
                 typ: element_typ,
                 dimensions,
-            } => {
-                let vector = PyVectorWrapper::new(self, *dimensions, element_typ)
-                    .map_err(SerializationError::from)?;
-
-                vector.serialize_py(typ, cell_writer)
-            }
+            } => PyVectorWrapper::new(self, *dimensions, element_typ)
+                .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
+                .serialize_py(typ, cell_writer),
 
             // Supports UDTs passed as Python dicts.
             // For Python dataclass instances, convert to dict first (e.g., using dataclasses.asdict()).
-            ColumnType::UserDefinedType { definition, .. } => {
-                let Ok(dict) = PyUdtWrapper::new(self, definition) else {
-                    return Err(
-                        DriverValueSerializationError::type_mismatch(TypeExpected::Udt).into(),
-                    );
-                };
+            ColumnType::UserDefinedType { definition, .. } => PyUdtWrapper::new(self, definition)
+                .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
+                .serialize_py(typ, cell_writer),
 
-                dict.serialize_py(typ, cell_writer)
-            }
-
-            ColumnType::Tuple(elements_types) => {
-                let Ok(tuple) = PyTupleWrapper::new(self, elements_types) else {
-                    return Err(
-                        DriverValueSerializationError::type_mismatch(TypeExpected::Tuple).into(),
-                    );
-                };
-
-                tuple.serialize_py(typ, cell_writer)
-            }
+            ColumnType::Tuple(elements_types) => PyTupleWrapper::new(self, elements_types)
+                .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
+                .serialize_py(typ, cell_writer),
             _ => Err(DriverValueSerializationError::unsupported_type(format!("{typ:?}")).into()),
         }
     }
@@ -325,7 +320,9 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         match value {
             Ok(value) => value.serialize(typ, cell_writer),
-            Err(ConvertError::NotAccepted) => Err(self.mismatched_type_error::<E>(typ)),
+            Err(ConvertError::NotAccepted) => {
+                Err(self.mismatch_error(typ, Mismatch::native::<E>()))
+            }
             Err(ConvertError::Failed(error)) => Err(error),
         }
     }
@@ -411,12 +408,23 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         Ok(columns)
     }
 
-    fn mismatched_type_error<T: ?Sized>(&self, typ: &ColumnType) -> SerializationError {
-        let expected = match self.map_type_to_expected() {
-            Ok(expected) => expected,
-            Err(e) => return e,
-        };
-        mk_typck_err::<T>(typ, BuiltinTypeCheckErrorKind::MismatchedType { expected })
+    fn mismatch_error(&self, typ: &ColumnType, mismatch: Mismatch) -> SerializationError {
+        match mismatch {
+            Mismatch::Native(rust_name) => {
+                let expected = match self.map_type_to_expected() {
+                    Ok(expected) => expected,
+                    Err(e) => return e,
+                };
+                mk_typck_err_named(
+                    rust_name,
+                    typ,
+                    BuiltinTypeCheckErrorKind::MismatchedType { expected },
+                )
+            }
+            Mismatch::Collection(expected) => {
+                DriverValueSerializationError::type_mismatch(expected).into()
+            }
+        }
     }
 }
 
@@ -539,10 +547,10 @@ impl<'a, 'py> Deref for PyListWrapper<'a, 'py> {
 }
 
 impl<'a, 'py> PyListWrapper<'a, 'py> {
-    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverValueSerializationError> {
+    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, Mismatch> {
         let list: &Bound<PyList> = value
             .cast::<PyList>()
-            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::List))?;
+            .map_err(|_| Mismatch::Collection(TypeExpected::List))?;
         Ok(PyListWrapper { inner: list })
     }
 }
@@ -570,10 +578,10 @@ impl<'a, 'py> Deref for PySetWrapper<'a, 'py> {
 }
 
 impl<'a, 'py> PySetWrapper<'a, 'py> {
-    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverValueSerializationError> {
+    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, Mismatch> {
         let set: &Bound<PySet> = value
             .cast::<PySet>()
-            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Set))?;
+            .map_err(|_| Mismatch::Collection(TypeExpected::Set))?;
         Ok(PySetWrapper(set))
     }
 }
@@ -601,10 +609,10 @@ impl<'a, 'py> Deref for PyMapWrapper<'a, 'py> {
 }
 
 impl<'a, 'py> PyMapWrapper<'a, 'py> {
-    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverValueSerializationError> {
+    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, Mismatch> {
         let map: &Bound<PyMapping> = value
             .cast::<PyMapping>()
-            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Map))?;
+            .map_err(|_| Mismatch::Collection(TypeExpected::Map))?;
         Ok(PyMapWrapper(map))
     }
 }
@@ -682,13 +690,13 @@ impl<'py, 'a> PyVectorWrapper<'py, 'a> {
         value: &PyAnyWrapper<'a, 'py>,
         dimension: u16,
         element_type: &'a ColumnType<'a>,
-    ) -> Result<Self, DriverValueSerializationError> {
+    ) -> Result<Self, Mismatch> {
         let items = if let Ok(list) = value.cast::<PyList>() {
             VectorItems::List(list)
         } else {
             let tuple = value
                 .cast::<PyTuple>()
-                .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Vector))?;
+                .map_err(|_| Mismatch::Collection(TypeExpected::Vector))?;
             VectorItems::Tuple(tuple)
         };
         Ok(PyVectorWrapper {
@@ -748,10 +756,10 @@ impl<'py, 'a> PyUdtWrapper<'py, 'a> {
     fn new(
         value: &PyAnyWrapper<'a, 'py>,
         definition: &'a Arc<UserDefinedType<'a>>,
-    ) -> Result<Self, DriverValueSerializationError> {
+    ) -> Result<Self, Mismatch> {
         let dict: &Bound<PyDict> = value
             .cast::<PyDict>()
-            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Udt))?;
+            .map_err(|_| Mismatch::Collection(TypeExpected::Udt))?;
         Ok(PyUdtWrapper {
             inner: dict,
             definition,
@@ -809,10 +817,10 @@ impl<'py, 'a> PyTupleWrapper<'py, 'a> {
     fn new(
         value: &PyAnyWrapper<'a, 'py>,
         elements_types: &'a Vec<ColumnType<'_>>,
-    ) -> Result<Self, DriverValueSerializationError> {
+    ) -> Result<Self, Mismatch> {
         let tuple: &Bound<PyTuple> = value
             .cast::<PyTuple>()
-            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Tuple))?;
+            .map_err(|_| Mismatch::Collection(TypeExpected::Tuple))?;
         Ok(PyTupleWrapper {
             inner: tuple,
             elements_types,
@@ -926,8 +934,16 @@ fn mk_typck_err<T: ?Sized>(
     got: &ColumnType,
     kind: impl Into<BuiltinTypeCheckErrorKind>,
 ) -> SerializationError {
+    mk_typck_err_named(type_name::<T>(), got, kind)
+}
+
+fn mk_typck_err_named(
+    rust_name: &'static str,
+    got: &ColumnType,
+    kind: impl Into<BuiltinTypeCheckErrorKind>,
+) -> SerializationError {
     SerializationError::new(BuiltinTypeCheckError {
-        rust_name: std::any::type_name::<T>(),
+        rust_name,
         got: got.clone().into_owned(),
         kind: kind.into(),
     })
