@@ -37,6 +37,80 @@ use scylla_cql::serialize::value::{
     serialize_next_variable_length_elem_unstable,
 };
 
+/// A cell writer that nothing has used yet.
+///
+/// Only the methods of [`Pending`] use it, so a rejected value is known to have written nothing.
+pub(super) struct Pending<'b>(CellWriter<'b>);
+
+/// Why a value was not written.
+pub(super) enum WriteError<'b> {
+    /// The built-in path does not accept the Python type. The writer is unused.
+    Rejected(
+        #[expect(dead_code, reason = "the retry with an adapter reads it")] Pending<'b>,
+        Mismatch,
+    ),
+    Failed(SerializationError),
+}
+
+impl<'b> Pending<'b> {
+    pub(super) fn new(cell_writer: CellWriter<'b>) -> Self {
+        Self(cell_writer)
+    }
+
+    fn write<T: SerializeValue + ?Sized>(
+        self,
+        value: &T,
+        typ: &ColumnType,
+    ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
+        value.serialize(typ, self.0).map_err(WriteError::Failed)
+    }
+
+    /// Writes a converted native value, else rejects it with a mismatch against `E`.
+    fn write_native_or_reject<T: SerializeValue, E: ?Sized>(
+        self,
+        value: Result<T, ConvertError>,
+        typ: &ColumnType,
+    ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
+        match value {
+            Ok(value) => self.write(&value, typ),
+            Err(ConvertError::NotAccepted) => Err(self.reject(Mismatch::native::<E>())),
+            Err(ConvertError::Failed(error)) => Err(WriteError::Failed(error)),
+        }
+    }
+
+    /// Writes `value` if the built-in path accepted the Python type, else rejects it.
+    fn write_compound_or_reject<T: PySerializeValue>(
+        self,
+        value: Result<T, Mismatch>,
+        typ: &ColumnType,
+    ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
+        match value {
+            Ok(value) => value.serialize_py(typ, self.0).map_err(WriteError::Failed),
+            Err(mismatch) => Err(self.reject(mismatch)),
+        }
+    }
+
+    fn set_null(self) -> WrittenCellProof<'b> {
+        self.0.set_null()
+    }
+
+    fn reject(self, mismatch: Mismatch) -> WriteError<'b> {
+        WriteError::Rejected(self, mismatch)
+    }
+}
+
+impl From<SerializationError> for WriteError<'_> {
+    fn from(error: SerializationError) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl From<DriverSerializationError> for WriteError<'_> {
+    fn from(error: DriverSerializationError) -> Self {
+        Self::Failed(error.into())
+    }
+}
+
 /// Why a Python value could not be converted for the built-in path.
 enum ConvertError {
     /// The built-in path does not accept the Python type.
@@ -105,37 +179,32 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
     }
 
     #[deny(clippy::wildcard_enum_match_arm)]
-    /// Dispatcher that inspects ColumnType and, based on that, forwards the value
-    /// to the appropriate serializer.
+    /// Writes the value, or gives back the unused writer if its Python type is not accepted.
     fn serialize_arbitrary_value<'b>(
         &self,
         typ: &ColumnType,
-        cell_writer: CellWriter<'b>,
-    ) -> Result<WrittenCellProof<'b>, SerializationError> {
+        writer: Pending<'b>,
+    ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
         if self.is_none() {
-            return Ok(cell_writer.set_null());
+            return Ok(writer.set_null());
         }
 
         match typ {
-            ColumnType::Native(native_type) => {
-                self.serialize_natives(typ, native_type, cell_writer)
-            }
+            ColumnType::Native(native_type) => self.serialize_natives(typ, native_type, writer),
 
             ColumnType::Collection {
                 typ: collection_typ,
                 ..
             } => match collection_typ {
-                CollectionType::List(_) => PyListWrapper::new(self)
-                    .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
-                    .serialize_py(typ, cell_writer),
-
-                CollectionType::Map(_, _) => PyMapWrapper::new(self)
-                    .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
-                    .serialize_py(typ, cell_writer),
-
-                CollectionType::Set(_) => PySetWrapper::new(self)
-                    .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
-                    .serialize_py(typ, cell_writer),
+                CollectionType::List(_) => {
+                    writer.write_compound_or_reject(PyListWrapper::new(self), typ)
+                }
+                CollectionType::Map(_, _) => {
+                    writer.write_compound_or_reject(PyMapWrapper::new(self), typ)
+                }
+                CollectionType::Set(_) => {
+                    writer.write_compound_or_reject(PySetWrapper::new(self), typ)
+                }
 
                 _ => {
                     let name = format!("{:?}", collection_typ);
@@ -147,19 +216,20 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             ColumnType::Vector {
                 typ: element_typ,
                 dimensions,
-            } => PyVectorWrapper::new(self, *dimensions, element_typ)
-                .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
-                .serialize_py(typ, cell_writer),
+            } => writer.write_compound_or_reject(
+                PyVectorWrapper::new(self, *dimensions, element_typ),
+                typ,
+            ),
 
             // Supports UDTs passed as Python dicts.
             // For Python dataclass instances, convert to dict first (e.g., using dataclasses.asdict()).
-            ColumnType::UserDefinedType { definition, .. } => PyUdtWrapper::new(self, definition)
-                .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
-                .serialize_py(typ, cell_writer),
+            ColumnType::UserDefinedType { definition, .. } => {
+                writer.write_compound_or_reject(PyUdtWrapper::new(self, definition), typ)
+            }
 
-            ColumnType::Tuple(elements_types) => PyTupleWrapper::new(self, elements_types)
-                .map_err(|mismatch| self.mismatch_error(typ, mismatch))?
-                .serialize_py(typ, cell_writer),
+            ColumnType::Tuple(elements_types) => {
+                writer.write_compound_or_reject(PyTupleWrapper::new(self, elements_types), typ)
+            }
             _ => Err(DriverSerializationError::unsupported_type(format!("{typ:?}")).into()),
         }
     }
@@ -169,21 +239,17 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         &self,
         typ: &ColumnType,
         native_type: &NativeType,
-        cell_writer: CellWriter<'b>,
-    ) -> Result<WrittenCellProof<'b>, SerializationError> {
+        writer: Pending<'b>,
+    ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
         match native_type {
             // Integer types.
-            NativeType::TinyInt => {
-                self.write_converted::<i8, i8>(typ, cell_writer, self.extract_int())
-            }
+            NativeType::TinyInt => writer.write_native_or_reject::<i8, i8>(self.extract_int(), typ),
             NativeType::SmallInt => {
-                self.write_converted::<i16, i16>(typ, cell_writer, self.extract_int())
+                writer.write_native_or_reject::<i16, i16>(self.extract_int(), typ)
             }
-            NativeType::Int => {
-                self.write_converted::<i32, i32>(typ, cell_writer, self.extract_int())
-            }
+            NativeType::Int => writer.write_native_or_reject::<i32, i32>(self.extract_int(), typ),
             NativeType::BigInt => {
-                self.write_converted::<i64, i64>(typ, cell_writer, self.extract_int())
+                writer.write_native_or_reject::<i64, i64>(self.extract_int(), typ)
             }
             NativeType::Counter => {
                 let counter = match self.cast::<PyInt>() {
@@ -193,35 +259,33 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                         .map_err(|_| DriverSerializationError::value_overflow().into()),
                     Err(_) => Err(ConvertError::NotAccepted),
                 };
-                self.write_converted::<_, Counter>(typ, cell_writer, counter)
+                writer.write_native_or_reject::<_, Counter>(counter, typ)
             }
             NativeType::Varint => {
-                self.write_converted::<BigInt, BigInt>(typ, cell_writer, self.extract_native())
+                writer.write_native_or_reject::<BigInt, BigInt>(self.extract_native(), typ)
             }
 
             // Float types.
             NativeType::Float => {
-                self.write_converted::<f32, f32>(typ, cell_writer, self.extract_native())
+                writer.write_native_or_reject::<f32, f32>(self.extract_native(), typ)
             }
             NativeType::Double => {
-                self.write_converted::<f64, f64>(typ, cell_writer, self.extract_native())
+                writer.write_native_or_reject::<f64, f64>(self.extract_native(), typ)
             }
-            NativeType::Decimal => self.write_converted::<BigDecimal, BigDecimal>(
-                typ,
-                cell_writer,
-                self.extract_native(),
-            ),
+            NativeType::Decimal => {
+                writer.write_native_or_reject::<BigDecimal, BigDecimal>(self.extract_native(), typ)
+            }
 
             // Boolean type.
             NativeType::Boolean => {
-                self.write_converted::<bool, bool>(typ, cell_writer, self.extract_native())
+                writer.write_native_or_reject::<bool, bool>(self.extract_native(), typ)
             }
 
             // Text types.
             // TODO: Python allows strings that are not valid in Rust, conversion to `&str` is fallible.
             // This case is currently ignored and should be handled in the future. See: #41
             NativeType::Ascii | NativeType::Text => {
-                self.write_converted::<&str, &str>(typ, cell_writer, self.extract_native())
+                writer.write_native_or_reject::<&str, &str>(self.extract_native(), typ)
             }
 
             // Binary data type.
@@ -230,17 +294,14 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                     .cast::<PyBytes>()
                     .map(|value| value.as_bytes())
                     .map_err(|_| ConvertError::NotAccepted);
-                self.write_converted::<_, PyBytes>(typ, cell_writer, bytes)
+                writer.write_native_or_reject::<_, PyBytes>(bytes, typ)
             }
 
             // Datatime types.
             NativeType::Date => match self.cast::<PyCqlDate>() {
-                Ok(date) => CqlDate::from(*date.get()).serialize(typ, cell_writer),
-                Err(_) => self.write_converted::<NaiveDate, NaiveDate>(
-                    typ,
-                    cell_writer,
-                    self.extract_native(),
-                ),
+                Ok(date) => writer.write(&CqlDate::from(*date.get()), typ),
+                Err(_) => writer
+                    .write_native_or_reject::<NaiveDate, NaiveDate>(self.extract_native(), typ),
             },
             NativeType::Duration => {
                 let duration = match self.cast::<PyCqlDuration>() {
@@ -251,7 +312,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                         .map_err(ConvertError::from),
                 };
                 let duration = duration.map(CqlDuration::from);
-                self.write_converted::<_, CqlDuration>(typ, cell_writer, duration)
+                writer.write_native_or_reject::<_, CqlDuration>(duration, typ)
             }
             NativeType::Time => {
                 let time = match self.cast::<PyCqlTime>() {
@@ -262,7 +323,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                         .and_then(|time| time.try_into().ok())
                         .ok_or(ConvertError::NotAccepted),
                 };
-                self.write_converted::<_, CqlTime>(typ, cell_writer, time)
+                writer.write_native_or_reject::<_, CqlTime>(time, typ)
             }
             NativeType::Timestamp => {
                 let timestamp = match self.cast::<PyCqlTimestamp>() {
@@ -274,7 +335,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                         .map(CqlTimestamp::from)
                         .map_err(|_| ConvertError::NotAccepted),
                 };
-                self.write_converted::<_, CqlTimestamp>(typ, cell_writer, timestamp)
+                writer.write_native_or_reject::<_, CqlTimestamp>(timestamp, typ)
             }
 
             // IP address type.
@@ -284,7 +345,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                     Ok(None) => Err(ConvertError::NotAccepted),
                     Err(err) => Err(DriverSerializationError::python_interop_failed(err).into()),
                 };
-                self.write_converted::<_, IpAddr>(typ, cell_writer, ip)
+                writer.write_native_or_reject::<_, IpAddr>(ip, typ)
             }
 
             // UUID types.
@@ -293,10 +354,10 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                     .extract::<Uuid>()
                     .map(CqlTimeuuid::from)
                     .map_err(|_| ConvertError::NotAccepted);
-                self.write_converted::<_, CqlTimeuuid>(typ, cell_writer, uuid)
+                writer.write_native_or_reject::<_, CqlTimeuuid>(uuid, typ)
             }
             NativeType::Uuid => {
-                self.write_converted::<Uuid, Uuid>(typ, cell_writer, self.extract_native())
+                writer.write_native_or_reject::<Uuid, Uuid>(self.extract_native(), typ)
             }
 
             _ => {
@@ -304,22 +365,6 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
 
                 Err(DriverSerializationError::unsupported_type(name).into())
             }
-        }
-    }
-
-    /// Writes `value`, or reports a mismatch against `E` if it was not accepted.
-    fn write_converted<'b, T: SerializeValue, E: ?Sized>(
-        &self,
-        typ: &ColumnType,
-        cell_writer: CellWriter<'b>,
-        value: Result<T, ConvertError>,
-    ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        match value {
-            Ok(value) => value.serialize(typ, cell_writer),
-            Err(ConvertError::NotAccepted) => {
-                Err(self.mismatch_error(typ, Mismatch::native::<E>()))
-            }
-            Err(ConvertError::Failed(error)) => Err(error),
         }
     }
 
@@ -420,6 +465,13 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             }
         }
     }
+
+    fn final_error(&self, typ: &ColumnType, error: WriteError<'_>) -> SerializationError {
+        match error {
+            WriteError::Rejected(_, mismatch) => self.mismatch_error(typ, mismatch),
+            WriteError::Failed(error) => error,
+        }
+    }
 }
 
 impl<'a, 'py> PySerializeValue for PyAnyWrapper<'a, 'py> {
@@ -428,7 +480,8 @@ impl<'a, 'py> PySerializeValue for PyAnyWrapper<'a, 'py> {
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.serialize_arbitrary_value(typ, cell_writer)
+        self.serialize_arbitrary_value(typ, Pending::new(cell_writer))
+            .map_err(|error| self.final_error(typ, error))
     }
 }
 
@@ -783,8 +836,10 @@ impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
                     )
                 })?;
 
-            PyAnyWrapper::new(&item)
-                .serialize_arbitrary_value(field_type, builder.make_sub_writer())?;
+            let field = PyAnyWrapper::new(&item);
+            field
+                .serialize_arbitrary_value(field_type, Pending::new(builder.make_sub_writer()))
+                .map_err(|error| field.final_error(field_type, error))?;
         }
 
         builder
@@ -842,8 +897,10 @@ impl<'py, 'a> PySerializeValue for PyTupleWrapper<'py, 'a> {
         let mut builder = cell_writer.into_value_builder();
 
         for (val, element_type) in self.inner.iter().zip(self.elements_types) {
-            PyAnyWrapper::new(&val)
-                .serialize_arbitrary_value(element_type, builder.make_sub_writer())?;
+            let element = PyAnyWrapper::new(&val);
+            element
+                .serialize_arbitrary_value(element_type, Pending::new(builder.make_sub_writer()))
+                .map_err(|error| element.final_error(element_type, error))?;
         }
 
         builder
