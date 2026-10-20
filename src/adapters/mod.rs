@@ -101,6 +101,34 @@ pub(crate) struct Adapters {
     writers: WriterMap,
 }
 
+impl Adapters {
+    fn writer_for_type<'py>(
+        &self,
+        py: Python<'py>,
+        typ: &Bound<'py, PyType>,
+    ) -> Option<Bound<'py, PyAny>> {
+        self.writers
+            .get(&address_of(typ))
+            .map(|adapter| adapter.bind(py).clone())
+    }
+
+    /// The writer for the type of `value`, else for its nearest base class.
+    pub(crate) fn writer_for<'py>(&self, value: &Bound<'py, PyAny>) -> Option<Bound<'py, PyAny>> {
+        if self.writers.is_empty() {
+            return None;
+        }
+        let py = value.py();
+        let typ = value.get_type();
+
+        self.writer_for_type(py, &typ).or_else(|| {
+            typ.mro()
+                .iter()
+                .skip(1)
+                .find_map(|base| self.writer_for_type(py, base.cast::<PyType>().ok()?))
+        })
+    }
+}
+
 #[pymodule]
 pub(crate) fn adapters(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyAdapters>()?;
