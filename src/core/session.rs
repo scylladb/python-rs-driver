@@ -23,7 +23,7 @@ use crate::errors::execution::{
 };
 use crate::policies::load_balancing::PyTargetPolicy;
 use crate::serialize::adapters::Adapters;
-use crate::serialize::value_list::{BoundValues, BoundValuesRef, PyValueList};
+use crate::serialize::value_list::{BoundBatchValues, BoundValues, BoundValuesRef, PyValueList};
 use crate::statement::{
     PyPreparedStatement, PyStatement, PyStatementSettings, StatementClass, StatementOptions,
 };
@@ -167,9 +167,11 @@ impl SessionCore {
             self.choose_row_factory(explicit_factory, batch.options.settings.row_factory());
 
         async move {
+            // The driver serializes the values in this future, so they borrow its copy of the core.
+            let values = BoundBatchValues::new(batch.values, &self.adapters);
             let result = self
                 .inner
-                .batch(&batch.options.inner, batch.values)
+                .batch(&batch.options.inner, values)
                 .await
                 .map_err(DriverExecuteError::rust_driver_execution_error)?;
 

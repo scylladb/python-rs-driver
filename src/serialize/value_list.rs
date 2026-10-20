@@ -11,6 +11,7 @@ use pyo3::{Bound, BoundObject, Py, PyAny};
 
 use scylla::frame::response::result::ColumnSpec;
 use scylla::serialize::SerializationError;
+use scylla::serialize::batch::{BatchValues, BatchValuesIterator};
 use scylla::serialize::row::{
     BuiltinTypeCheckError, BuiltinTypeCheckErrorKind, RowSerializationContext, SerializeRow,
 };
@@ -105,7 +106,64 @@ impl SerializeRow for BoundValuesRef<'_> {
     }
 }
 
-// The batch and the cluster state do not pass their adapters yet.
+/// The values of all statements in a batch, with one borrow of the adapters for all of them.
+pub(crate) struct BoundBatchValues<'a> {
+    values: Vec<PyValueList>,
+    adapters: &'a Adapters,
+}
+
+impl<'a> BoundBatchValues<'a> {
+    pub(crate) fn new(values: Vec<PyValueList>, adapters: &'a Adapters) -> Self {
+        Self { values, adapters }
+    }
+}
+
+impl BatchValues for BoundBatchValues<'_> {
+    type BatchValuesIter<'r>
+        = BoundBatchValuesIter<'r>
+    where
+        Self: 'r;
+
+    fn batch_values_iter(&self) -> Self::BatchValuesIter<'_> {
+        BoundBatchValuesIter {
+            values: self.values.iter(),
+            adapters: self.adapters,
+        }
+    }
+}
+
+pub(crate) struct BoundBatchValuesIter<'r> {
+    values: std::slice::Iter<'r, PyValueList>,
+    adapters: &'r Adapters,
+}
+
+impl<'r> BatchValuesIterator<'r> for BoundBatchValuesIter<'r> {
+    fn serialize_next(
+        &mut self,
+        ctx: &RowSerializationContext<'_>,
+        writer: &mut RowWriter,
+    ) -> Option<Result<(), SerializationError>> {
+        self.values
+            .next()
+            .map(|values| BoundValuesRef::new(values, self.adapters).serialize(ctx, writer))
+    }
+
+    fn is_empty_next(&mut self) -> Option<bool> {
+        self.values
+            .next()
+            .map(|values| matches!(values, PyValueList::Empty))
+    }
+
+    fn skip_next(&mut self) -> Option<()> {
+        self.values.next().map(|_| ())
+    }
+
+    fn count(self) -> usize {
+        self.values.len()
+    }
+}
+
+// The cluster state does not pass its adapters yet.
 impl SerializeRow for PyValueList {
     fn serialize(
         &self,
