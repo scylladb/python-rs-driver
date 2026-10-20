@@ -10,10 +10,9 @@ use pyo3::{Bound, BoundObject, Py, PyAny};
 use scylla::frame::response::result::ColumnSpec;
 use scylla::serialize::SerializationError;
 use scylla::serialize::row::{RowSerializationContext, SerializeRow};
-use scylla::serialize::value::SerializeValue;
 use scylla::serialize::writers::{RowWriter, WrittenCellProof};
 
-use crate::serialize::value::PyAnyWrapper;
+use crate::serialize::value::{PyAnyWrapper, PySerializeValue};
 
 #[derive(Default, Clone)]
 pub(crate) enum PyValueList {
@@ -98,7 +97,7 @@ fn serialize_element<'a>(
 ) -> Result<WrittenCellProof<'a>, SerializationError> {
     let wrapper = PyAnyWrapper::new(val);
     let sub_writer = row_writer.make_cell_writer();
-    SerializeValue::serialize(&wrapper, col.typ(), sub_writer)
+    wrapper.serialize_py(col.typ(), sub_writer)
 }
 
 fn serialize_sequence<'py>(
