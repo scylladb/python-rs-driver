@@ -131,3 +131,19 @@ The driver calls an adapter with the value and the CQL type of the column, so on
 - The adapters also apply to `session.cluster_state.compute_token()`. The cluster state that a load balancing policy gets has no adapters, because a policy can serve more than one session.
 - Adapters also apply to the elements of collections, tuples, vectors and user defined types.
 - The session copies the adapters when it connects. Changes after the connection have no effect on that session.
+
+A class of your own can also define a `__cql_value__` method. It works like an adapter, but you do not need to register it:
+
+```python
+class Celsius:
+    def __init__(self, degrees: float):
+        self.degrees = degrees
+
+    def __cql_value__(self, cql_type):
+        return self.degrees
+
+
+await session.execute("INSERT INTO readings (id, temperature) VALUES (?, ?)", (1, Celsius(21.5)))
+```
+
+If a type has both, the adapter takes precedence. So you can change how the driver writes a class from a library that defines `__cql_value__`.

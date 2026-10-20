@@ -16,6 +16,9 @@ class Adapters:
     driver does not adapt the result itself again, but it adapts the elements
     of a returned collection.
 
+    If no adapter matches, the driver calls the ``__cql_value__(cql_type)``
+    method of the value, if the value has one.
+
     The driver calls an adapter only for a value that it cannot write. An
     adapter cannot change how the driver writes a type that it accepts.
 
