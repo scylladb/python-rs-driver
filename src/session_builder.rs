@@ -9,6 +9,7 @@ use crate::policies::address_translator::PyAddressTranslator;
 use crate::policies::authenticator_provider::PyAuthenticatorProvider;
 use crate::policies::host_filter::PyHostFilter;
 use crate::policies::timestamp_generator::PyTimestampGenerator;
+use crate::serialize::adapters::PyAdapters;
 use crate::session::PySession;
 use crate::tls::{PyTlsConfig, PyTlsContext};
 use crate::utils::{ParsedAddress, ParsedAddressList, PyDuration, WithOriginalPyObject};
@@ -62,6 +63,15 @@ impl SessionBuilder {
             inner.config.default_execution_profile_handle =
                 execution_profile.get().inner.clone().into_handle();
         }
+        slf
+    }
+
+    fn adapters<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        adapters: Py<PyAdapters>,
+    ) -> PyRef<'py, Self> {
+        slf.inner.lock_py_attached(py).unwrap().adapters = Some(adapters);
         slf
     }
 
@@ -547,6 +557,8 @@ struct PySessionBuilderConfig {
     pub shard_aware_local_port_range: (u16, u16),
     #[pyo3(get)]
     pub tls_context: Option<Py<PyTlsConfig>>,
+    #[pyo3(get)]
+    pub adapters: Option<Py<PyAdapters>>,
 }
 
 impl PySessionBuilderConfig {
@@ -574,6 +586,7 @@ impl PySessionBuilderConfig {
             address_translator: None,
             timestamp_generator: None,
             tls_context: None,
+            adapters: None,
         })
     }
 }

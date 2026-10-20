@@ -156,6 +156,12 @@ fn scylla(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
         execution_profile::execution_profile,
     )?;
     add_submodule(py, module, "types", types::types)?;
+    add_submodule(
+        py,
+        module,
+        "serialization",
+        serialize::adapters::serialization,
+    )?;
     add_submodule(py, module, "batch", batch::batch)?;
     add_submodule(py, module, "policies", policies::policies)?;
     add_submodule(py, module, "cluster", cluster::cluster)?;
