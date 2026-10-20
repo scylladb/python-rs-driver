@@ -72,9 +72,7 @@ impl SerializeRow for BoundValuesRef<'_> {
         ctx: &RowSerializationContext<'_>,
         row_writer: &mut RowWriter,
     ) -> Result<(), SerializationError> {
-        let context = AdapterContext {
-            adapters: self.adapters,
-        };
+        let context = AdapterContext::new(self.adapters);
         Python::attach(|py| match self.values {
             PyValueList::Sequence(sequence) => {
                 serialize_sequence(sequence.bind(py), &context, ctx, row_writer)

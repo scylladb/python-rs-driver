@@ -1,4 +1,4 @@
-use crate::cluster::metadata::column_type::extract_column_type;
+use crate::cluster::metadata::column_type::{PyCqlColumnType, extract_column_type};
 use crate::cql_types::{
     PyCqlDate, PyCqlDuration, PyCqlTime, PyCqlTimestamp, aware_datetime_to_utc,
 };
@@ -7,6 +7,8 @@ use crate::serialize::adapters::Adapters;
 use crate::serialize::error::{DriverSerializationError, TypeExpected};
 
 use std::any::{Any, type_name};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -180,7 +182,37 @@ impl Mismatch {
 /// What the values of one row share while they are written.
 #[derive(Debug)]
 pub(super) struct AdapterContext<'a> {
-    pub(super) adapters: &'a Adapters,
+    adapters: &'a Adapters,
+    /// Compound CQL types given to adapters, keyed by the address of their `ColumnType`.
+    ///
+    /// A context lives for one row only, and every `ColumnType` it sees is borrowed from
+    /// the metadata of that row, so no address is freed or used again while it lives.
+    cql_types: RefCell<HashMap<usize, Py<PyCqlColumnType>>>,
+}
+
+impl<'a> AdapterContext<'a> {
+    pub(super) fn new(adapters: &'a Adapters) -> Self {
+        Self {
+            adapters,
+            cql_types: RefCell::default(),
+        }
+    }
+
+    /// Native types are shared objects already, so only compound types are kept.
+    fn cql_type(&self, py: Python<'_>, typ: &ColumnType) -> PyResult<Py<PyCqlColumnType>> {
+        if matches!(typ, ColumnType::Native(_)) {
+            return extract_column_type(py, typ);
+        }
+        let key = std::ptr::from_ref(typ) as usize;
+        if let Some(cql_type) = self.cql_types.borrow().get(&key) {
+            return Ok(cql_type.clone_ref(py));
+        }
+        let cql_type = extract_column_type(py, typ)?;
+        self.cql_types
+            .borrow_mut()
+            .insert(key, cql_type.clone_ref(py));
+        Ok(cql_type)
+    }
 }
 
 /// Writes a Python value to a CQL cell, as [`SerializeValue`] does for a Rust value.
@@ -265,7 +297,8 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 }
             },
         };
-        let cql_type = extract_column_type(self.py(), typ)
+        let cql_type = context
+            .cql_type(self.py(), typ)
             .map_err(DriverSerializationError::python_interop_failed)?;
         let adapted = convert
             .call1((self.0, cql_type))
