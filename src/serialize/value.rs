@@ -60,6 +60,15 @@ impl From<RelativedeltaError> for ConvertError {
     }
 }
 
+/// Writes a Python value to a CQL cell, as [`SerializeValue`] does for a Rust value.
+pub(super) trait PySerializeValue {
+    fn serialize_py<'b>(
+        &self,
+        typ: &ColumnType,
+        cell_writer: CellWriter<'b>,
+    ) -> Result<WrittenCellProof<'b>, SerializationError>;
+}
+
 /// Wrapper around a Python value (`PyAny`) used for Python → CQL serialization.
 ///
 /// This type performs runtime type inspection and dispatches the value to the
@@ -103,19 +112,19 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 CollectionType::List(_) => {
                     let list = PyListWrapper::new(self).map_err(SerializationError::from)?;
 
-                    list.serialize(typ, cell_writer)
+                    list.serialize_py(typ, cell_writer)
                 }
 
                 CollectionType::Map(_, _) => {
                     let map = PyMapWrapper::new(self).map_err(SerializationError::from)?;
 
-                    map.serialize(typ, cell_writer)
+                    map.serialize_py(typ, cell_writer)
                 }
 
                 CollectionType::Set(_) => {
                     let set = PySetWrapper::new(self).map_err(SerializationError::from)?;
 
-                    set.serialize(typ, cell_writer)
+                    set.serialize_py(typ, cell_writer)
                 }
 
                 _ => {
@@ -132,7 +141,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 let vector = PyVectorWrapper::new(self, *dimensions, element_typ)
                     .map_err(SerializationError::from)?;
 
-                vector.serialize(typ, cell_writer)
+                vector.serialize_py(typ, cell_writer)
             }
 
             // Supports UDTs passed as Python dicts.
@@ -142,7 +151,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                     return Err(DriverSerializationError::type_mismatch(TypeExpected::Udt).into());
                 };
 
-                dict.serialize(typ, cell_writer)
+                dict.serialize_py(typ, cell_writer)
             }
 
             ColumnType::Tuple(elements_types) => {
@@ -150,7 +159,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                     return Err(DriverSerializationError::type_mismatch(TypeExpected::Tuple).into());
                 };
 
-                tuple.serialize(typ, cell_writer)
+                tuple.serialize_py(typ, cell_writer)
             }
             _ => Err(DriverSerializationError::unsupported_type(format!("{typ:?}")).into()),
         }
@@ -401,13 +410,26 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
     }
 }
 
-impl<'a, 'py> SerializeValue for PyAnyWrapper<'a, 'py> {
-    fn serialize<'b>(
+impl<'a, 'py> PySerializeValue for PyAnyWrapper<'a, 'py> {
+    fn serialize_py<'b>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         self.serialize_arbitrary_value(typ, cell_writer)
+    }
+}
+
+/// A vector element. The driver's vector helpers take a [`SerializeValue`].
+struct VectorElement<'a, 'py>(PyAnyWrapper<'a, 'py>);
+
+impl SerializeValue for VectorElement<'_, '_> {
+    fn serialize<'b>(
+        &self,
+        typ: &ColumnType,
+        cell_writer: CellWriter<'b>,
+    ) -> Result<WrittenCellProof<'b>, SerializationError> {
+        self.0.serialize_py(typ, cell_writer)
     }
 }
 
@@ -433,14 +455,14 @@ fn serialize_sequence<'t, 'b, 'py, T: Any>(
     builder.append_bytes(&element_count.to_be_bytes());
 
     for el in iter {
-        PyAnyWrapper::serialize(&PyAnyWrapper::new(&el), elt, builder.make_sub_writer()).map_err(
-            |err| {
+        PyAnyWrapper::new(&el)
+            .serialize_py(elt, builder.make_sub_writer())
+            .map_err(|err| {
                 mk_ser_err::<T>(
                     typ,
                     SetOrListSerializationErrorKind::ElementSerializationFailed(err),
                 )
-            },
-        )?;
+            })?;
     }
 
     builder
@@ -471,7 +493,7 @@ pub fn serialize_vector<'t, 'b, 'py, T: Any>(
                     element_type,
                     typ,
                     &mut builder,
-                    &PyAnyWrapper::new(&element),
+                    &VectorElement(PyAnyWrapper::new(&element)),
                 )?;
             }
         }
@@ -482,7 +504,7 @@ pub fn serialize_vector<'t, 'b, 'py, T: Any>(
                     element_type,
                     typ,
                     &mut builder,
-                    &PyAnyWrapper::new(&element),
+                    &VectorElement(PyAnyWrapper::new(&element)),
                 )?;
             }
         }
@@ -515,8 +537,8 @@ impl<'a, 'py> PyListWrapper<'a, 'py> {
     }
 }
 
-impl<'a, 'py> SerializeValue for PyListWrapper<'a, 'py> {
-    fn serialize<'b>(
+impl<'a, 'py> PySerializeValue for PyListWrapper<'a, 'py> {
+    fn serialize_py<'b>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
@@ -546,8 +568,8 @@ impl<'a, 'py> PySetWrapper<'a, 'py> {
     }
 }
 
-impl<'a, 'py> SerializeValue for PySetWrapper<'a, 'py> {
-    fn serialize<'b>(
+impl<'a, 'py> PySerializeValue for PySetWrapper<'a, 'py> {
+    fn serialize_py<'b>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
@@ -577,8 +599,8 @@ impl<'a, 'py> PyMapWrapper<'a, 'py> {
     }
 }
 
-impl<'a, 'py> SerializeValue for PyMapWrapper<'a, 'py> {
-    fn serialize<'b>(
+impl<'a, 'py> PySerializeValue for PyMapWrapper<'a, 'py> {
+    fn serialize_py<'b>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
@@ -606,14 +628,16 @@ impl<'a, 'py> SerializeValue for PyMapWrapper<'a, 'py> {
             let (key, value) = pair
                 .extract::<(Bound<'py, PyAny>, Bound<'py, PyAny>)>()
                 .map_err(DriverSerializationError::python_interop_failed)?;
-            PyAnyWrapper::serialize(&PyAnyWrapper::new(&key), ktyp, builder.make_sub_writer())
+            PyAnyWrapper::new(&key)
+                .serialize_py(ktyp, builder.make_sub_writer())
                 .map_err(|err| {
                     mk_ser_err::<PyMapping>(
                         typ,
                         MapSerializationErrorKind::KeySerializationFailed(err),
                     )
                 })?;
-            PyAnyWrapper::serialize(&PyAnyWrapper::new(&value), vtyp, builder.make_sub_writer())
+            PyAnyWrapper::new(&value)
+                .serialize_py(vtyp, builder.make_sub_writer())
                 .map_err(|err| {
                     mk_ser_err::<PyMapping>(
                         typ,
@@ -665,8 +689,8 @@ impl<'py, 'a> PyVectorWrapper<'py, 'a> {
     }
 }
 
-impl<'py, 'a> SerializeValue for PyVectorWrapper<'py, 'a> {
-    fn serialize<'b>(
+impl<'py, 'a> PySerializeValue for PyVectorWrapper<'py, 'a> {
+    fn serialize_py<'b>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
@@ -725,8 +749,8 @@ impl<'py, 'a> PyUdtWrapper<'py, 'a> {
     }
 }
 
-impl<'py> SerializeValue for PyUdtWrapper<'py, '_> {
-    fn serialize<'a>(
+impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
+    fn serialize_py<'a>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'a>,
@@ -786,8 +810,8 @@ impl<'py, 'a> PyTupleWrapper<'py, 'a> {
     }
 }
 
-impl<'py, 'a> SerializeValue for PyTupleWrapper<'py, 'a> {
-    fn serialize<'b>(
+impl<'py, 'a> PySerializeValue for PyTupleWrapper<'py, 'a> {
+    fn serialize_py<'b>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
