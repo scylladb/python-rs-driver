@@ -892,6 +892,7 @@ async def test_tuple_serialization(session: Session, table_factory: TableFactory
         (2, ("tag1", "", ""), (100, 0, 0)),
         (3, ("a", "b", "c"), (1, 2, 3)),
         (4, ("test", "with", "spaces"), (0, -1, 999)),
+        (5, ("a", None, "c"), (1, None, 3)),
     ]
 
     for values in test_cases:
@@ -1044,6 +1045,14 @@ async def test_udt(session: Session, table_factory: TableFactory):
     await session.execute(f"INSERT INTO {table} (id, addr) VALUES (?, ?)", (2, asdict(address)))
 
     await session.execute(f"SELECT * from {table}")
+
+    partial = {"street": None, "city": "Anytown", "zip_code": None}
+    await session.execute(f"INSERT INTO {table} (id, addr) VALUES (?, ?)", (3, partial))
+    result = await session.execute(f"SELECT addr FROM {table} WHERE id = 3")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["addr"] == partial
 
 
 @pytest.mark.asyncio
