@@ -1,4 +1,5 @@
 use crate::RUNTIME;
+use crate::adapters::PyAdapters;
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{
     PyCompression, PyConsistency, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay,
@@ -66,6 +67,15 @@ impl SessionBuilder {
                 execution_profile.get().inner.clone().into_handle();
             inner.is_execution_profile_set = true;
         }
+        slf
+    }
+
+    fn adapters<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        adapters: Py<PyAdapters>,
+    ) -> PyRef<'py, Self> {
+        slf.inner.lock_py_attached(py).unwrap().adapters = Some(adapters);
         slf
     }
 
@@ -572,6 +582,8 @@ struct PySessionBuilderConfig {
     pub shard_aware_local_port_range: (u16, u16),
     #[pyo3(get)]
     pub tls_context: Option<Py<PyTlsConfig>>,
+    #[pyo3(get)]
+    pub adapters: Option<Py<PyAdapters>>,
     /// `execution_profile()` was called: a legacy session then uses execution profiles.
     is_execution_profile_set: bool,
 }
@@ -601,6 +613,7 @@ impl PySessionBuilderConfig {
             address_translator: None,
             timestamp_generator: None,
             tls_context: None,
+            adapters: None,
             is_execution_profile_set: false,
         })
     }
