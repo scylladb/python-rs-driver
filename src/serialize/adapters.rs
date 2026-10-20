@@ -69,8 +69,35 @@ impl PyAdapters {
 /// A frozen copy of the adapters registered for a session.
 #[derive(Debug, Default)]
 pub(crate) struct Adapters {
-    #[expect(dead_code, reason = "the retry with an adapter reads it")]
     adapter_map: AdapterMap,
+}
+
+impl Adapters {
+    fn get_adapter<'py>(
+        &self,
+        py: Python<'py>,
+        typ: &Bound<'py, PyType>,
+    ) -> Option<Bound<'py, PyAny>> {
+        self.adapter_map
+            .get(&TypeKey::of(typ))
+            .map(|(_, adapter)| adapter.bind(py).clone())
+    }
+
+    /// Finds the adapter for the type of `value`, else for its nearest base class.
+    pub(crate) fn find<'py>(&self, value: &Bound<'py, PyAny>) -> Option<Bound<'py, PyAny>> {
+        if self.adapter_map.is_empty() {
+            return None;
+        }
+        let py = value.py();
+        let typ = value.get_type();
+
+        self.get_adapter(py, &typ).or_else(|| {
+            typ.mro()
+                .iter()
+                .skip(1)
+                .find_map(|base| self.get_adapter(py, base.cast::<PyType>().ok()?))
+        })
+    }
 }
 
 #[pymodule]
