@@ -874,10 +874,7 @@ impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
                     )
                 })?;
 
-            let field = PyAnyWrapper::new(&item);
-            field
-                .try_serialize_arbitrary_value(field_type, Pending::new(builder.make_sub_writer()))
-                .map_err(|error| field.final_error(field_type, error))?;
+            PyAnyWrapper::new(&item).serialize_py(field_type, builder.make_sub_writer())?;
         }
 
         builder
@@ -935,13 +932,7 @@ impl<'py, 'a> PySerializeValue for PyTupleWrapper<'py, 'a> {
         let mut builder = cell_writer.into_value_builder();
 
         for (val, element_type) in self.inner.iter().zip(self.elements_types) {
-            let element = PyAnyWrapper::new(&val);
-            element
-                .try_serialize_arbitrary_value(
-                    element_type,
-                    Pending::new(builder.make_sub_writer()),
-                )
-                .map_err(|error| element.final_error(element_type, error))?;
+            PyAnyWrapper::new(&val).serialize_py(element_type, builder.make_sub_writer())?;
         }
 
         builder
