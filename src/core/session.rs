@@ -15,6 +15,7 @@ use scylla::statement::{Consistency, SerialConsistency};
 use scylla_cql_core::serialize::row::SerializedValues;
 use uuid::Uuid;
 
+use crate::adapters::Adapters;
 use crate::batch::BatchState;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::{Pager, PendingRequestResult};
@@ -25,7 +26,7 @@ use crate::errors::execution::{
     DriverStatementConversionError, DriverUseKeyspaceError,
 };
 use crate::policies::load_balancing::PyTargetPolicy;
-use crate::serialize::value_list::PyValueList;
+use crate::serialize::value_list::{BoundValues, BoundValuesRef, PyValueList};
 use crate::statement::{
     PyPreparedStatement, PyStatement, PyStatementSettings, StatementClass, StatementOptions,
 };
@@ -43,12 +44,15 @@ pub(crate) struct SessionCore {
     session_id: Arc<Py<PyAny>>,
     /// Row factory of the default execution profile, taken at connect time.
     default_row_factory: Option<PyRowFactory>,
+    /// Adapters for values of user types, frozen at connect time.
+    adapters: Arc<Adapters>,
 }
 
 impl SessionCore {
     pub(crate) fn new(
         inner: Arc<Session>,
         default_row_factory: Option<PyRowFactory>,
+        adapters: Arc<Adapters>,
     ) -> Result<Self, PyErr> {
         let (cluster_state, session_id) = Python::attach(|py| -> PyResult<_> {
             let cluster_state = Py::new(py, PyClusterState::try_from(inner.get_cluster_state())?)?;
@@ -60,6 +64,7 @@ impl SessionCore {
             session_id: Arc::new(session_id),
             inner,
             default_row_factory,
+            adapters,
         })
     }
 
@@ -115,7 +120,7 @@ impl SessionCore {
 
         let request = if paged {
             ExecutionParams::Paged {
-                prepared: Arc::new(BoundStatement::new(kind, values)?),
+                prepared: Arc::new(BoundStatement::new(kind, values, &self.adapters)?),
                 paging_state: paging_state.unwrap_or_else(PagingState::start),
             }
         } else {
@@ -124,7 +129,7 @@ impl SessionCore {
             }
 
             ExecutionParams::Unpaged {
-                prepared: BoundStatement::new(kind, values)?,
+                prepared: BoundStatement::new(kind, values, &self.adapters)?,
             }
         };
 
@@ -334,22 +339,27 @@ enum ExecutionParams {
 /// so it is done up front on the calling thread
 pub(crate) enum BoundStatement {
     Prepared(PreparedStatement, SerializedValues),
-    Unprepared(Statement, PyValueList),
+    Unprepared(Statement, BoundValues),
 }
 
 impl BoundStatement {
     pub(crate) fn new(
         statement: StatementKind,
         values: PyValueList,
+        adapters: &Arc<Adapters>,
     ) -> Result<Self, DriverExecuteError> {
         Ok(match statement {
             StatementKind::Prepared(p) => {
                 let serialized_values = p
-                    .serialize_values_unstable(&values)
+                    .serialize_values_unstable(&BoundValuesRef::new(&values, adapters))
                     .map_err(DriverExecuteError::serialization_failed)?;
                 BoundStatement::Prepared(p, serialized_values)
             }
-            StatementKind::Unprepared(q) => BoundStatement::Unprepared(q, values),
+            // The driver serializes these values in the request future, again for each page, so
+            // they keep their own clone of the adapters.
+            StatementKind::Unprepared(q) => {
+                BoundStatement::Unprepared(q, BoundValues::new(values, Arc::clone(adapters)))
+            }
         })
     }
 }
