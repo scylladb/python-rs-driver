@@ -18,6 +18,7 @@ use crate::errors::execution::{
 use crate::future::{DriverFuture, boxed_py_future};
 use crate::policies::load_balancing::PyTargetPolicy;
 use crate::results::PyPagingState;
+use crate::serialize::adapters::Adapters;
 use crate::serialize::value_list::PyValueList;
 use crate::statement::PyPreparedStatement;
 
@@ -35,9 +36,10 @@ impl PySession {
     pub(crate) fn new(
         inner: Arc<Session>,
         default_row_factory: Option<PyRowFactory>,
+        adapters: Arc<Adapters>,
     ) -> Result<Self, PyErr> {
         Ok(Self {
-            core: SessionCore::new(inner, default_row_factory)?,
+            core: SessionCore::new(inner, default_row_factory, adapters)?,
         })
     }
 }

@@ -506,7 +506,7 @@ impl SessionBuilder {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<PySession, DriverSessionConnectionError>> {
-        let (config, default_row_factory) = {
+        let (config, default_row_factory, adapters) = {
             let inner = self.inner.lock_py_attached(py).unwrap();
             (
                 inner.config.clone(),
@@ -516,6 +516,11 @@ impl SessionBuilder {
                     .row_factory
                     .as_ref()
                     .map(|f| f.extracted.clone()),
+                inner
+                    .adapters
+                    .as_ref()
+                    .map(|adapters| adapters.get().snapshot(py))
+                    .unwrap_or_default(),
             )
         };
 
@@ -523,8 +528,10 @@ impl SessionBuilder {
             py,
             boxed_py_future(async move {
                 match scylla::client::session::Session::connect(config).await {
-                    Ok(session) => PySession::new(Arc::new(session), default_row_factory)
-                        .map_err(DriverSessionConnectionError::python_conversion_error),
+                    Ok(session) => {
+                        PySession::new(Arc::new(session), default_row_factory, Arc::new(adapters))
+                            .map_err(DriverSessionConnectionError::python_conversion_error)
+                    }
                     Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
                 }
             }),
