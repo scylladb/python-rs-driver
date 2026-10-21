@@ -64,6 +64,10 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
+        if self.is_none() {
+            return Ok(cell_writer.set_null());
+        }
+
         match typ {
             ColumnType::Native(native_type) => {
                 self.serialize_natives(typ, native_type, cell_writer)
@@ -357,10 +361,6 @@ impl<'a, 'py> SerializeValue for PyAnyWrapper<'a, 'py> {
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        if self.is_none() {
-            return Ok(cell_writer.set_null());
-        }
-
         self.serialize_arbitrary_value(typ, cell_writer)
     }
 }
