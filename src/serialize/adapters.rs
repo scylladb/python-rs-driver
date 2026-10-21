@@ -20,7 +20,7 @@ impl TypeKey {
     }
 }
 
-/// The Python `Adapters` registry.
+/// The Python `Adapters` registry. A session copies it when it connects.
 #[pyclass(module = "scylla.serialization", name = "Adapters", frozen)]
 pub(crate) struct PyAdapters {
     adapter_map: Mutex<AdapterMap>,
@@ -50,6 +50,23 @@ impl PyAdapters {
             .insert(TypeKey::of(&cls), (cls.unbind(), adapter.unbind()));
         Ok(())
     }
+}
+
+impl PyAdapters {
+    /// Copies the registry, so later changes do not reach a connected session.
+    pub(crate) fn snapshot(&self, py: Python<'_>) -> Adapters {
+        Adapters {
+            // Cloning a `Py` is safe here: `py` shows that this thread is attached to Python.
+            adapter_map: self.adapter_map.lock_py_attached(py).unwrap().clone(),
+        }
+    }
+}
+
+/// A frozen copy of the adapters registered for a session.
+#[derive(Debug, Default)]
+pub(crate) struct Adapters {
+    #[expect(dead_code, reason = "the retry with an adapter reads it")]
+    adapter_map: AdapterMap,
 }
 
 #[pymodule]

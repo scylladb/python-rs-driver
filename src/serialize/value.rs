@@ -2,6 +2,7 @@ use crate::cql_types::{
     PyCqlDate, PyCqlDuration, PyCqlTime, PyCqlTimestamp, aware_datetime_to_utc,
 };
 use crate::relativedelta::{Relativedelta, RelativedeltaError};
+use crate::serialize::adapters::Adapters;
 use crate::serialize::error::{DriverSerializationError, TypeExpected};
 
 use std::any::{Any, type_name};
@@ -105,10 +106,11 @@ impl<'b> Pending<'b> {
         self,
         value: Result<T, Mismatch>,
         typ: &ColumnType,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
         match value {
             Ok(value) => value
-                .serialize_py(typ, self.cell_writer)
+                .serialize_py(typ, self.cell_writer, context)
                 .map_err(WriteError::Failed),
             Err(mismatch) => Err(self.reject(mismatch)),
         }
@@ -177,12 +179,20 @@ impl Mismatch {
     }
 }
 
+/// What the values of one row share while they are written.
+#[derive(Debug)]
+pub(super) struct AdapterContext<'a> {
+    #[expect(dead_code, reason = "the retry with an adapter reads it")]
+    pub(super) adapters: &'a Adapters,
+}
+
 /// Writes a Python value to a CQL cell, as [`SerializeValue`] does for a Rust value.
 pub(super) trait PySerializeValue {
     fn serialize_py<'b>(
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError>;
 }
 
@@ -209,8 +219,9 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         &self,
         typ: &ColumnType,
         writer: Pending<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.try_serialize_arbitrary_value(typ, writer)
+        self.try_serialize_arbitrary_value(typ, writer, context)
             .map_err(|error| self.final_error(typ, error))
     }
 
@@ -220,6 +231,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         &self,
         typ: &ColumnType,
         writer: Pending<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, WriteError<'b>> {
         if self.is_none() {
             return writer.set_null();
@@ -233,13 +245,13 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 ..
             } => match collection_typ {
                 CollectionType::List(_) => {
-                    writer.write_compound_or_reject(PyListWrapper::new(self), typ)
+                    writer.write_compound_or_reject(PyListWrapper::new(self), typ, context)
                 }
                 CollectionType::Map(_, _) => {
-                    writer.write_compound_or_reject(PyMapWrapper::new(self), typ)
+                    writer.write_compound_or_reject(PyMapWrapper::new(self), typ, context)
                 }
                 CollectionType::Set(_) => {
-                    writer.write_compound_or_reject(PySetWrapper::new(self), typ)
+                    writer.write_compound_or_reject(PySetWrapper::new(self), typ, context)
                 }
 
                 _ => {
@@ -255,17 +267,20 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             } => writer.write_compound_or_reject(
                 PyVectorWrapper::new(self, *dimensions, element_typ),
                 typ,
+                context,
             ),
 
             // Supports UDTs passed as Python dicts.
             // For Python dataclass instances, convert to dict first (e.g., using dataclasses.asdict()).
             ColumnType::UserDefinedType { definition, .. } => {
-                writer.write_compound_or_reject(PyUdtWrapper::new(self, definition), typ)
+                writer.write_compound_or_reject(PyUdtWrapper::new(self, definition), typ, context)
             }
 
-            ColumnType::Tuple(elements_types) => {
-                writer.write_compound_or_reject(PyTupleWrapper::new(self, elements_types), typ)
-            }
+            ColumnType::Tuple(elements_types) => writer.write_compound_or_reject(
+                PyTupleWrapper::new(self, elements_types),
+                typ,
+                context,
+            ),
             _ => Err(DriverSerializationError::unsupported_type(format!("{typ:?}")).into()),
         }
     }
@@ -515,15 +530,20 @@ impl<'a, 'py> PySerializeValue for PyAnyWrapper<'a, 'py> {
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.serialize_value(typ, Pending::new(cell_writer))
+        self.serialize_value(typ, Pending::new(cell_writer), context)
     }
 }
 
 /// A vector element. It has no way to hold a null, so `None` is an error.
 ///
-/// The driver's vector helpers take a [`SerializeValue`].
-struct VectorElement<'a, 'py>(PyAnyWrapper<'a, 'py>);
+/// The driver's vector helpers take a [`SerializeValue`], which has no context argument,
+/// so the element keeps its context.
+struct VectorElement<'a, 'py> {
+    value: PyAnyWrapper<'a, 'py>,
+    context: &'a AdapterContext<'a>,
+}
 
 impl SerializeValue for VectorElement<'_, '_> {
     fn serialize<'b>(
@@ -531,14 +551,15 @@ impl SerializeValue for VectorElement<'_, '_> {
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.0
-            .serialize_value(typ, Pending::vector_element(cell_writer))
+        self.value
+            .serialize_value(typ, Pending::vector_element(cell_writer), self.context)
     }
 }
 
 fn serialize_sequence<'t, 'b, 'py, T: Any>(
     len: usize,
     iter: impl Iterator<Item = Bound<'py, PyAny>>,
+    context: &AdapterContext<'_>,
     typ: &ColumnType,
     writer: CellWriter<'b>,
 ) -> Result<WrittenCellProof<'b>, SerializationError> {
@@ -559,7 +580,7 @@ fn serialize_sequence<'t, 'b, 'py, T: Any>(
 
     for el in iter {
         PyAnyWrapper::new(&el)
-            .serialize_py(elt, builder.make_sub_writer())
+            .serialize_py(elt, builder.make_sub_writer(), context)
             .map_err(|err| {
                 mk_ser_err::<T>(
                     typ,
@@ -573,9 +594,10 @@ fn serialize_sequence<'t, 'b, 'py, T: Any>(
         .map_err(|_| mk_ser_err::<T>(typ, BuiltinSerializationErrorKind::SizeOverflow))
 }
 
-pub fn serialize_vector<'t, 'b, 'py, T: Any>(
+fn serialize_vector<'t, 'b, 'py, T: Any>(
     len: usize,
     iter: impl Iterator<Item = Bound<'py, PyAny>>,
+    context: &AdapterContext<'_>,
     element_type: &ColumnType,
     dimensions: u16,
     typ: &ColumnType,
@@ -596,7 +618,10 @@ pub fn serialize_vector<'t, 'b, 'py, T: Any>(
                     element_type,
                     typ,
                     &mut builder,
-                    &VectorElement(PyAnyWrapper::new(&element)),
+                    &VectorElement {
+                        value: PyAnyWrapper::new(&element),
+                        context,
+                    },
                 )?;
             }
         }
@@ -607,7 +632,10 @@ pub fn serialize_vector<'t, 'b, 'py, T: Any>(
                     element_type,
                     typ,
                     &mut builder,
-                    &VectorElement(PyAnyWrapper::new(&element)),
+                    &VectorElement {
+                        value: PyAnyWrapper::new(&element),
+                        context,
+                    },
                 )?;
             }
         }
@@ -645,10 +673,11 @@ impl<'a, 'py> PySerializeValue for PyListWrapper<'a, 'py> {
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         let items = self.iter();
 
-        serialize_sequence::<PyList>(items.len(), items, typ, cell_writer)
+        serialize_sequence::<PyList>(items.len(), items, context, typ, cell_writer)
     }
 }
 
@@ -676,10 +705,11 @@ impl<'a, 'py> PySerializeValue for PySetWrapper<'a, 'py> {
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         let items = self.iter();
 
-        serialize_sequence::<PySet>(items.len(), items, typ, cell_writer)
+        serialize_sequence::<PySet>(items.len(), items, context, typ, cell_writer)
     }
 }
 
@@ -707,6 +737,7 @@ impl<'a, 'py> PySerializeValue for PyMapWrapper<'a, 'py> {
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         let ColumnType::Collection {
             typ: CollectionType::Map(ktyp, vtyp),
@@ -732,7 +763,7 @@ impl<'a, 'py> PySerializeValue for PyMapWrapper<'a, 'py> {
                 .extract::<(Bound<'py, PyAny>, Bound<'py, PyAny>)>()
                 .map_err(DriverSerializationError::python_interop_failed)?;
             PyAnyWrapper::new(&key)
-                .serialize_py(ktyp, builder.make_sub_writer())
+                .serialize_py(ktyp, builder.make_sub_writer(), context)
                 .map_err(|err| {
                     mk_ser_err::<PyMapping>(
                         typ,
@@ -740,7 +771,7 @@ impl<'a, 'py> PySerializeValue for PyMapWrapper<'a, 'py> {
                     )
                 })?;
             PyAnyWrapper::new(&value)
-                .serialize_py(vtyp, builder.make_sub_writer())
+                .serialize_py(vtyp, builder.make_sub_writer(), context)
                 .map_err(|err| {
                     mk_ser_err::<PyMapping>(
                         typ,
@@ -797,6 +828,7 @@ impl<'py, 'a> PySerializeValue for PyVectorWrapper<'py, 'a> {
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         match self.items {
             VectorItems::List(list) => {
@@ -804,6 +836,7 @@ impl<'py, 'a> PySerializeValue for PyVectorWrapper<'py, 'a> {
                 serialize_vector::<PyList>(
                     items.len(),
                     items,
+                    context,
                     self.element_type,
                     self.dimension,
                     typ,
@@ -815,6 +848,7 @@ impl<'py, 'a> PySerializeValue for PyVectorWrapper<'py, 'a> {
                 serialize_vector::<PyTuple>(
                     items.len(),
                     items,
+                    context,
                     self.element_type,
                     self.dimension,
                     typ,
@@ -857,6 +891,7 @@ impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'a>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'a>, SerializationError> {
         let mut builder = cell_writer.into_value_builder();
 
@@ -874,7 +909,11 @@ impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
                     )
                 })?;
 
-            PyAnyWrapper::new(&item).serialize_py(field_type, builder.make_sub_writer())?;
+            PyAnyWrapper::new(&item).serialize_py(
+                field_type,
+                builder.make_sub_writer(),
+                context,
+            )?;
         }
 
         builder
@@ -917,6 +956,7 @@ impl<'py, 'a> PySerializeValue for PyTupleWrapper<'py, 'a> {
         &self,
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
+        context: &AdapterContext<'_>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         // A shorter tuple is allowed: the database reads the missing elements as null.
         if self.inner.len() > self.elements_types.len() {
@@ -932,7 +972,11 @@ impl<'py, 'a> PySerializeValue for PyTupleWrapper<'py, 'a> {
         let mut builder = cell_writer.into_value_builder();
 
         for (val, element_type) in self.inner.iter().zip(self.elements_types) {
-            PyAnyWrapper::new(&val).serialize_py(element_type, builder.make_sub_writer())?;
+            PyAnyWrapper::new(&val).serialize_py(
+                element_type,
+                builder.make_sub_writer(),
+                context,
+            )?;
         }
 
         builder

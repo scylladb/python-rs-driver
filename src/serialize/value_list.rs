@@ -1,6 +1,8 @@
+use crate::serialize::adapters::Adapters;
 use crate::serialize::error::DriverSerializationError;
 
 use std::any::Any;
+use std::sync::Arc;
 
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
@@ -14,7 +16,7 @@ use scylla::serialize::row::{
 };
 use scylla::serialize::writers::{RowWriter, WrittenCellProof};
 
-use crate::serialize::value::{PyAnyWrapper, PySerializeValue};
+use crate::serialize::value::{AdapterContext, PyAnyWrapper, PySerializeValue};
 
 #[derive(Default, Clone)]
 pub(crate) enum PyValueList {
@@ -24,16 +26,62 @@ pub(crate) enum PyValueList {
     Empty,
 }
 
-impl SerializeRow for PyValueList {
+/// Bind values together with the adapters of the session that sends them.
+#[derive(Clone)]
+pub(crate) struct BoundValues {
+    values: PyValueList,
+    adapters: Arc<Adapters>,
+}
+
+impl BoundValues {
+    pub(crate) fn new(values: PyValueList, adapters: Arc<Adapters>) -> Self {
+        Self { values, adapters }
+    }
+}
+
+impl SerializeRow for BoundValues {
     fn serialize(
         &self,
         ctx: &RowSerializationContext<'_>,
         row_writer: &mut RowWriter,
     ) -> Result<(), SerializationError> {
-        Python::attach(|py| match self {
-            Self::Sequence(sequence) => serialize_sequence(sequence.bind(py), ctx, row_writer),
-            Self::Mapping(mapping) => serialize_mapping(mapping.bind(py), ctx, row_writer),
-            Self::Empty => {
+        BoundValuesRef::new(&self.values, &self.adapters).serialize(ctx, row_writer)
+    }
+
+    fn is_empty(&self) -> bool {
+        matches!(self.values, PyValueList::Empty)
+    }
+}
+
+/// [`BoundValues`] that borrow both parts, for values serialized while their owner lives.
+pub(crate) struct BoundValuesRef<'a> {
+    values: &'a PyValueList,
+    adapters: &'a Adapters,
+}
+
+impl<'a> BoundValuesRef<'a> {
+    pub(crate) fn new(values: &'a PyValueList, adapters: &'a Adapters) -> Self {
+        Self { values, adapters }
+    }
+}
+
+impl SerializeRow for BoundValuesRef<'_> {
+    fn serialize(
+        &self,
+        ctx: &RowSerializationContext<'_>,
+        row_writer: &mut RowWriter,
+    ) -> Result<(), SerializationError> {
+        let context = AdapterContext {
+            adapters: self.adapters,
+        };
+        Python::attach(|py| match self.values {
+            PyValueList::Sequence(sequence) => {
+                serialize_sequence(sequence.bind(py), &context, ctx, row_writer)
+            }
+            PyValueList::Mapping(mapping) => {
+                serialize_mapping(mapping.bind(py), &context, ctx, row_writer)
+            }
+            PyValueList::Empty => {
                 if ctx.columns().is_empty() {
                     Ok(())
                 } else {
@@ -50,6 +98,21 @@ impl SerializeRow for PyValueList {
                 }
             }
         })
+    }
+
+    fn is_empty(&self) -> bool {
+        matches!(self.values, PyValueList::Empty)
+    }
+}
+
+// The batch and the cluster state do not pass their adapters yet.
+impl SerializeRow for PyValueList {
+    fn serialize(
+        &self,
+        ctx: &RowSerializationContext<'_>,
+        row_writer: &mut RowWriter,
+    ) -> Result<(), SerializationError> {
+        BoundValuesRef::new(self, &Adapters::default()).serialize(ctx, row_writer)
     }
 
     fn is_empty(&self) -> bool {
@@ -116,15 +179,17 @@ fn length_equality_check<T: Any>(
 fn serialize_element<'a>(
     col: &ColumnSpec,
     val: &Bound<PyAny>,
+    context: &AdapterContext<'_>,
     row_writer: &'a mut RowWriter<'_>,
 ) -> Result<WrittenCellProof<'a>, SerializationError> {
     let wrapper = PyAnyWrapper::new(val);
     let sub_writer = row_writer.make_cell_writer();
-    wrapper.serialize_py(col.typ(), sub_writer)
+    wrapper.serialize_py(col.typ(), sub_writer, context)
 }
 
 fn serialize_sequence<'py>(
     value_list: &Bound<'py, PySequence>,
+    context: &AdapterContext<'_>,
     ctx: &RowSerializationContext<'_>,
     row_writer: &mut RowWriter,
 ) -> Result<(), SerializationError> {
@@ -140,7 +205,7 @@ fn serialize_sequence<'py>(
 
     for (index, (col, val)) in ctx.columns().iter().zip(iter).enumerate() {
         let val = val.map_err(DriverSerializationError::python_interop_failed)?;
-        serialize_element(col, &val, row_writer).map_err(|err| {
+        serialize_element(col, &val, context, row_writer).map_err(|err| {
             DriverSerializationError::scylla_serialize_failed(err).at_parameter_index(index)
         })?;
     }
@@ -150,6 +215,7 @@ fn serialize_sequence<'py>(
 
 fn serialize_mapping<'py>(
     value_list: &Bound<'py, PyMapping>,
+    context: &AdapterContext<'_>,
     ctx: &RowSerializationContext<'_>,
     row_writer: &mut RowWriter,
 ) -> Result<(), SerializationError> {
@@ -171,7 +237,7 @@ fn serialize_mapping<'py>(
                 SerializationError::new(DriverSerializationError::python_interop_failed(e))
             }
         })?;
-        serialize_element(col, &item, row_writer).map_err(|err| {
+        serialize_element(col, &item, context, row_writer).map_err(|err| {
             DriverSerializationError::scylla_serialize_failed(err).at_parameter_name(col.name())
         })?;
     }
