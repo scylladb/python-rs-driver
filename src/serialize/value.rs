@@ -180,7 +180,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
 
     #[deny(clippy::wildcard_enum_match_arm)]
     /// Writes the value, or gives back the unused writer if its Python type is not accepted.
-    fn serialize_arbitrary_value<'b>(
+    fn try_serialize_arbitrary_value<'b>(
         &self,
         typ: &ColumnType,
         writer: Pending<'b>,
@@ -190,7 +190,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         }
 
         match typ {
-            ColumnType::Native(native_type) => self.serialize_natives(typ, native_type, writer),
+            ColumnType::Native(native_type) => self.try_serialize_native(typ, native_type, writer),
 
             ColumnType::Collection {
                 typ: collection_typ,
@@ -235,7 +235,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
     }
 
     #[deny(clippy::wildcard_enum_match_arm)]
-    fn serialize_natives<'b>(
+    fn try_serialize_native<'b>(
         &self,
         typ: &ColumnType,
         native_type: &NativeType,
@@ -480,7 +480,7 @@ impl<'a, 'py> PySerializeValue for PyAnyWrapper<'a, 'py> {
         typ: &ColumnType,
         cell_writer: CellWriter<'b>,
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
-        self.serialize_arbitrary_value(typ, Pending::new(cell_writer))
+        self.try_serialize_arbitrary_value(typ, Pending::new(cell_writer))
             .map_err(|error| self.final_error(typ, error))
     }
 }
@@ -838,7 +838,7 @@ impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
 
             let field = PyAnyWrapper::new(&item);
             field
-                .serialize_arbitrary_value(field_type, Pending::new(builder.make_sub_writer()))
+                .try_serialize_arbitrary_value(field_type, Pending::new(builder.make_sub_writer()))
                 .map_err(|error| field.final_error(field_type, error))?;
         }
 
@@ -899,7 +899,10 @@ impl<'py, 'a> PySerializeValue for PyTupleWrapper<'py, 'a> {
         for (val, element_type) in self.inner.iter().zip(self.elements_types) {
             let element = PyAnyWrapper::new(&val);
             element
-                .serialize_arbitrary_value(element_type, Pending::new(builder.make_sub_writer()))
+                .try_serialize_arbitrary_value(
+                    element_type,
+                    Pending::new(builder.make_sub_writer()),
+                )
                 .map_err(|error| element.final_error(element_type, error))?;
         }
 
