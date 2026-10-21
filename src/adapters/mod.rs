@@ -54,10 +54,10 @@ impl Borrow<usize> for TypeKey {
     }
 }
 
-/// The Python `Adapters` registry.
+/// The Python `Adapters` registry. A session copies it when it connects.
 #[pyclass(module = "scylla.adapters", name = "Adapters", frozen)]
 pub(crate) struct PyAdapters {
-    writers: Mutex<WriterMap>,
+    registry: Mutex<Adapters>,
 }
 
 #[pymethods]
@@ -65,7 +65,7 @@ impl PyAdapters {
     #[new]
     fn new() -> Self {
         Self {
-            writers: Mutex::default(),
+            registry: Mutex::default(),
         }
     }
 
@@ -78,12 +78,27 @@ impl PyAdapters {
         if !adapter.is_callable() {
             return Err(PyTypeError::new_err("The adapter must be callable."));
         }
-        self.writers
+        self.registry
             .lock_py_attached(py)
             .unwrap()
+            .writers
             .insert(TypeKey::new(cls), adapter.unbind());
         Ok(())
     }
+}
+
+impl PyAdapters {
+    /// Copies the registry, so later changes do not reach a connected session.
+    pub(crate) fn snapshot(&self, py: Python<'_>) -> Adapters {
+        // Cloning a `Py` is safe here: `py` shows that this thread is attached to Python.
+        self.registry.lock_py_attached(py).unwrap().clone()
+    }
+}
+
+/// A frozen copy of the adapters registered for a session.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Adapters {
+    writers: WriterMap,
 }
 
 #[pymodule]
