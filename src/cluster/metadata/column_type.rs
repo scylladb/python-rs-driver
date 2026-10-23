@@ -17,7 +17,7 @@ macro_rules! native_type_class {
 
 /// Macro to case PyClassInitializer to PyResult<Py<PyCqlColumnType>>
 /// Takes a `py` Python token and a PyClassInitializer expression
-/// Usage: create_and_extract!(py, PyCqlAscii::new())
+/// Usage: create_and_extract!(py, PyCqlAsciiType::new())
 macro_rules! create_py_and_cast {
     ($py:expr, $initializer:expr) => {
         Py::new($py, $initializer).map(|obj| obj.into_bound($py).into_super().into_super().unbind())
@@ -34,26 +34,26 @@ impl PyCqlNativeType {
 }
 
 // Generate all native type classes
-native_type_class!(PyCqlAscii, "CqlAscii");
-native_type_class!(PyCqlBoolean, "CqlBoolean");
-native_type_class!(PyCqlBlob, "CqlBlob");
-native_type_class!(PyCqlCounter, "CqlCounter");
-native_type_class!(PyCqlDate, "CqlDate");
-native_type_class!(PyCqlDecimal, "CqlDecimal");
-native_type_class!(PyCqlDouble, "CqlDouble");
-native_type_class!(PyCqlDuration, "CqlDuration");
-native_type_class!(PyCqlFloat, "CqlFloat");
-native_type_class!(PyCqlInt, "CqlInt");
-native_type_class!(PyCqlBigInt, "CqlBigInt");
-native_type_class!(PyCqlText, "CqlText");
-native_type_class!(PyCqlTimestamp, "CqlTimestamp");
-native_type_class!(PyCqlInet, "CqlInet");
-native_type_class!(PyCqlSmallInt, "CqlSmallInt");
-native_type_class!(PyCqlTinyInt, "CqlTinyInt");
-native_type_class!(PyCqlTime, "CqlTime");
-native_type_class!(PyCqlTimeuuid, "CqlTimeuuid");
-native_type_class!(PyCqlUuid, "CqlUuid");
-native_type_class!(PyCqlVarint, "CqlVarint");
+native_type_class!(PyCqlAsciiType, "CqlAsciiType");
+native_type_class!(PyCqlBooleanType, "CqlBooleanType");
+native_type_class!(PyCqlBlobType, "CqlBlobType");
+native_type_class!(PyCqlCounterType, "CqlCounterType");
+native_type_class!(PyCqlDateType, "CqlDateType");
+native_type_class!(PyCqlDecimalType, "CqlDecimalType");
+native_type_class!(PyCqlDoubleType, "CqlDoubleType");
+native_type_class!(PyCqlDurationType, "CqlDurationType");
+native_type_class!(PyCqlFloatType, "CqlFloatType");
+native_type_class!(PyCqlIntType, "CqlIntType");
+native_type_class!(PyCqlBigIntType, "CqlBigIntType");
+native_type_class!(PyCqlTextType, "CqlTextType");
+native_type_class!(PyCqlTimestampType, "CqlTimestampType");
+native_type_class!(PyCqlInetType, "CqlInetType");
+native_type_class!(PyCqlSmallIntType, "CqlSmallIntType");
+native_type_class!(PyCqlTinyIntType, "CqlTinyIntType");
+native_type_class!(PyCqlTimeType, "CqlTimeType");
+native_type_class!(PyCqlTimeuuidType, "CqlTimeuuidType");
+native_type_class!(PyCqlUuidType, "CqlUuidType");
+native_type_class!(PyCqlVarintType, "CqlVarintType");
 
 #[pyclass(module = "scylla.cql_types", name = "CqlCollectionType", subclass, extends=PyCqlColumnType, frozen, get_all)]
 pub(crate) struct PyCqlCollectionType {
@@ -66,13 +66,13 @@ impl PyCqlCollectionType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlMap", extends=PyCqlCollectionType, frozen, get_all)]
-pub(crate) struct PyCqlMap {
+#[pyclass(module = "scylla.cql_types", name = "CqlMapType", extends=PyCqlCollectionType, frozen, get_all)]
+pub(crate) struct PyCqlMapType {
     pub(crate) key_type: Py<PyCqlColumnType>,
     pub(crate) value_type: Py<PyCqlColumnType>,
 }
 
-impl PyCqlMap {
+impl PyCqlMapType {
     pub(crate) fn new(
         frozen: bool,
         key_type: Py<PyCqlColumnType>,
@@ -85,46 +85,46 @@ impl PyCqlMap {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlSet", extends=PyCqlCollectionType, frozen, get_all)]
-pub(crate) struct PyCqlSet {
+#[pyclass(module = "scylla.cql_types", name = "CqlSetType", extends=PyCqlCollectionType, frozen, get_all)]
+pub(crate) struct PyCqlSetType {
     pub(crate) column_type: Py<PyCqlColumnType>,
 }
 
-impl PyCqlSet {
+impl PyCqlSetType {
     pub(crate) fn new(frozen: bool, column_type: Py<PyCqlColumnType>) -> PyClassInitializer<Self> {
         PyCqlCollectionType::new(frozen).add_subclass(Self { column_type })
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlList", extends=PyCqlCollectionType, frozen, get_all)]
-pub(crate) struct PyCqlList {
+#[pyclass(module = "scylla.cql_types", name = "CqlListType", extends=PyCqlCollectionType, frozen, get_all)]
+pub(crate) struct PyCqlListType {
     pub(crate) column_type: Py<PyCqlColumnType>,
 }
 
-impl PyCqlList {
+impl PyCqlListType {
     pub(crate) fn new(frozen: bool, column_type: Py<PyCqlColumnType>) -> PyClassInitializer<Self> {
         PyCqlCollectionType::new(frozen).add_subclass(Self { column_type })
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlTuple", extends=PyCqlColumnType, frozen, get_all)]
-pub(crate) struct PyCqlTuple {
+#[pyclass(module = "scylla.cql_types", name = "CqlTupleType", extends=PyCqlColumnType, frozen, get_all)]
+pub(crate) struct PyCqlTupleType {
     pub(crate) element_types: Vec<Py<PyCqlColumnType>>,
 }
 
-impl PyCqlTuple {
+impl PyCqlTupleType {
     pub(crate) fn new(element_types: Vec<Py<PyCqlColumnType>>) -> PyClassInitializer<Self> {
         PyClassInitializer::from(PyCqlColumnType::new()).add_subclass(Self { element_types })
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlVector", extends=PyCqlColumnType, frozen, get_all)]
-pub(crate) struct PyCqlVector {
+#[pyclass(module = "scylla.cql_types", name = "CqlVectorType", extends=PyCqlColumnType, frozen, get_all)]
+pub(crate) struct PyCqlVectorType {
     pub(crate) typ: Py<PyCqlColumnType>,
     pub(crate) dimensions: u16,
 }
 
-impl PyCqlVector {
+impl PyCqlVectorType {
     pub(crate) fn new(typ: Py<PyCqlColumnType>, dimensions: u16) -> PyClassInitializer<Self> {
         PyClassInitializer::from(PyCqlColumnType::new()).add_subclass(Self { typ, dimensions })
     }
@@ -172,42 +172,42 @@ pub(crate) fn extract_column_type(
         {
             #[deny(clippy::wildcard_enum_match_arm)]
             match native_type {
-                NativeType::Ascii => create_py_and_cast!(py, PyCqlAscii::new()),
-                NativeType::BigInt => create_py_and_cast!(py, PyCqlBigInt::new()),
-                NativeType::Blob => create_py_and_cast!(py, PyCqlBlob::new()),
-                NativeType::Boolean => create_py_and_cast!(py, PyCqlBoolean::new()),
-                NativeType::Counter => create_py_and_cast!(py, PyCqlCounter::new()),
-                NativeType::Date => create_py_and_cast!(py, PyCqlDate::new()),
-                NativeType::Decimal => create_py_and_cast!(py, PyCqlDecimal::new()),
-                NativeType::Double => create_py_and_cast!(py, PyCqlDouble::new()),
-                NativeType::Duration => create_py_and_cast!(py, PyCqlDuration::new()),
-                NativeType::Float => create_py_and_cast!(py, PyCqlFloat::new()),
-                NativeType::Inet => create_py_and_cast!(py, PyCqlInet::new()),
-                NativeType::Int => create_py_and_cast!(py, PyCqlInt::new()),
-                NativeType::SmallInt => create_py_and_cast!(py, PyCqlSmallInt::new()),
-                NativeType::Text => create_py_and_cast!(py, PyCqlText::new()),
-                NativeType::Time => create_py_and_cast!(py, PyCqlTime::new()),
-                NativeType::Timestamp => create_py_and_cast!(py, PyCqlTimestamp::new()),
-                NativeType::Timeuuid => create_py_and_cast!(py, PyCqlTimeuuid::new()),
-                NativeType::TinyInt => create_py_and_cast!(py, PyCqlTinyInt::new()),
-                NativeType::Uuid => create_py_and_cast!(py, PyCqlUuid::new()),
-                NativeType::Varint => create_py_and_cast!(py, PyCqlVarint::new()),
+                NativeType::Ascii => create_py_and_cast!(py, PyCqlAsciiType::new()),
+                NativeType::BigInt => create_py_and_cast!(py, PyCqlBigIntType::new()),
+                NativeType::Blob => create_py_and_cast!(py, PyCqlBlobType::new()),
+                NativeType::Boolean => create_py_and_cast!(py, PyCqlBooleanType::new()),
+                NativeType::Counter => create_py_and_cast!(py, PyCqlCounterType::new()),
+                NativeType::Date => create_py_and_cast!(py, PyCqlDateType::new()),
+                NativeType::Decimal => create_py_and_cast!(py, PyCqlDecimalType::new()),
+                NativeType::Double => create_py_and_cast!(py, PyCqlDoubleType::new()),
+                NativeType::Duration => create_py_and_cast!(py, PyCqlDurationType::new()),
+                NativeType::Float => create_py_and_cast!(py, PyCqlFloatType::new()),
+                NativeType::Inet => create_py_and_cast!(py, PyCqlInetType::new()),
+                NativeType::Int => create_py_and_cast!(py, PyCqlIntType::new()),
+                NativeType::SmallInt => create_py_and_cast!(py, PyCqlSmallIntType::new()),
+                NativeType::Text => create_py_and_cast!(py, PyCqlTextType::new()),
+                NativeType::Time => create_py_and_cast!(py, PyCqlTimeType::new()),
+                NativeType::Timestamp => create_py_and_cast!(py, PyCqlTimestampType::new()),
+                NativeType::Timeuuid => create_py_and_cast!(py, PyCqlTimeuuidType::new()),
+                NativeType::TinyInt => create_py_and_cast!(py, PyCqlTinyIntType::new()),
+                NativeType::Uuid => create_py_and_cast!(py, PyCqlUuidType::new()),
+                NativeType::Varint => create_py_and_cast!(py, PyCqlVarintType::new()),
                 _ => unreachable!("clippy testifies that the match is exhaustive"),
             }
         }
         ColumnType::Collection { frozen, typ } => match typ {
             CollectionType::List(element_type) => {
                 let column_type = extract_column_type(py, element_type)?;
-                create_py_and_cast!(py, PyCqlList::new(*frozen, column_type))
+                create_py_and_cast!(py, PyCqlListType::new(*frozen, column_type))
             }
             CollectionType::Set(element_type) => {
                 let column_type = extract_column_type(py, element_type)?;
-                create_py_and_cast!(py, PyCqlSet::new(*frozen, column_type))
+                create_py_and_cast!(py, PyCqlSetType::new(*frozen, column_type))
             }
             CollectionType::Map(key_type, value_type) => {
                 let key_type = extract_column_type(py, key_type)?;
                 let value_type = extract_column_type(py, value_type)?;
-                create_py_and_cast!(py, PyCqlMap::new(*frozen, key_type, value_type))
+                create_py_and_cast!(py, PyCqlMapType::new(*frozen, key_type, value_type))
             }
             _ => unreachable!("clippy testifies that the match is exhaustive"),
         },
@@ -217,12 +217,12 @@ pub(crate) fn extract_column_type(
                 .map(|col_typ| extract_column_type(py, col_typ))
                 .collect::<PyResult<Vec<Py<PyCqlColumnType>>>>()?;
 
-            Py::new(py, PyCqlTuple::new(element_types))
+            Py::new(py, PyCqlTupleType::new(element_types))
                 .map(|obj| obj.into_bound(py).into_super().unbind())
         }
         ColumnType::Vector { typ, dimensions } => {
             let element_type = extract_column_type(py, typ)?;
-            Py::new(py, PyCqlVector::new(element_type, *dimensions))
+            Py::new(py, PyCqlVectorType::new(element_type, *dimensions))
                 .map(|obj| obj.into_bound(py).into_super().unbind())
         }
         ColumnType::UserDefinedType { frozen, definition } => {

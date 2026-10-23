@@ -18,7 +18,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import Any, TypeAlias
 
-from scylla.cql_types import CqlBlob, CqlColumnType, CqlText
+from scylla.cql_types import CqlBlobType, CqlColumnType, CqlTextType
 from scylla.results import (
     ClassRowFactory,
     ColumnSpec,
@@ -184,9 +184,9 @@ Decoder: TypeAlias = Callable[[Any], Any]
 
 def _decoder(cql_type: CqlColumnType) -> Decoder:
     """Pick a per-column converter from the CQL type, once per page."""
-    if isinstance(cql_type, CqlBlob):
+    if isinstance(cql_type, CqlBlobType):
         return lambda value: json.loads(value) if value else None
-    if isinstance(cql_type, CqlText):
+    if isinstance(cql_type, CqlTextType):
         return lambda value: value.upper() if value else value
     return lambda value: value
 

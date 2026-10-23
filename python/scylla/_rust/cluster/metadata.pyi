@@ -39,64 +39,64 @@ class CqlColumnType:
 class CqlNativeType(CqlColumnType):
     """Base class for native Cassandra scalar types."""
 
-class CqlAscii(CqlNativeType):
+class CqlAsciiType(CqlNativeType):
     """CQL ``ascii``: US-ASCII string."""
 
-class CqlBigInt(CqlNativeType):
+class CqlBigIntType(CqlNativeType):
     """CQL ``bigint``: 64-bit signed integer."""
 
-class CqlBlob(CqlNativeType):
+class CqlBlobType(CqlNativeType):
     """CQL ``blob``: arbitrary bytes."""
 
-class CqlBoolean(CqlNativeType):
+class CqlBooleanType(CqlNativeType):
     """CQL ``boolean``: true or false."""
 
-class CqlCounter(CqlNativeType):
+class CqlCounterType(CqlNativeType):
     """CQL ``counter``: 64-bit signed integer that is only incremented or decremented."""
 
-class CqlDate(CqlNativeType):
+class CqlDateType(CqlNativeType):
     """CQL ``date``: calendar date without a time of day."""
 
-class CqlDecimal(CqlNativeType):
+class CqlDecimalType(CqlNativeType):
     """CQL ``decimal``: arbitrary-precision decimal number."""
 
-class CqlDouble(CqlNativeType):
+class CqlDoubleType(CqlNativeType):
     """CQL ``double``: 64-bit floating point number."""
 
-class CqlDuration(CqlNativeType):
+class CqlDurationType(CqlNativeType):
     """CQL ``duration``: length of time in months, days and nanoseconds."""
 
-class CqlFloat(CqlNativeType):
+class CqlFloatType(CqlNativeType):
     """CQL ``float``: 32-bit floating point number."""
 
-class CqlInt(CqlNativeType):
+class CqlIntType(CqlNativeType):
     """CQL ``int``: 32-bit signed integer."""
 
-class CqlInet(CqlNativeType):
+class CqlInetType(CqlNativeType):
     """CQL ``inet``: IPv4 or IPv6 address."""
 
-class CqlSmallInt(CqlNativeType):
+class CqlSmallIntType(CqlNativeType):
     """CQL ``smallint``: 16-bit signed integer."""
 
-class CqlText(CqlNativeType):
+class CqlTextType(CqlNativeType):
     """CQL ``text``: UTF-8 string."""
 
-class CqlTime(CqlNativeType):
+class CqlTimeType(CqlNativeType):
     """CQL ``time``: time of day with nanosecond precision."""
 
-class CqlTimestamp(CqlNativeType):
+class CqlTimestampType(CqlNativeType):
     """CQL ``timestamp``: date and time with millisecond precision."""
 
-class CqlTimeuuid(CqlNativeType):
+class CqlTimeuuidType(CqlNativeType):
     """CQL ``timeuuid``: version 1, time-based UUID."""
 
-class CqlTinyInt(CqlNativeType):
+class CqlTinyIntType(CqlNativeType):
     """CQL ``tinyint``: 8-bit signed integer."""
 
-class CqlUuid(CqlNativeType):
+class CqlUuidType(CqlNativeType):
     """CQL ``uuid``: UUID of any version."""
 
-class CqlVarint(CqlNativeType):
+class CqlVarintType(CqlNativeType):
     """CQL ``varint``: arbitrary-precision integer."""
 
 class CqlCollectionType(CqlColumnType):
@@ -104,29 +104,29 @@ class CqlCollectionType(CqlColumnType):
 
     frozen: bool
 
-class CqlList(CqlCollectionType):
-    """CqlList<T> — ordered sequence of elements."""
+class CqlListType(CqlCollectionType):
+    """list<T> — ordered sequence of elements."""
 
     column_type: CqlColumnType
 
-class CqlMap(CqlCollectionType):
-    """CqlMap<K, V> — key-value pairs."""
+class CqlMapType(CqlCollectionType):
+    """map<K, V> — key-value pairs."""
 
     key_type: CqlColumnType
     value_type: CqlColumnType
 
-class CqlSet(CqlCollectionType):
-    """CqlSet<T> — unordered set of elements."""
+class CqlSetType(CqlCollectionType):
+    """set<T> — unordered set of elements."""
 
     column_type: CqlColumnType
 
-class CqlTuple(CqlColumnType):
-    """CqlTuple<T1, T2, ...> — positional tuple of column types."""
+class CqlTupleType(CqlColumnType):
+    """tuple<T1, T2, ...> — positional tuple of column types."""
 
     element_types: list[CqlColumnType]
 
-class CqlVector(CqlColumnType):
-    """CqlVector<T, N> — fixed-length vector of elements."""
+class CqlVectorType(CqlColumnType):
+    """vector<T, N> — fixed-length vector of elements."""
 
     typ: CqlColumnType
     dimensions: int

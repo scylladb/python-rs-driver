@@ -5,7 +5,7 @@ from typing import Any, cast
 import pytest
 from helpers.ddl import ddl
 from helpers.session import connect
-from scylla.cql_types import CqlColumnType, CqlText
+from scylla.cql_types import CqlColumnType, CqlTextType
 from scylla.errors import LoadBalancingPolicyError, PrepareError, StatementConfigError, StatementConversionError
 from scylla.policies.load_balancing import DefaultPolicy
 from scylla.policies.retry import DefaultRetryPolicy
@@ -162,7 +162,7 @@ async def test_prepared_statement_bind_columns():
     assert bind_col.table_name == "local"
     assert bind_col.keyspace_name == "system"
     assert isinstance(bind_col.cql_type, CqlColumnType)
-    assert isinstance(bind_col.cql_type, CqlText)
+    assert isinstance(bind_col.cql_type, CqlTextType)
 
 
 @pytest.mark.asyncio
@@ -181,7 +181,7 @@ async def test_prepared_statement_result_columns():
     assert result_col.table_name == "local"
     assert result_col.keyspace_name == "system"
     assert isinstance(result_col.cql_type, CqlColumnType)
-    assert isinstance(result_col.cql_type, CqlText)
+    assert isinstance(result_col.cql_type, CqlTextType)
 
 
 @pytest.mark.asyncio

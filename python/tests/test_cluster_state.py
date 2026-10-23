@@ -8,7 +8,16 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from scylla.cluster import ClusterState, ColumnKind, Keyspace, Node, StrategyKind
-from scylla.cql_types import CqlCollectionType, CqlColumnType, CqlInt, CqlList, CqlMap, CqlNativeType, CqlText, CqlTuple
+from scylla.cql_types import (
+    CqlCollectionType,
+    CqlColumnType,
+    CqlIntType,
+    CqlListType,
+    CqlMapType,
+    CqlNativeType,
+    CqlTextType,
+    CqlTupleType,
+)
 from scylla.routing import ReplicaLocator, Shard, Token
 from scylla.session import Session, SessionBuilder
 from scylla.statement import Statement
@@ -117,7 +126,7 @@ async def test_table_partition_key(cluster_state: ClusterState) -> None:
     pk = ks.tables[TABLE].partition_key
     assert isinstance(pk, MappingProxyType)
     pk_typ = next(iter(pk.values())).typ
-    assert isinstance(pk_typ, CqlInt)
+    assert isinstance(pk_typ, CqlIntType)
     assert "id" in pk
 
 
@@ -483,19 +492,19 @@ async def test_complex_column_type(session: Session) -> None:
     assert complex_col is not None
     assert isinstance(complex_col.typ, CqlColumnType)
     assert isinstance(complex_col.typ, CqlCollectionType)
-    assert isinstance(complex_col.typ, CqlMap)
+    assert isinstance(complex_col.typ, CqlMapType)
     assert isinstance(complex_col.typ.key_type, CqlColumnType)
     assert isinstance(complex_col.typ.key_type, CqlCollectionType)
-    assert isinstance(complex_col.typ.key_type, CqlList)
+    assert isinstance(complex_col.typ.key_type, CqlListType)
     assert complex_col.typ.key_type.frozen
     assert isinstance(complex_col.typ.value_type, CqlColumnType)
     assert isinstance(complex_col.typ.value_type, CqlNativeType)
-    assert isinstance(complex_col.typ.value_type, CqlInt)
+    assert isinstance(complex_col.typ.value_type, CqlIntType)
     assert isinstance(complex_col.typ.key_type.column_type, CqlColumnType)
-    assert isinstance(complex_col.typ.key_type.column_type, CqlTuple)
+    assert isinstance(complex_col.typ.key_type.column_type, CqlTupleType)
     assert isinstance(complex_col.typ.key_type.column_type.element_types[0], CqlColumnType)
     assert isinstance(complex_col.typ.key_type.column_type.element_types[0], CqlNativeType)
-    assert isinstance(complex_col.typ.key_type.column_type.element_types[0], CqlText)
+    assert isinstance(complex_col.typ.key_type.column_type.element_types[0], CqlTextType)
     assert isinstance(complex_col.typ.key_type.column_type.element_types[1], CqlColumnType)
     assert isinstance(complex_col.typ.key_type.column_type.element_types[1], CqlNativeType)
-    assert isinstance(complex_col.typ.key_type.column_type.element_types[1], CqlInt)
+    assert isinstance(complex_col.typ.key_type.column_type.element_types[1], CqlIntType)

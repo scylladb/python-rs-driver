@@ -1,15 +1,18 @@
 import ipaddress
+import pickle
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
 from dateutil.relativedelta import relativedelta
 from helpers.ddl import ddl
 from helpers.session import connect
+from scylla.cql_types import CqlDate, CqlDuration, CqlTime, CqlTimestamp
 
 # SerializationError is never raised directly, but it shapes the error message.
 # We import ExecuteError which is raised for serialization issues during query execution.
@@ -142,16 +145,46 @@ async def test_blob_serialization(session: Session, table_factory: TableFactory)
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_date_serialization(session: Session, table_factory: TableFactory):
+@pytest.mark.parametrize(
+    "val,expected",
+    [
+        (date(2004, 6, 16), CqlDate.from_date(date(2004, 6, 16))),
+        (CqlDate(-(2**31)), CqlDate(-(2**31))),
+        (CqlDate(2**31 - 1), CqlDate(2**31 - 1)),
+    ],
+)
+async def test_date_serialization(
+    session: Session, table_factory: TableFactory, val: CqlDate | date, expected: CqlDate
+):
     table = await table_factory(
         "id int PRIMARY KEY, col date",
         "date_table",
     )
 
-    val = date(2004, 6, 16)
-
     await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
-    await session.execute(f"SELECT * from {table}")
+    result = await session.execute(f"SELECT col FROM {table} WHERE id = 1")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["col"] == expected
+
+
+def test_date_value_semantics():
+    d = CqlDate.from_date(date(2024, 5, 10))
+
+    assert d.days == (date(2024, 5, 10) - date(1970, 1, 1)).days
+    assert d.to_date() == date(2024, 5, 10)
+    assert CqlDate(0).to_date() == date(1970, 1, 1)
+    assert CqlDate(-1) < CqlDate(0) < CqlDate(1)
+    assert hash(d) == hash(CqlDate(d.days))
+    assert repr(CqlDate(5)) == "CqlDate(days=5)"
+    assert str(d) == "2024-05-10"
+    assert str(CqlDate(2**31 - 1)) == str(2**31 - 1)
+    assert pickle.loads(pickle.dumps(d)) == d
+    with pytest.raises(ValueError):
+        CqlDate(2**31 - 1).to_date()
+    with pytest.raises(OverflowError):
+        CqlDate(2**31)
 
 
 @pytest.mark.asyncio
@@ -185,15 +218,20 @@ async def test_double_serialization(session: Session, table_factory: TableFactor
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
-    "val",
+    "val,expected",
     [
-        relativedelta(months=2, days=5, microseconds=36),
-        # relativedelta stores these as years=1, months=2, days=1, hours=1, seconds=5.
-        relativedelta(months=14, hours=25, seconds=5),
-        relativedelta(weeks=2, minutes=90),
+        (CqlDuration(months=14, days=40, nanoseconds=7), CqlDuration(months=14, days=40, nanoseconds=7)),
+        (CqlDuration(months=-1, days=-2, nanoseconds=-3), CqlDuration(months=-1, days=-2, nanoseconds=-3)),
+        (relativedelta(months=2, days=5, microseconds=36), CqlDuration(months=2, days=5, nanoseconds=36_000)),
+        # relativedelta stores this as years=1, months=2, days=1, hours=1, seconds=5.
+        (relativedelta(months=14, hours=25, seconds=5), CqlDuration(months=14, days=1, nanoseconds=3_605_000_000_000)),
+        (relativedelta(weeks=2, minutes=90), CqlDuration(months=0, days=14, nanoseconds=5_400_000_000_000)),
+        (relativedelta(hours=1, minutes=-30), CqlDuration(months=0, days=0, nanoseconds=1_800_000_000_000)),
     ],
 )
-async def test_duration_serialization(session: Session, table_factory: TableFactory, val: relativedelta):
+async def test_duration_serialization(
+    session: Session, table_factory: TableFactory, val: CqlDuration | relativedelta, expected: CqlDuration
+):
     table = await table_factory(
         "id int PRIMARY KEY, col duration",
         "duration_table",
@@ -204,7 +242,33 @@ async def test_duration_serialization(session: Session, table_factory: TableFact
     row = await result.first_row()
 
     assert row is not None
-    assert row["col"] == val
+    assert row["col"] == expected
+
+
+def test_duration_value_semantics():
+    d = CqlDuration(months=1, days=2, nanoseconds=3)
+
+    assert (d.months, d.days, d.nanoseconds) == (1, 2, 3)
+    assert CqlDuration() == CqlDuration(0, 0, 0)
+    assert d == CqlDuration(1, 2, 3)
+    assert d != CqlDuration(1, 2, 4)
+    assert hash(d) == hash(CqlDuration(1, 2, 3))
+    assert repr(d) == "CqlDuration(months=1, days=2, nanoseconds=3)"
+    assert pickle.loads(pickle.dumps(d)) == d
+
+
+@pytest.mark.parametrize(
+    "kwargs,error",
+    [
+        ({"months": 1, "days": -1}, ValueError),
+        ({"days": -1, "nanoseconds": 1}, ValueError),
+        ({"months": 2**31}, OverflowError),
+        ({"nanoseconds": 2**63}, OverflowError),
+    ],
+)
+def test_duration_rejects_invalid_parts(kwargs: dict[str, int], error: type[Exception]):
+    with pytest.raises(error):
+        CqlDuration(**kwargs)
 
 
 @pytest.mark.asyncio
@@ -226,6 +290,22 @@ async def test_duration_serialization_mixed_sign(session: Session, table_factory
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
 
     assert "all duration fields must have the same sign" in str(exc_info.value).lower()
+
+
+def test_duration_relativedelta_conversion():
+    d = CqlDuration.from_relativedelta(relativedelta(years=1, months=2, days=3, hours=4, microseconds=5))
+
+    assert d == CqlDuration(months=14, days=3, nanoseconds=14_400_000_005_000)
+    assert d.to_relativedelta() == relativedelta(years=1, months=2, days=3, hours=4, microseconds=5)
+    # The last three digits of the nanoseconds are lost, and 25 hours become 1 day and 1 hour.
+    assert CqlDuration(nanoseconds=90_000_000_000_999).to_relativedelta() == relativedelta(days=1, hours=1)
+    assert CqlDuration(months=-1, nanoseconds=-1000).to_relativedelta() == relativedelta(months=-1, microseconds=-1)
+    with pytest.raises(TypeError):
+        CqlDuration.from_relativedelta(timedelta(days=1))  # pyright: ignore[reportArgumentType]
+    with pytest.raises(ValueError):
+        CqlDuration.from_relativedelta(relativedelta(days=1, hours=-1))
+    with pytest.raises(OverflowError):
+        CqlDuration.from_relativedelta(relativedelta(years=2**31))
 
 
 @pytest.mark.asyncio
@@ -318,16 +398,57 @@ async def test_text_serialization(session: Session, table_factory: TableFactory)
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_timestamp_serialization(session: Session, table_factory: TableFactory):
+@pytest.mark.parametrize(
+    "val,expected",
+    [
+        (
+            datetime(1, 1, 1, 23, 59, 59, 999000, tzinfo=UTC),
+            CqlTimestamp.from_datetime(datetime(1, 1, 1, 23, 59, 59, 999000, tzinfo=UTC)),
+        ),
+        (datetime(2024, 5, 10, 14, 30, tzinfo=timezone(timedelta(hours=2))), CqlTimestamp(1_715_344_200_000)),
+        (datetime(2024, 5, 10, 14, 30, tzinfo=ZoneInfo("Europe/Warsaw")), CqlTimestamp(1_715_344_200_000)),
+        (CqlTimestamp(0), CqlTimestamp(0)),
+        (CqlTimestamp(-1), CqlTimestamp(-1)),
+        (CqlTimestamp(10**16), CqlTimestamp(10**16)),
+    ],
+)
+async def test_timestamp_serialization(
+    session: Session, table_factory: TableFactory, val: CqlTimestamp | datetime, expected: CqlTimestamp
+):
     table = await table_factory(
         "id int PRIMARY KEY, col timestamp",
         "timestamp_table",
     )
 
-    val = datetime(1, 1, 1, 23, 59, 59, 999000, tzinfo=UTC)
-
     await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
-    await session.execute(f"SELECT * from {table}")
+    result = await session.execute(f"SELECT col FROM {table} WHERE id = 1")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["col"] == expected
+
+
+def test_timestamp_value_semantics():
+    t = CqlTimestamp.from_datetime(datetime(2024, 5, 10, 12, 30, 15, 123456, tzinfo=UTC))
+
+    assert t.milliseconds == 1_715_344_215_123
+    assert (
+        CqlTimestamp.from_datetime(datetime(2024, 5, 10, 14, 30, 15, 123000, tzinfo=timezone(timedelta(hours=2)))) == t
+    )
+    assert CqlTimestamp.from_datetime(datetime(2024, 5, 10, 14, 30, 15, 123000, tzinfo=ZoneInfo("Europe/Warsaw"))) == t
+    with pytest.raises(TypeError):
+        CqlTimestamp.from_datetime(datetime(2024, 5, 10, tzinfo=UTC).replace(tzinfo=None))
+    assert t.to_datetime() == datetime(2024, 5, 10, 12, 30, 15, 123000, tzinfo=UTC)
+    assert CqlTimestamp(-1) < CqlTimestamp(0) < CqlTimestamp(1)
+    assert hash(t) == hash(CqlTimestamp(t.milliseconds))
+    assert repr(CqlTimestamp(5)) == "CqlTimestamp(milliseconds=5)"
+    assert str(t) == "2024-05-10T12:30:15.123Z"
+    assert str(CqlTimestamp(10**16)) == str(10**16)
+    assert pickle.loads(pickle.dumps(t)) == t
+    with pytest.raises(ValueError):
+        CqlTimestamp(10**16).to_datetime()
+    with pytest.raises(OverflowError):
+        CqlTimestamp(2**63)
 
 
 @pytest.mark.asyncio
@@ -475,16 +596,44 @@ async def test_tinyint_serialization_overflow(session: Session, table_factory: T
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_time_serialization(session: Session, table_factory: TableFactory):
+@pytest.mark.parametrize(
+    "val,expected",
+    [
+        (time(1, 30, 45, 500000), CqlTime(5_445_500_000_000)),
+        (CqlTime(0), CqlTime(0)),
+        (CqlTime(86_399_999_999_999), CqlTime(86_399_999_999_999)),
+    ],
+)
+async def test_time_serialization(
+    session: Session, table_factory: TableFactory, val: CqlTime | time, expected: CqlTime
+):
     table = await table_factory(
         "id int PRIMARY KEY, col time",
         "time_table",
     )
 
-    val = time(1, 30, 45, 500000)
-
     await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
-    await session.execute(f"SELECT * from {table}")
+    result = await session.execute(f"SELECT col FROM {table} WHERE id = 1")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["col"] == expected
+
+
+def test_time_value_semantics():
+    t = CqlTime(5_445_500_000_123)
+
+    assert (t.hour, t.minute, t.second, t.nanosecond) == (1, 30, 45, 500_000_123)
+    assert t.to_time() == time(1, 30, 45, 500000)
+    assert CqlTime.from_time(time(1, 30, 45, 500000)) == CqlTime(5_445_500_000_000)
+    assert CqlTime(1) < CqlTime(2)
+    assert hash(t) == hash(CqlTime(t.nanoseconds))
+    assert repr(CqlTime(5)) == "CqlTime(nanoseconds=5)"
+    assert str(t) == "01:30:45.500000123"
+    assert pickle.loads(pickle.dumps(t)) == t
+    for nanoseconds in (-1, 86_400_000_000_000):
+        with pytest.raises(ValueError):
+            CqlTime(nanoseconds)
 
 
 @pytest.mark.asyncio

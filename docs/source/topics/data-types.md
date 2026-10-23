@@ -25,10 +25,10 @@ The table below shows the default Python objects returned by the driver when rea
 | `inet` | `ipaddress.IPv4Address` or `ipaddress.IPv6Address` | `ipaddress.IPv4Address` or `ipaddress.IPv6Address` |
 | `uuid` | `uuid.UUID` | `uuid.UUID` |
 | `timeuuid` | `uuid.UUID` | `uuid.UUID` |
-| `date` | `datetime.date` | `datetime.date` |
-| `time` | `datetime.time` | `datetime.time` |
-| `timestamp` | `datetime.datetime` in UTC | `datetime.datetime` in UTC |
-| `duration` | `dateutil.relativedelta.relativedelta` (requires `python-dateutil`) | `dateutil.relativedelta.relativedelta` (requires `python-dateutil`) |
+| `date` | `scylla.cql_types.CqlDate` | `scylla.cql_types.CqlDate` or `datetime.date` |
+| `time` | `scylla.cql_types.CqlTime` | `scylla.cql_types.CqlTime` or `datetime.time` |
+| `timestamp` | `scylla.cql_types.CqlTimestamp` | `scylla.cql_types.CqlTimestamp` or `datetime.datetime` with a time zone |
+| `duration` | `scylla.cql_types.CqlDuration` | `scylla.cql_types.CqlDuration` or `dateutil.relativedelta.relativedelta` (requires `python-dateutil`) |
 | `decimal` | `decimal.Decimal` | `decimal.Decimal` |
 | `list<T>` | `list` | `list` |
 | `set<T>` | `set` | `set` |

@@ -460,35 +460,35 @@ pub(crate) fn metadata(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResul
     module.add_class::<PyCqlCollectionType>()?;
 
     // Native types (20 total)
-    module.add_class::<PyCqlAscii>()?;
-    module.add_class::<PyCqlBigInt>()?;
-    module.add_class::<PyCqlBlob>()?;
-    module.add_class::<PyCqlBoolean>()?;
-    module.add_class::<PyCqlCounter>()?;
-    module.add_class::<PyCqlDate>()?;
-    module.add_class::<PyCqlDecimal>()?;
-    module.add_class::<PyCqlDouble>()?;
-    module.add_class::<PyCqlDuration>()?;
-    module.add_class::<PyCqlFloat>()?;
-    module.add_class::<PyCqlInet>()?;
-    module.add_class::<PyCqlInt>()?;
-    module.add_class::<PyCqlSmallInt>()?;
-    module.add_class::<PyCqlText>()?;
-    module.add_class::<PyCqlTime>()?;
-    module.add_class::<PyCqlTimestamp>()?;
-    module.add_class::<PyCqlTimeuuid>()?;
-    module.add_class::<PyCqlTinyInt>()?;
-    module.add_class::<PyCqlUuid>()?;
-    module.add_class::<PyCqlVarint>()?;
+    module.add_class::<PyCqlAsciiType>()?;
+    module.add_class::<PyCqlBigIntType>()?;
+    module.add_class::<PyCqlBlobType>()?;
+    module.add_class::<PyCqlBooleanType>()?;
+    module.add_class::<PyCqlCounterType>()?;
+    module.add_class::<PyCqlDateType>()?;
+    module.add_class::<PyCqlDecimalType>()?;
+    module.add_class::<PyCqlDoubleType>()?;
+    module.add_class::<PyCqlDurationType>()?;
+    module.add_class::<PyCqlFloatType>()?;
+    module.add_class::<PyCqlInetType>()?;
+    module.add_class::<PyCqlIntType>()?;
+    module.add_class::<PyCqlSmallIntType>()?;
+    module.add_class::<PyCqlTextType>()?;
+    module.add_class::<PyCqlTimeType>()?;
+    module.add_class::<PyCqlTimestampType>()?;
+    module.add_class::<PyCqlTimeuuidType>()?;
+    module.add_class::<PyCqlTinyIntType>()?;
+    module.add_class::<PyCqlUuidType>()?;
+    module.add_class::<PyCqlVarintType>()?;
 
     // Collection types
-    module.add_class::<PyCqlList>()?;
-    module.add_class::<PyCqlMap>()?;
-    module.add_class::<PyCqlSet>()?;
+    module.add_class::<PyCqlListType>()?;
+    module.add_class::<PyCqlMapType>()?;
+    module.add_class::<PyCqlSetType>()?;
 
     // Complex types
-    module.add_class::<PyCqlTuple>()?;
-    module.add_class::<PyCqlVector>()?;
+    module.add_class::<PyCqlTupleType>()?;
+    module.add_class::<PyCqlVectorType>()?;
     module.add_class::<PyCqlUserDefinedType>()?;
 
     // Metadata classes

@@ -1,3 +1,7 @@
+use crate::cql_types::{
+    PyCqlDate, PyCqlDuration, PyCqlTime, PyCqlTimestamp, aware_datetime_to_utc,
+};
+use crate::relativedelta::{Relativedelta, RelativedeltaError};
 use crate::serialize::error::{DriverSerializationError, TypeExpected};
 
 use std::any::Any;
@@ -7,7 +11,7 @@ use std::sync::Arc;
 
 use bigdecimal::BigDecimal;
 use bigdecimal::num_bigint::BigInt;
-use chrono::{DateTime, NaiveDate, NaiveTime, TimeDelta, Utc};
+use chrono::{NaiveDate, NaiveTime};
 use uuid::Uuid;
 
 use pyo3::Bound;
@@ -15,7 +19,7 @@ use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{
-    PyAny, PyBytes, PyDict, PyInt, PyList, PyMapping, PySet, PyString, PyTuple, PyType,
+    PyAny, PyBytes, PyDateTime, PyDict, PyInt, PyList, PyMapping, PySet, PyString, PyTuple, PyType,
 };
 
 use scylla::cluster::metadata::{CollectionType, ColumnType, NativeType, UserDefinedType};
@@ -26,7 +30,7 @@ use scylla::serialize::value::{
     SetOrListSerializationErrorKind, TupleTypeCheckErrorKind, UdtTypeCheckErrorKind,
 };
 use scylla::serialize::writers::{CellWriter, WrittenCellProof};
-use scylla::value::{Counter, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
+use scylla::value::{Counter, CqlDate, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
 
 use scylla_cql::serialize::value::{
     VectorSerializationErrorKind, serialize_next_constant_length_elem_unstable,
@@ -175,27 +179,42 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             }
 
             // Datatime types.
-            NativeType::Date => self.serialize_native::<NaiveDate>(typ, cell_writer),
-            NativeType::Duration => self
-                .relativedelta_to_duration(typ)?
-                .serialize(typ, cell_writer),
+            NativeType::Date => match self.cast::<PyCqlDate>() {
+                Ok(date) => CqlDate::from(*date.get()).serialize(typ, cell_writer),
+                Err(_) => self.serialize_native::<NaiveDate>(typ, cell_writer),
+            },
+            NativeType::Duration => {
+                let duration = match self.cast::<PyCqlDuration>() {
+                    Ok(duration) => *duration.get(),
+                    Err(_) => self
+                        .extract::<Relativedelta>()
+                        .and_then(PyCqlDuration::try_from)
+                        .map_err(|err| self.relativedelta_error(err, typ))?,
+                };
+                CqlDuration::from(duration).serialize(typ, cell_writer)
+            }
             NativeType::Time => {
-                let value = self
-                    .extract::<NaiveTime>()
-                    .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?;
-
-                let time: CqlTime = value
-                    .try_into()
-                    .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?;
+                let time = match self.cast::<PyCqlTime>() {
+                    Ok(time) => CqlTime::from(*time.get()),
+                    Err(_) => self
+                        .extract::<NaiveTime>()
+                        .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?
+                        .try_into()
+                        .map_err(|_| self.mismatched_type_error::<CqlTime>(typ))?,
+                };
 
                 time.serialize(typ, cell_writer)
             }
             NativeType::Timestamp => {
-                let value = self
-                    .extract::<DateTime<Utc>>()
-                    .map_err(|_| self.mismatched_type_error::<CqlTimestamp>(typ))?;
-
-                let timestamp: CqlTimestamp = value.into();
+                let timestamp = match self.cast::<PyCqlTimestamp>() {
+                    Ok(timestamp) => CqlTimestamp::from(*timestamp.get()),
+                    Err(_) => self
+                        .cast::<PyDateTime>()
+                        .map_err(PyErr::from)
+                        .and_then(aware_datetime_to_utc)
+                        .map_err(|_| self.mismatched_type_error::<CqlTimestamp>(typ))?
+                        .into(),
+                };
 
                 timestamp.serialize(typ, cell_writer)
             }
@@ -275,55 +294,6 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         Ok(Some(ip))
     }
 
-    /// Reads every relative field, because `relativedelta` carries overflow into
-    /// the next unit (14 months become 1 year and 2 months).
-    fn relativedelta_to_duration(
-        &self,
-        typ: &ColumnType,
-    ) -> Result<CqlDuration, SerializationError> {
-        let py = self.py();
-        let attr = |name| {
-            self.getattr(name)
-                .and_then(|value| value.extract::<i64>())
-                .map_err(|_| self.mismatched_type_error::<CqlDuration>(typ))
-        };
-        let years = attr(intern!(py, "years"))?;
-        let months = attr(intern!(py, "months"))?;
-        let days = attr(intern!(py, "days"))?;
-        let hours = attr(intern!(py, "hours"))?;
-        let minutes = attr(intern!(py, "minutes"))?;
-        let seconds = attr(intern!(py, "seconds"))?;
-        let microseconds = attr(intern!(py, "microseconds"))?;
-
-        let months = years
-            .checked_mul(12)
-            .and_then(|m| m.checked_add(months))
-            .and_then(|m| i32::try_from(m).ok());
-        let days = i32::try_from(days).ok();
-        let nanoseconds = [
-            TimeDelta::try_hours(hours),
-            TimeDelta::try_minutes(minutes),
-            TimeDelta::try_seconds(seconds),
-            Some(TimeDelta::microseconds(microseconds)),
-        ]
-        .into_iter()
-        .try_fold(TimeDelta::zero(), |sum, part| sum.checked_add(&part?))
-        .and_then(|sum| sum.num_nanoseconds());
-
-        let (Some(months), Some(days), Some(nanoseconds)) = (months, days, nanoseconds) else {
-            return Err(DriverSerializationError::value_overflow().into());
-        };
-        // Days and nanoseconds stay apart, because a day is not always 24 hours.
-        if !has_uniform_sign(months, days, nanoseconds) {
-            return Err(DriverSerializationError::mixed_sign_duration().into());
-        }
-        Ok(CqlDuration {
-            months,
-            days,
-            nanoseconds,
-        })
-    }
-
     fn python_type_name(&self) -> Result<Bound<'py, PyString>, SerializationError> {
         self.get_type()
             .name()
@@ -348,10 +318,12 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             "str" => STRING_COLUMNS,
             "bytes" => BYTES_COLUMNS,
             "Decimal" => DECIMAL_COLUMNS,
-            "relativedelta" => RELATIVEDELTA_COLUMNS,
+            "CqlDuration" | "relativedelta" => DURATION_COLUMNS,
+            "CqlDate" | "date" => DATE_COLUMNS,
             "datetime" => DATETIME_COLUMNS,
+            "CqlTimestamp" => TIMESTAMP_COLUMNS,
             "IPv4Address" | "IPv6Address" => IP_COLUMNS,
-            "time" => TIME_COLUMNS,
+            "CqlTime" | "time" => TIME_COLUMNS,
             "UUID" => UUID_COLUMNS,
 
             _ => {
@@ -360,6 +332,14 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         };
 
         Ok(columns)
+    }
+
+    fn relativedelta_error(&self, err: RelativedeltaError, typ: &ColumnType) -> SerializationError {
+        match err {
+            RelativedeltaError::NotRelativedelta => self.mismatched_type_error::<CqlDuration>(typ),
+            RelativedeltaError::Overflow => DriverSerializationError::value_overflow().into(),
+            RelativedeltaError::MixedSign => DriverSerializationError::mixed_sign_duration().into(),
+        }
     }
 
     fn mismatched_type_error<T: ?Sized>(&self, typ: &ColumnType) -> SerializationError {
@@ -383,13 +363,6 @@ impl<'a, 'py> SerializeValue for PyAnyWrapper<'a, 'py> {
 
         self.serialize_arbitrary_value(typ, cell_writer)
     }
-}
-
-/// CQL rejects a duration whose fields have different signs.
-fn has_uniform_sign(months: i32, days: i32, nanoseconds: i64) -> bool {
-    let non_negative = months >= 0 && days >= 0 && nanoseconds >= 0;
-    let non_positive = months <= 0 && days <= 0 && nanoseconds <= 0;
-    non_negative || non_positive
 }
 
 fn serialize_sequence<'t, 'b, 'py, T: Any>(
@@ -835,16 +808,23 @@ static BOOL_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::B
 static BYTES_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Blob)];
 
 // List of CQL column types used to provide clear error messages
-// indicating which CQL types are compatible with Python `relativedelta` type.
-static RELATIVEDELTA_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Duration)];
+// indicating which CQL types are compatible with Python `CqlDuration` and `relativedelta` types.
+static DURATION_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Duration)];
 
 // List of CQL column types used to provide clear error messages
-// indicating which CQL types are compatible with Python `datetime.date`
-// and `datetime.datetime` types.
+// indicating which CQL types are compatible with Python `CqlDate` and `datetime.date` types.
+static DATE_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Date)];
+
+// List of CQL column types used to provide clear error messages
+// indicating which CQL types are compatible with Python `datetime.datetime` type.
 static DATETIME_COLUMNS: &[ColumnType<'static>] = &[
     ColumnType::Native(NativeType::Date),
     ColumnType::Native(NativeType::Timestamp),
 ];
+
+// List of CQL column types used to provide clear error messages
+// indicating which CQL types are compatible with Python `CqlTimestamp` type.
+static TIMESTAMP_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Timestamp)];
 
 // List of CQL column types used to provide clear error messages
 // indicating which CQL types are compatible with Python `ipaddress.IPv4Address`
@@ -852,7 +832,7 @@ static DATETIME_COLUMNS: &[ColumnType<'static>] = &[
 static IP_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Inet)];
 
 // List of CQL column types used to provide clear error messages
-// indicating which CQL types are compatible with Python `datetime.time` type.
+// indicating which CQL types are compatible with Python `CqlTime` and `datetime.time` types.
 static TIME_COLUMNS: &[ColumnType<'static>] = &[ColumnType::Native(NativeType::Time)];
 
 // List of CQL column types used to provide clear error messages

@@ -3,60 +3,70 @@ CQL column types and the Python values they map to.
 
 Every public name starts with ``Cql``; the rest of the name tells what it is:
 
-- ``Cql<Name>``, such as ``CqlInt``, ``CqlList`` or ``CqlUserDefinedType``,
-  describes one CQL type, as reported by the schema or by a prepared
-  statement. The name is the CQL type's own name.
-- ``Cql*Type`` (``CqlColumnType``, ``CqlNativeType``, ``CqlCollectionType``)
-  is a base class that groups those descriptors, for ``isinstance`` checks.
+- ``Cql<Name>Type``, such as ``CqlIntType``, ``CqlListType`` or
+  ``CqlUserDefinedType``, describes one CQL type, as reported by the schema
+  or by a prepared statement. ``<Name>`` is the CQL type's own name.
+- ``CqlColumnType``, ``CqlNativeType`` and ``CqlCollectionType`` are base
+  classes that group those descriptors, for ``isinstance`` checks.
 - ``Cql*Value`` (``CqlValue``, ``CqlScalarValue``, ``CqlCollectionValue``)
   is a type alias for the Python objects the driver produces when reading a
-  column. Writing accepts the same objects, except ``CqlEmpty``.
+  column. Writing accepts the same objects, except ``CqlEmpty``, and also
+  the standard types listed below.
 - ``CqlEmpty`` is the value read from a column that holds CQL's empty value.
   It is read-only: the driver does not accept it when writing.
+- ``CqlDate``, ``CqlTime``, ``CqlTimestamp`` and ``CqlDuration`` are the values
+  of CQL ``date``, ``time``, ``timestamp`` and ``duration`` columns.
+
+Writing also accepts ``datetime.date`` for ``date``, ``datetime.time`` for
+``time``, a ``datetime.datetime`` with a time zone for ``timestamp`` and
+``dateutil.relativedelta.relativedelta`` for ``duration``.
 """
 
 import ipaddress
-from datetime import date, datetime, time
 from decimal import Decimal
 from typing import TYPE_CHECKING, TypeAlias
 from uuid import UUID
 
 from ._rust.cluster.metadata import (  # pyright: ignore[reportMissingModuleSource]
-    CqlAscii,
-    CqlBigInt,
-    CqlBlob,
-    CqlBoolean,
+    CqlAsciiType,
+    CqlBigIntType,
+    CqlBlobType,
+    CqlBooleanType,
     CqlCollectionType,
     CqlColumnType,
-    CqlCounter,
-    CqlDate,
-    CqlDecimal,
-    CqlDouble,
-    CqlDuration,
-    CqlFloat,
-    CqlInet,
-    CqlInt,
-    CqlList,
-    CqlMap,
+    CqlCounterType,
+    CqlDateType,
+    CqlDecimalType,
+    CqlDoubleType,
+    CqlDurationType,
+    CqlFloatType,
+    CqlInetType,
+    CqlIntType,
+    CqlListType,
+    CqlMapType,
     CqlNativeType,
-    CqlSet,
-    CqlSmallInt,
-    CqlText,
+    CqlSetType,
+    CqlSmallIntType,
+    CqlTextType,
+    CqlTimestampType,
+    CqlTimeType,
+    CqlTimeuuidType,
+    CqlTinyIntType,
+    CqlTupleType,
+    CqlUserDefinedType,
+    CqlUuidType,
+    CqlVarintType,
+    CqlVectorType,
+)
+from ._rust.cql_types import (  # pyright: ignore[reportMissingModuleSource]
+    CqlDate,
+    CqlDuration,
+    CqlEmpty,
     CqlTime,
     CqlTimestamp,
-    CqlTimeuuid,
-    CqlTinyInt,
-    CqlTuple,
-    CqlUserDefinedType,
-    CqlUuid,
-    CqlVarint,
-    CqlVector,
 )
-from ._rust.value import CqlEmpty  # pyright: ignore[reportMissingModuleSource]
 
 if TYPE_CHECKING:
-    from dateutil.relativedelta import relativedelta
-
     CqlScalarValue: TypeAlias = (
         # CQL:
         # - Counter
@@ -95,16 +105,16 @@ if TYPE_CHECKING:
         | ipaddress.IPv6Address
         # CQL:
         # - Date
-        | date
+        | CqlDate
         # CQL:
         # - Timestamp
-        | datetime
+        | CqlTimestamp
         # CQL:
         # - Time
-        | time
+        | CqlTime
         # CQL:
         # - Duration
-        | relativedelta
+        | CqlDuration
         # CQL:
         # - Empty (read only; the driver does not accept CqlEmpty when writing)
         | CqlEmpty
@@ -122,14 +132,9 @@ if TYPE_CHECKING:
     """Python value of a CQL collection, tuple, vector or user defined type column."""
 
     CqlValue: TypeAlias = CqlScalarValue | CqlCollectionValue
-    """Python value of any CQL column, as read and written by the driver."""
+    """Python value of any CQL column, as read by the driver."""
 else:
     # Runtime stand-ins without recursion, so get_type_hints() can resolve them.
-    try:
-        from dateutil.relativedelta import relativedelta
-    except ImportError:
-        relativedelta = None
-
     CqlScalarValue = (
         int
         | float
@@ -140,10 +145,10 @@ else:
         | UUID
         | ipaddress.IPv4Address
         | ipaddress.IPv6Address
-        | date
-        | datetime
-        | time
-        | relativedelta
+        | CqlDate
+        | CqlTimestamp
+        | CqlTime
+        | CqlDuration
         | CqlEmpty
         | None
     )
@@ -151,37 +156,41 @@ else:
     CqlValue = CqlScalarValue | CqlCollectionValue
 
 __all__ = [
-    "CqlAscii",
-    "CqlBigInt",
-    "CqlBlob",
-    "CqlBoolean",
+    "CqlAsciiType",
+    "CqlBigIntType",
+    "CqlBlobType",
+    "CqlBooleanType",
     "CqlCollectionType",
     "CqlCollectionValue",
     "CqlColumnType",
-    "CqlCounter",
+    "CqlCounterType",
     "CqlDate",
-    "CqlDecimal",
-    "CqlDouble",
+    "CqlDateType",
+    "CqlDecimalType",
+    "CqlDoubleType",
     "CqlDuration",
+    "CqlDurationType",
     "CqlEmpty",
-    "CqlFloat",
-    "CqlInet",
-    "CqlInt",
-    "CqlList",
-    "CqlMap",
+    "CqlFloatType",
+    "CqlInetType",
+    "CqlIntType",
+    "CqlListType",
+    "CqlMapType",
     "CqlNativeType",
     "CqlScalarValue",
-    "CqlSet",
-    "CqlSmallInt",
-    "CqlText",
+    "CqlSetType",
+    "CqlSmallIntType",
+    "CqlTextType",
     "CqlTime",
+    "CqlTimeType",
     "CqlTimestamp",
-    "CqlTimeuuid",
-    "CqlTinyInt",
-    "CqlTuple",
+    "CqlTimestampType",
+    "CqlTimeuuidType",
+    "CqlTinyIntType",
+    "CqlTupleType",
     "CqlUserDefinedType",
-    "CqlUuid",
+    "CqlUuidType",
     "CqlValue",
-    "CqlVarint",
-    "CqlVector",
+    "CqlVarintType",
+    "CqlVectorType",
 ]

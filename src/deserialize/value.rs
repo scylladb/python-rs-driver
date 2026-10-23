@@ -1,14 +1,14 @@
-use crate::deserialize::conversion::{CqlDurationWrapper, CqlVarintWrapper};
+use crate::cql_types::{CqlEmpty, PyCqlDate, PyCqlDuration, PyCqlTime, PyCqlTimestamp};
+use crate::deserialize::conversion::CqlVarintWrapper;
 use crate::deserialize::error::DriverDeserializationError;
 use crate::utils::PyValueOrError;
 use bigdecimal::BigDecimal;
-use chrono::{DateTime, NaiveTime, Utc};
-use pyo3::prelude::{PyDictMethods, PyListMethods, PyModule, PyModuleMethods, PySetMethods};
+use pyo3::prelude::{PyDictMethods, PyListMethods, PySetMethods};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{
     PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyString, PyTuple,
 };
-use pyo3::{Bound, IntoPyObject, Py, PyAny, PyResult, Python, pyclass, pymethods, pymodule};
+use pyo3::{Bound, IntoPyObject, Py, PyAny, PyResult, Python};
 use scylla::deserialize::value::FrameSliceWithMetadata;
 use scylla::deserialize::value::VectorIterator;
 use scylla::deserialize::value::{DeserializeValue, ListlikeIterator, MapIterator, UdtIterator};
@@ -98,16 +98,6 @@ impl<'frame, 'metadata, 'py> PyDeserializeValue<'frame, 'metadata, 'py> for PyDe
 
 pub(crate) struct PyDeserializedValue {
     value: Py<PyAny>,
-}
-
-#[pyclass(module = "scylla.cql_types", frozen)]
-pub struct CqlEmpty;
-
-#[pymethods]
-impl CqlEmpty {
-    fn __repr__(&self) -> &'static str {
-        "CqlEmpty"
-    }
 }
 
 struct List<T> {
@@ -403,47 +393,35 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                             .map_err(DriverDeserializationError::scylla_decode_failed)?;
                         PyBool::new(py, v).to_owned().into_any()
                     }
-                    // CQL Date → Python datetime.date
+                    // CQL Date → Python scylla.cql_types.CqlDate
                     NativeType::Date => {
-                        let date: chrono::NaiveDate = CqlDate::deserialize(typ, Some(v))
-                            .map_err(DriverDeserializationError::scylla_decode_failed)?
-                            .try_into()
-                            .map_err(DeserializationError::new)
+                        let d = CqlDate::deserialize(typ, Some(v))
                             .map_err(DriverDeserializationError::scylla_decode_failed)?;
-
-                        date.into_pyobject(py)
+                        Bound::new(py, PyCqlDate::from(d))
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }
-                    // CQL Timestamp → Python datetime.datetime (UTC)
+                    // CQL Timestamp → Python scylla.cql_types.CqlTimestamp
                     NativeType::Timestamp => {
-                        let t: DateTime<Utc> = CqlTimestamp::deserialize(typ, Some(v))
-                            .map_err(DriverDeserializationError::scylla_decode_failed)?
-                            .try_into()
-                            .map_err(DeserializationError::new)
+                        let t = CqlTimestamp::deserialize(typ, Some(v))
                             .map_err(DriverDeserializationError::scylla_decode_failed)?;
-
-                        t.into_pyobject(py)
+                        Bound::new(py, PyCqlTimestamp::from(t))
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }
-                    // CQL Time → Python datetime.time
+                    // CQL Time → Python scylla.cql_types.CqlTime
                     NativeType::Time => {
-                        let time: NaiveTime = CqlTime::deserialize(typ, Some(v))
-                            .map_err(DriverDeserializationError::scylla_decode_failed)?
-                            .try_into()
-                            .map_err(DeserializationError::new)
+                        let t = CqlTime::deserialize(typ, Some(v))
                             .map_err(DriverDeserializationError::scylla_decode_failed)?;
-                        time.into_pyobject(py)
+                        Bound::new(py, PyCqlTime::from(t))
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }
-                    // CQL Duration → Python dateutil.relativedelta.relativedelta
+                    // CQL Duration → Python scylla.cql_types.CqlDuration
                     NativeType::Duration => {
-                        let d: CqlDurationWrapper = CqlDuration::deserialize(typ, Some(v))
-                            .map_err(DriverDeserializationError::scylla_decode_failed)?
-                            .into();
-                        d.into_pyobject(py)
+                        let d = CqlDuration::deserialize(typ, Some(v))
+                            .map_err(DriverDeserializationError::scylla_decode_failed)?;
+                        Bound::new(py, PyCqlDuration::from(d))
                             .map_err(DriverDeserializationError::python_conversion_failed)?
                             .into_any()
                     }
@@ -564,11 +542,4 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
             )));
         }
     })
-}
-
-#[pymodule]
-pub(crate) fn value(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<CqlEmpty>()?;
-
-    Ok(())
 }
