@@ -2,7 +2,7 @@ import time
 
 import pytest
 from helpers.ddl import ddl
-from scylla.errors import ExecuteError, RequestError
+from scylla.errors import InvalidRequest, RequestError
 from scylla.session import SessionBuilder
 
 
@@ -75,7 +75,7 @@ async def test_change_use_keyspace():
 
         await session.use_keyspace(ks2)
 
-        with pytest.raises(ExecuteError):
+        with pytest.raises(InvalidRequest):
             await session.execute("INSERT INTO test_table (id) VALUES (1)")
     finally:
         await ddl(session, f"DROP KEYSPACE IF EXISTS {ks1}")

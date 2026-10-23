@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import CONTACT_POINTS, session_builder
-from scylla.errors import ExecuteError, RowFactoryError, RowIterationError
+from scylla.errors import RowFactoryError, RowIterationError
 from scylla.results import (
     ClassRowFactory,
     ColumnSpec,
@@ -414,7 +414,7 @@ async def test_pages_ends_after_error_on_later_page(session: Session, paged_tabl
     pages = aiter((await session.execute(statement, factory=FailsOnSecondPage())).pages())
 
     assert list(await anext(pages)) == ["id=0|ck=0", "id=0|ck=1"]
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(RowFactoryError) as exc_info:
         await anext(pages)
     assert isinstance(exc_info.value.__cause__, ValueError)
     with pytest.raises(StopAsyncIteration):
