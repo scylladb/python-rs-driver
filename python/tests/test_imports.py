@@ -68,7 +68,7 @@ def test_classes_report_their_public_module() -> None:
     from scylla.cluster import Keyspace
     from scylla.cql_types import CqlInt
     from scylla.errors import RequestTimeoutError
-    from scylla.legacy import QueryExhausted, ResponseFuture, ResultSet
+    from scylla.legacy import LegacySession, QueryExhausted, ResponseFuture, ResultSet
     from scylla.session import PoolSize, SessionBuilder
     from scylla.statement import Consistency
 
@@ -81,3 +81,4 @@ def test_classes_report_their_public_module() -> None:
     assert ResponseFuture.__module__ == "scylla.legacy"
     assert QueryExhausted.__module__ == "scylla.legacy"
     assert ResultSet.__module__ == "scylla.legacy"
+    assert LegacySession.__module__ == "scylla.legacy"

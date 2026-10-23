@@ -265,7 +265,6 @@ pub(crate) struct PyResponseFuture {
 
 impl PyResponseFuture {
     /// Spawns `request` on the runtime, returning the future that delivers its result.
-    #[expect(dead_code, reason = "LegacySession calls it; it lands in a later PR")]
     pub(crate) fn spawn(
         py: Python<'_>,
         request: LegacyRequestFuture<DriverExecuteError>,
