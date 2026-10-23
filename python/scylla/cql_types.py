@@ -13,10 +13,18 @@ Every public name starts with ``Cql``; the rest of the name tells what it is:
   column. Writing accepts the same objects, except ``CqlEmpty``.
 - ``CqlEmpty`` is the value read from a column that holds CQL's empty value.
   It is read-only: the driver does not accept it when writing.
+
+``Date``, ``Time`` and ``Duration`` are exceptions to the ``Cql`` prefix,
+because ``CqlDate``, ``CqlTime`` and ``CqlDuration`` are the type descriptors.
+They are the values of CQL ``date``, ``time`` and ``duration`` columns.
+Writing also accepts ``datetime.date`` for ``date``, ``datetime.time`` for
+``time`` and ``dateutil.relativedelta.relativedelta`` for ``duration``.
+
+``Timestamp`` is the same kind of exception, for CQL ``timestamp`` columns.
+Writing also accepts ``datetime.datetime``.
 """
 
 import ipaddress
-from datetime import date, datetime, time
 from decimal import Decimal
 from typing import TYPE_CHECKING, TypeAlias
 from uuid import UUID
@@ -52,11 +60,9 @@ from ._rust.cluster.metadata import (  # pyright: ignore[reportMissingModuleSour
     CqlVarint,
     CqlVector,
 )
-from ._rust.value import CqlEmpty  # pyright: ignore[reportMissingModuleSource]
+from ._rust.types import CqlEmpty, Date, Duration, Time, Timestamp  # pyright: ignore[reportMissingModuleSource]
 
 if TYPE_CHECKING:
-    from dateutil.relativedelta import relativedelta
-
     CqlScalarValue: TypeAlias = (
         # CQL:
         # - Counter
@@ -95,16 +101,16 @@ if TYPE_CHECKING:
         | ipaddress.IPv6Address
         # CQL:
         # - Date
-        | date
+        | Date
         # CQL:
         # - Timestamp
-        | datetime
+        | Timestamp
         # CQL:
         # - Time
-        | time
+        | Time
         # CQL:
         # - Duration
-        | relativedelta
+        | Duration
         # CQL:
         # - Empty (read only; the driver does not accept CqlEmpty when writing)
         | CqlEmpty
@@ -125,11 +131,6 @@ if TYPE_CHECKING:
     """Python value of any CQL column, as read and written by the driver."""
 else:
     # Runtime stand-ins without recursion, so get_type_hints() can resolve them.
-    try:
-        from dateutil.relativedelta import relativedelta
-    except ImportError:
-        relativedelta = None
-
     CqlScalarValue = (
         int
         | float
@@ -140,10 +141,10 @@ else:
         | UUID
         | ipaddress.IPv4Address
         | ipaddress.IPv6Address
-        | date
-        | datetime
-        | time
-        | relativedelta
+        | Date
+        | Timestamp
+        | Time
+        | Duration
         | CqlEmpty
         | None
     )
@@ -184,4 +185,8 @@ __all__ = [
     "CqlValue",
     "CqlVarint",
     "CqlVector",
+    "Date",
+    "Duration",
+    "Time",
+    "Timestamp",
 ]

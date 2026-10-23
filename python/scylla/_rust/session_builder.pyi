@@ -8,6 +8,7 @@ from scylla.future import DriverFuture
 from scylla.policies.address_translator import AddressTranslator
 from scylla.policies.host_filter import HostFilter
 from scylla.policies.timestamp_generator import TimestampGenerator
+from scylla.serialization import Adapters
 from scylla.session import (
     Compression,
     ContactPoint,
@@ -42,6 +43,8 @@ class SessionBuilderConfig:
     def timestamp_generator(self) -> Any | None: ...
     @property
     def tls_context(self) -> TlsConfig | None: ...
+    @property
+    def adapters(self) -> Adapters | None: ...
     @property
     def shard_aware_local_port_range(self) -> tuple[int, int]: ...
     @property
@@ -149,6 +152,23 @@ class SessionBuilder:
         execution_profile : ExecutionProfile
             The execution profile to use by default for requests executed through
             the created session.
+
+        Returns
+        -------
+        SessionBuilder
+        """
+
+    def adapters(self, adapters: Adapters) -> SessionBuilder:
+        """
+        Set the adapters for values of your own types.
+
+        The session copies the adapters when it connects. Changes after the
+        connection have no effect on that session.
+
+        Parameters
+        ----------
+        adapters : Adapters
+            The adapters that convert values the driver cannot write.
 
         Returns
         -------

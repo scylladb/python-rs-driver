@@ -16,6 +16,7 @@ The root also exports `Batch`, `BatchType`, `PreparedStatement`, `RequestResult`
 | [`scylla.statement`](reference/scylla/statement/index) | What you send. `Statement`, `PreparedStatement`, `Batch` and `BatchType`, the `Consistency` and `SerialConsistency` levels, and `UNSET`, which options such as `serial_consistency` report when they are left to the execution profile. |
 | [`scylla.results`](reference/scylla/results/index) | What comes back. `RequestResult`, `PagingState`, the row iterators, `ColumnSpec`, and the row factories that shape each row: the `RowFactory` base class and the built-in ones. |
 | [`scylla.cql_types`](reference/scylla/cql_types/index) | The CQL type system. The `Cql*` type descriptors reported by the schema and by prepared statements, the `CqlValue` aliases describing which Python objects the driver reads and writes, and the read-only `CqlEmpty`, which writing does not accept. |
+| [`scylla.serialization`](reference/scylla/serialization/index) | Writing values of your own types. `Adapters` converts them into values the driver can write, and is passed to `SessionBuilder.adapters()`. |
 | [`scylla.cluster`](reference/scylla/cluster/index) | What the driver knows about the cluster. `ClusterState`, `Node`, and the schema metadata: `Keyspace`, `Table`, `MaterializedView`, `Column`, `Strategy`. |
 | [`scylla.policies`](reference/scylla/policies/index) | Pluggable driver behaviour: which nodes a request goes to and in what order (load balancing, host filters), what happens when a request fails or is slow (retry, speculative execution), how node addresses are translated, and where client-side timestamps come from. Each has its own submodule, such as `scylla.policies.retry`, to import from; `scylla.policies` itself exports nothing. |
 | [`scylla.auth`](reference/scylla/auth/index) | `Authenticator` and `AuthenticatorProvider` for custom authentication. Plain username and password needs nothing from here, see `SessionBuilder.user()`. |
@@ -33,6 +34,7 @@ reference/scylla/session/index
 reference/scylla/statement/index
 reference/scylla/results/index
 reference/scylla/cql_types/index
+reference/scylla/serialization/index
 reference/scylla/cluster/index
 reference/scylla/policies/index
 reference/scylla/auth/index

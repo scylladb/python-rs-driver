@@ -9,6 +9,7 @@ use crate::policies::address_translator::PyAddressTranslator;
 use crate::policies::authenticator_provider::PyAuthenticatorProvider;
 use crate::policies::host_filter::PyHostFilter;
 use crate::policies::timestamp_generator::PyTimestampGenerator;
+use crate::serialize::adapters::PyAdapters;
 use crate::session::PySession;
 use crate::tls::{PyTlsConfig, PyTlsContext};
 use crate::utils::{ParsedAddress, ParsedAddressList, PyDuration, WithOriginalPyObject};
@@ -62,6 +63,15 @@ impl SessionBuilder {
             inner.config.default_execution_profile_handle =
                 execution_profile.get().inner.clone().into_handle();
         }
+        slf
+    }
+
+    fn adapters<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        adapters: Py<PyAdapters>,
+    ) -> PyRef<'py, Self> {
+        slf.inner.lock_py_attached(py).unwrap().adapters = Some(adapters);
         slf
     }
 
@@ -496,7 +506,7 @@ impl SessionBuilder {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<PySession, DriverSessionConnectionError>> {
-        let (config, default_row_factory) = {
+        let (config, default_row_factory, adapters) = {
             let inner = self.inner.lock_py_attached(py).unwrap();
             (
                 inner.config.clone(),
@@ -506,6 +516,11 @@ impl SessionBuilder {
                     .row_factory
                     .as_ref()
                     .map(|f| f.extracted.clone()),
+                inner
+                    .adapters
+                    .as_ref()
+                    .map(|adapters| adapters.get().snapshot(py))
+                    .unwrap_or_default(),
             )
         };
 
@@ -513,8 +528,10 @@ impl SessionBuilder {
             py,
             boxed_py_future(async move {
                 match scylla::client::session::Session::connect(config).await {
-                    Ok(session) => PySession::new(Arc::new(session), default_row_factory)
-                        .map_err(DriverSessionConnectionError::python_conversion_error),
+                    Ok(session) => {
+                        PySession::new(Arc::new(session), default_row_factory, Arc::new(adapters))
+                            .map_err(DriverSessionConnectionError::python_conversion_error)
+                    }
                     Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
                 }
             }),
@@ -547,6 +564,8 @@ struct PySessionBuilderConfig {
     pub shard_aware_local_port_range: (u16, u16),
     #[pyo3(get)]
     pub tls_context: Option<Py<PyTlsConfig>>,
+    #[pyo3(get)]
+    pub adapters: Option<Py<PyAdapters>>,
 }
 
 impl PySessionBuilderConfig {
@@ -574,6 +593,7 @@ impl PySessionBuilderConfig {
             address_translator: None,
             timestamp_generator: None,
             tls_context: None,
+            adapters: None,
         })
     }
 }

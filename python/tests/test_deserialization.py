@@ -9,11 +9,10 @@ from typing import Any, cast
 
 import pytest
 import pytest_asyncio
-from dateutil.relativedelta import relativedelta
 from helpers.ddl import ddl
 from helpers.session import connect
-from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue
-from scylla.errors import DeserializationError, RowIterationError
+from scylla.cql_types import CqlColumnType, CqlEmpty, CqlText, CqlValue, Date, Duration, Time, Timestamp
+from scylla.errors import RowIterationError
 from scylla.results import ColumnSpec, RowBuilder, RowFactory
 from scylla.session import Session
 
@@ -492,7 +491,7 @@ async def test_timeuuid_deserialization(
     assert row["value"] == value
 
 
-# Verifies correct deserialization of CQL date into Python date objects
+# Verifies correct deserialization of CQL date into Date
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
@@ -500,6 +499,7 @@ async def test_timeuuid_deserialization(
     [
         (1, datetime.date(2024, 5, 10)),
         (2, datetime.date(1999, 12, 31)),
+        (3, datetime.date(1970, 1, 1)),
     ],
 )
 async def test_date_deserialization(session: Session, table_factory: TableFactory, row_id: int, value: datetime.date):
@@ -512,11 +512,9 @@ async def test_date_deserialization(session: Session, table_factory: TableFactor
         value_sql=f"'{value.isoformat()}'",
     )
 
-    # Type checks
-    assert isinstance(row["value"], datetime.date)
-
-    # Value correctness
-    assert row["value"] == value
+    assert isinstance(row["value"], Date)
+    assert row["value"] == Date.from_date(value)
+    assert row["value"].to_date() == value
 
 
 # Verifies correct deserialization of CQL ascii into Python strings
@@ -627,7 +625,7 @@ async def test_varint_deserialization_parametrized(
     assert row["value"] == value
 
 
-# Verifies correct deserialization of CQL timestamp into timezone-aware datetime
+# Verifies correct deserialization of CQL timestamp into Timestamp
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
@@ -661,25 +659,28 @@ async def test_timestamp_deserialization(
         value_sql=str(value_ms),
     )
 
-    assert isinstance(row["value"], datetime.datetime)
-    assert row["value"] == value
+    assert isinstance(row["value"], Timestamp)
+    assert row["value"] == Timestamp(value_ms)
+    assert row["value"].to_datetime() == value
 
 
-# Verifies correct deserialization of CQL time into Python time objects
+# Verifies correct deserialization of CQL time into Time
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
-    "row_id,value",
+    "row_id,value_sql,expected",
     [
-        (1, time(1, 30, 45, 500000)),  # 01:30:45.500
-        (2, time(10, 15, 5, 123000)),  # 10:15:05.123
+        (1, "'01:30:45.500'", Time.from_time(time(1, 30, 45, 500000))),
+        (2, "'10:15:05.123'", Time.from_time(time(10, 15, 5, 123000))),
+        (3, "'23:59:59.999999999'", Time(86_399_999_999_999)),
     ],
 )
 async def test_time_deserialization(
     session: Session,
     table_factory: TableFactory,
     row_id: int,
-    value: time,
+    value_sql: str,
+    expected: Time,
 ):
     row = await insert_and_fetch_single_row(
         session,
@@ -687,36 +688,30 @@ async def test_time_deserialization(
         schema="id int PRIMARY KEY, value time",
         table_name="time_table",
         row_id=row_id,
-        value_sql=f"'{value.isoformat()}'",
+        value_sql=value_sql,
     )
 
-    assert isinstance(row["value"], time)
-    assert row["value"] == value
+    assert isinstance(row["value"], Time)
+    assert row["value"] == expected
 
 
-# Verifies correct deserialization of CQL duration into relativedelta
+# Verifies correct deserialization of CQL duration into Duration
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
     "row_id,expected,value_literal",
     [
-        (
-            1,
-            relativedelta(months=2, days=5, microseconds=36),
-            "2mo5d36000ns",
-        ),
-        (
-            2,
-            relativedelta(months=11, days=0, microseconds=123_456),
-            "11mo0d123456000ns",
-        ),
+        (1, Duration(months=2, days=5, nanoseconds=36_000), "2mo5d36000ns"),
+        (2, Duration(months=11, days=0, nanoseconds=123_456_000), "11mo0d123456000ns"),
+        (3, Duration(months=14, days=40, nanoseconds=7), "14mo40d7ns"),
+        (4, Duration(months=-1, days=-2, nanoseconds=-3), "-1mo2d3ns"),
     ],
 )
 async def test_duration_deserialization(
     session: Session,
     table_factory: TableFactory,
     row_id: int,
-    expected: relativedelta,
+    expected: Duration,
     value_literal: str,
 ):
     row = await insert_and_fetch_single_row(
@@ -728,7 +723,7 @@ async def test_duration_deserialization(
         value_sql=value_literal,
     )
 
-    assert isinstance(row["value"], relativedelta)
+    assert isinstance(row["value"], Duration)
     assert row["value"] == expected
 
 
@@ -1114,21 +1109,12 @@ async def test_empty_values_deserialization(
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-@pytest.mark.xfail(
-    reason=(
-        "Conversion from CqlDate to Python date is currently fallible. "
-        "CQL date supports a wider range than Python datetime.date. "
-        "This test documents the failure for extreme values and serves "
-        "as a regression test once conversion logic is fixed."
-    ),
-)
 @pytest.mark.parametrize(
-    "row_id,value_sql",
+    "row_id,value_sql,expected_days",
     [
-        # CQL date is stored as unsigned days since epoch (1970-01-01).
-        # These values correspond to u32::MIN and u32::MAX on the Rust side.
-        (1, "0"),  # CqlDate(u32::MIN)
-        (2, "4294967295"),  # CqlDate(u32::MAX)
+        # CQL date is stored as unsigned days with 1970-01-01 at 2^31.
+        (1, "0", -(2**31)),
+        (2, "4294967295", 2**31 - 1),
     ],
 )
 async def test_date_deserialization_extreme_ranges(
@@ -1136,6 +1122,7 @@ async def test_date_deserialization_extreme_ranges(
     table_factory: TableFactory,
     row_id: int,
     value_sql: str,
+    expected_days: int,
 ):
     row = await insert_and_fetch_single_row(
         session=session,
@@ -1146,33 +1133,25 @@ async def test_date_deserialization_extreme_ranges(
         value_sql=value_sql,
     )
 
-    # Expected behavior after fix:
-    # - Either successfully return a Python date
-    # - Or raise a well-defined, documented exception
-    assert isinstance(row["value"], datetime.date)
+    assert row["value"] == Date(expected_days)
+    with pytest.raises(ValueError):
+        row["value"].to_date()
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason=(
-        "CQL timestamp values may exceed the range supported by "
-        "Python datetime / chrono. Deserialization overflows for "
-        "extreme timestamps and currently fails."
-    ),
-)
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
-    "row_id,value_sql",
+    "row_id,milliseconds",
     [
-        (1, 10**16),  # far future → overflow
-        (2, -(10**16)),  # far past → overflow
+        (1, 10**16),  # far future
+        (2, -(10**16)),  # far past
     ],
 )
-async def test_timestamp_overflow(
+async def test_timestamp_outside_datetime_range(
     session: Session,
     table_factory: TableFactory,
     row_id: int,
-    value_sql: str,
+    milliseconds: int,
 ):
     row = await insert_and_fetch_single_row(
         session=session,
@@ -1180,10 +1159,12 @@ async def test_timestamp_overflow(
         schema="id int PRIMARY KEY, value timestamp",
         table_name="timestamp_overflow_table",
         row_id=row_id,
-        value_sql=value_sql,
+        value_sql=str(milliseconds),
     )
 
-    assert isinstance(row["value"], datetime.datetime)
+    assert row["value"] == Timestamp(milliseconds)
+    with pytest.raises(ValueError):
+        row["value"].to_datetime()
 
 
 @pytest.mark.asyncio
@@ -1215,24 +1196,6 @@ async def test_request_result_first_page_columns_for_non_rows(session: Session, 
 
     assert result.first_page_columns == ()
     assert result.first_page.columns == ()
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_db
-async def test_timestamp_overflow_raises_deserialization_error(session: Session, table_factory: TableFactory):
-    table = await table_factory(
-        "id int PRIMARY KEY, value timestamp",
-        "timestamp_overflow_table",
-    )
-
-    await session.execute(f"INSERT INTO {table} (id, value) VALUES (1, {10**16})")
-
-    result = await session.execute(f"SELECT * FROM {table} WHERE id = 1")
-
-    with pytest.raises(DeserializationError) as exc_info:
-        await result.first_row()
-
-    assert "column" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio

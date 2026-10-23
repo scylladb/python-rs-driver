@@ -1,8 +1,9 @@
 import ipaddress
+import pickle
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -10,6 +11,7 @@ import pytest_asyncio
 from dateutil.relativedelta import relativedelta
 from helpers.ddl import ddl
 from helpers.session import connect
+from scylla.cql_types import Date, Duration, Time, Timestamp
 
 # SerializationError is never raised directly, but it shapes the error message.
 # We import ExecuteError which is raised for serialization issues during query execution.
@@ -142,16 +144,44 @@ async def test_blob_serialization(session: Session, table_factory: TableFactory)
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_date_serialization(session: Session, table_factory: TableFactory):
+@pytest.mark.parametrize(
+    "val,expected",
+    [
+        (date(2004, 6, 16), Date.from_date(date(2004, 6, 16))),
+        (Date(-(2**31)), Date(-(2**31))),
+        (Date(2**31 - 1), Date(2**31 - 1)),
+    ],
+)
+async def test_date_serialization(session: Session, table_factory: TableFactory, val: Date | date, expected: Date):
     table = await table_factory(
         "id int PRIMARY KEY, col date",
         "date_table",
     )
 
-    val = date(2004, 6, 16)
-
     await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
-    await session.execute(f"SELECT * from {table}")
+    result = await session.execute(f"SELECT col FROM {table} WHERE id = 1")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["col"] == expected
+
+
+def test_date_value_semantics():
+    d = Date.from_date(date(2024, 5, 10))
+
+    assert d.days == (date(2024, 5, 10) - date(1970, 1, 1)).days
+    assert d.to_date() == date(2024, 5, 10)
+    assert Date(0).to_date() == date(1970, 1, 1)
+    assert Date(-1) < Date(0) < Date(1)
+    assert hash(d) == hash(Date(d.days))
+    assert repr(Date(5)) == "Date(days=5)"
+    assert str(d) == "2024-05-10"
+    assert str(Date(2**31 - 1)) == str(2**31 - 1)
+    assert pickle.loads(pickle.dumps(d)) == d
+    with pytest.raises(ValueError):
+        Date(2**31 - 1).to_date()
+    with pytest.raises(OverflowError):
+        Date(2**31)
 
 
 @pytest.mark.asyncio
@@ -185,15 +215,20 @@ async def test_double_serialization(session: Session, table_factory: TableFactor
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 @pytest.mark.parametrize(
-    "val",
+    "val,expected",
     [
-        relativedelta(months=2, days=5, microseconds=36),
-        # relativedelta stores these as years=1, months=2, days=1, hours=1, seconds=5.
-        relativedelta(months=14, hours=25, seconds=5),
-        relativedelta(weeks=2, minutes=90),
+        (Duration(months=14, days=40, nanoseconds=7), Duration(months=14, days=40, nanoseconds=7)),
+        (Duration(months=-1, days=-2, nanoseconds=-3), Duration(months=-1, days=-2, nanoseconds=-3)),
+        (relativedelta(months=2, days=5, microseconds=36), Duration(months=2, days=5, nanoseconds=36_000)),
+        # relativedelta stores this as years=1, months=2, days=1, hours=1, seconds=5.
+        (relativedelta(months=14, hours=25, seconds=5), Duration(months=14, days=1, nanoseconds=3_605_000_000_000)),
+        (relativedelta(weeks=2, minutes=90), Duration(months=0, days=14, nanoseconds=5_400_000_000_000)),
+        (relativedelta(hours=1, minutes=-30), Duration(months=0, days=0, nanoseconds=1_800_000_000_000)),
     ],
 )
-async def test_duration_serialization(session: Session, table_factory: TableFactory, val: relativedelta):
+async def test_duration_serialization(
+    session: Session, table_factory: TableFactory, val: Duration | relativedelta, expected: Duration
+):
     table = await table_factory(
         "id int PRIMARY KEY, col duration",
         "duration_table",
@@ -204,7 +239,33 @@ async def test_duration_serialization(session: Session, table_factory: TableFact
     row = await result.first_row()
 
     assert row is not None
-    assert row["col"] == val
+    assert row["col"] == expected
+
+
+def test_duration_value_semantics():
+    d = Duration(months=1, days=2, nanoseconds=3)
+
+    assert (d.months, d.days, d.nanoseconds) == (1, 2, 3)
+    assert Duration() == Duration(0, 0, 0)
+    assert d == Duration(1, 2, 3)
+    assert d != Duration(1, 2, 4)
+    assert hash(d) == hash(Duration(1, 2, 3))
+    assert repr(d) == "Duration(months=1, days=2, nanoseconds=3)"
+    assert pickle.loads(pickle.dumps(d)) == d
+
+
+@pytest.mark.parametrize(
+    "kwargs,error",
+    [
+        ({"months": 1, "days": -1}, ValueError),
+        ({"days": -1, "nanoseconds": 1}, ValueError),
+        ({"months": 2**31}, OverflowError),
+        ({"nanoseconds": 2**63}, OverflowError),
+    ],
+)
+def test_duration_rejects_invalid_parts(kwargs: dict[str, int], error: type[Exception]):
+    with pytest.raises(error):
+        Duration(**kwargs)
 
 
 @pytest.mark.asyncio
@@ -318,16 +379,52 @@ async def test_text_serialization(session: Session, table_factory: TableFactory)
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_timestamp_serialization(session: Session, table_factory: TableFactory):
+@pytest.mark.parametrize(
+    "val,expected",
+    [
+        (
+            datetime(1, 1, 1, 23, 59, 59, 999000, tzinfo=UTC),
+            Timestamp.from_datetime(datetime(1, 1, 1, 23, 59, 59, 999000, tzinfo=UTC)),
+        ),
+        (Timestamp(0), Timestamp(0)),
+        (Timestamp(-1), Timestamp(-1)),
+        (Timestamp(10**16), Timestamp(10**16)),
+    ],
+)
+async def test_timestamp_serialization(
+    session: Session, table_factory: TableFactory, val: Timestamp | datetime, expected: Timestamp
+):
     table = await table_factory(
         "id int PRIMARY KEY, col timestamp",
         "timestamp_table",
     )
 
-    val = datetime(1, 1, 1, 23, 59, 59, 999000, tzinfo=UTC)
-
     await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
-    await session.execute(f"SELECT * from {table}")
+    result = await session.execute(f"SELECT col FROM {table} WHERE id = 1")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["col"] == expected
+
+
+def test_timestamp_value_semantics():
+    t = Timestamp.from_datetime(datetime(2024, 5, 10, 12, 30, 15, 123456, tzinfo=UTC))
+
+    assert t.milliseconds == 1_715_344_215_123
+    assert Timestamp.from_datetime(datetime(2024, 5, 10, 14, 30, 15, 123000, tzinfo=timezone(timedelta(hours=2)))) == t
+    with pytest.raises(TypeError):
+        Timestamp.from_datetime(datetime(2024, 5, 10, tzinfo=UTC).replace(tzinfo=None))
+    assert t.to_datetime() == datetime(2024, 5, 10, 12, 30, 15, 123000, tzinfo=UTC)
+    assert Timestamp(-1) < Timestamp(0) < Timestamp(1)
+    assert hash(t) == hash(Timestamp(t.milliseconds))
+    assert repr(Timestamp(5)) == "Timestamp(milliseconds=5)"
+    assert str(t) == "2024-05-10T12:30:15.123Z"
+    assert str(Timestamp(10**16)) == str(10**16)
+    assert pickle.loads(pickle.dumps(t)) == t
+    with pytest.raises(ValueError):
+        Timestamp(10**16).to_datetime()
+    with pytest.raises(OverflowError):
+        Timestamp(2**63)
 
 
 @pytest.mark.asyncio
@@ -475,16 +572,42 @@ async def test_tinyint_serialization_overflow(session: Session, table_factory: T
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_time_serialization(session: Session, table_factory: TableFactory):
+@pytest.mark.parametrize(
+    "val,expected",
+    [
+        (time(1, 30, 45, 500000), Time(5_445_500_000_000)),
+        (Time(0), Time(0)),
+        (Time(86_399_999_999_999), Time(86_399_999_999_999)),
+    ],
+)
+async def test_time_serialization(session: Session, table_factory: TableFactory, val: Time | time, expected: Time):
     table = await table_factory(
         "id int PRIMARY KEY, col time",
         "time_table",
     )
 
-    val = time(1, 30, 45, 500000)
-
     await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
-    await session.execute(f"SELECT * from {table}")
+    result = await session.execute(f"SELECT col FROM {table} WHERE id = 1")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["col"] == expected
+
+
+def test_time_value_semantics():
+    t = Time(5_445_500_000_123)
+
+    assert (t.hour, t.minute, t.second, t.nanosecond) == (1, 30, 45, 500_000_123)
+    assert t.to_time() == time(1, 30, 45, 500000)
+    assert Time.from_time(time(1, 30, 45, 500000)) == Time(5_445_500_000_000)
+    assert Time(1) < Time(2)
+    assert hash(t) == hash(Time(t.nanoseconds))
+    assert repr(Time(5)) == "Time(nanoseconds=5)"
+    assert str(t) == "01:30:45.500000123"
+    assert pickle.loads(pickle.dumps(t)) == t
+    for nanoseconds in (-1, 86_400_000_000_000):
+        with pytest.raises(ValueError):
+            Time(nanoseconds)
 
 
 @pytest.mark.asyncio
@@ -693,6 +816,24 @@ async def test_vector_serialization_tuple(session: Session, table_factory: Table
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+@pytest.mark.parametrize("element_type", ["float", "text"])
+async def test_vector_serialization_rejects_none_element(
+    session: Session, table_factory: TableFactory, element_type: str
+):
+    table = await table_factory(
+        f"id int PRIMARY KEY, embedding vector<{element_type}, 3>",
+        f"vector_none_{element_type}_table",
+    )
+    vector = [1.0, None, 2.0] if element_type == "float" else ["a", None, "b"]
+
+    with pytest.raises(ExecuteError) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, embedding) VALUES (?, ?)", (1, vector))
+
+    assert "vector element cannot be none" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_list_serialization(session: Session, table_factory: TableFactory):
     table = await table_factory(
         "id int PRIMARY KEY, tags list<text>, scores list<int>",
@@ -751,6 +892,7 @@ async def test_tuple_serialization(session: Session, table_factory: TableFactory
         (2, ("tag1", "", ""), (100, 0, 0)),
         (3, ("a", "b", "c"), (1, 2, 3)),
         (4, ("test", "with", "spaces"), (0, -1, 999)),
+        (5, ("a", None, "c"), (1, None, 3)),
     ]
 
     for values in test_cases:
@@ -903,6 +1045,14 @@ async def test_udt(session: Session, table_factory: TableFactory):
     await session.execute(f"INSERT INTO {table} (id, addr) VALUES (?, ?)", (2, asdict(address)))
 
     await session.execute(f"SELECT * from {table}")
+
+    partial = {"street": None, "city": "Anytown", "zip_code": None}
+    await session.execute(f"INSERT INTO {table} (id, addr) VALUES (?, ?)", (3, partial))
+    result = await session.execute(f"SELECT addr FROM {table} WHERE id = 3")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["addr"] == partial
 
 
 @pytest.mark.asyncio

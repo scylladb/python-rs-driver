@@ -19,6 +19,7 @@ PUBLIC_MODULES = [
     "scylla.policies.timestamp_generator",
     "scylla.results",
     "scylla.routing",
+    "scylla.serialization",
     "scylla.session",
     "scylla.statement",
     "scylla.tls",

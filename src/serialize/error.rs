@@ -32,6 +32,9 @@ pub enum SerializationErrorKind {
     /// The duration fields have different signs, which CQL cannot represent.
     #[error("All duration fields must have the same sign")]
     MixedSignDuration,
+    /// A vector element is null, which CQL cannot represent.
+    #[error("A vector element cannot be None")]
+    NullVectorElement,
     /// An error occurred while interacting with Python objects during serialization.
     #[error("Python interop failed: {source}")]
     PythonInteropFailed { source: Box<PyErr> },
@@ -120,6 +123,13 @@ impl DriverSerializationError {
         }
     }
 
+    pub(crate) fn null_vector_element() -> Self {
+        Self {
+            kind: SerializationErrorKind::NullVectorElement,
+            location: None,
+        }
+    }
+
     pub(crate) fn scylla_serialize_failed(source: scylla::serialize::SerializationError) -> Self {
         Self {
             kind: SerializationErrorKind::ScyllaSerializeFailed { source },
@@ -162,7 +172,8 @@ impl From<DriverSerializationError> for PyErr {
             SerializationErrorKind::ValueOverflow => {
                 (ValueOverflowSerializationError::new_err(message), None)
             }
-            SerializationErrorKind::MixedSignDuration => {
+            SerializationErrorKind::MixedSignDuration
+            | SerializationErrorKind::NullVectorElement => {
                 (SerializationError::new_err(message), None)
             }
             SerializationErrorKind::PythonInteropFailed { source } => {
