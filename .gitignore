@@ -50,3 +50,5 @@ docs/source/api/reference/
 
 # No need for that in a library
 uv.lock
+
+!docs/uv.lock

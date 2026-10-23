@@ -64,7 +64,7 @@ linkcheck: setup
 # Build the configured Git refs for publication.
 .PHONY: multiversion
 multiversion: setup
-	$(UV) run sphinx-multiversion $(SOURCEDIR) $(BUILDDIR)/dirhtml $(SPHINXOPTS) -W --keep-going
+	$(UV) run sphinx-multiversion $(SOURCEDIR) $(BUILDDIR)/dirhtml -W --keep-going
 
 .PHONY: multiversionpreview
 multiversionpreview: multiversion
