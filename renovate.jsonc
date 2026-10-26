@@ -1,0 +1,64 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "config:recommended",
+        "helpers:pinGitHubActionDigestsToSemver"
+    ],
+    "commitBodyTable": true,
+    // Keep the PR body short: drop the config description, rebase checkbox, footer
+    // and inline release notes. The table links to the release notes instead.
+    "prBodyTemplate": "{{{header}}}{{{table}}}{{{warnings}}}{{{notes}}}",
+    "prBodyColumns": [
+        "Package",
+        "Type",
+        "Update",
+        "Change",
+        "Pending",
+        "Release notes"
+    ],
+    "prBodyDefinitions": {
+        "Release notes": "{{#each releases}}{{#if releaseNotes.url}}[{{{version}}}]({{{releaseNotes.url}}}) {{/if}}{{/each}}"
+    },
+    "description": "Global branch-creation cadence: Renovate may only open update branches on Saturdays.",
+    // See https://crontab.cronhub.io/ for cheatsheet on crontab syntax and translation to natural language.
+    "schedule": [
+        "* * * * 6"
+    ],
+    // Refresh docs/uv.lock to the newest versions that docs/pyproject.toml allows.
+    // The root uv.lock is not committed, so this touches only the docs lockfile.
+    "pep621": {
+        "lockFileMaintenance": {
+            "enabled": true,
+            "schedule": [
+                "* * * * 6"
+            ]
+        }
+    },
+    "packageRules": [
+        {
+            "description": "The root .python-version is the oldest supported Python, and docs/.python-version matches the docs CI. Do not bump them to the newest release.",
+            "matchManagers": [
+                "pyenv"
+            ],
+            "enabled": false
+        },
+        {
+            "matchManagers": [
+                "github-actions"
+            ],
+            "pinDigests": true,
+            "minimumReleaseAge": "90 days"
+        },
+        {
+            "description": "Skip wait period for scylladb actions. This is generally a no-op, because minimumReleaseAge doesn't work for pure hashes on branches - it needs releases. Keeping it here in case this changes in the future.",
+            "matchManagers": [
+                "github-actions"
+            ],
+            "matchPackageNames": [
+                "/^scylladb-actions\\//",
+                "/^scylladb\\//"
+            ],
+            "minimumReleaseAge": null
+        }
+    ]
+}
