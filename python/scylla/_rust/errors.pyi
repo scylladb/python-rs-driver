@@ -1,6 +1,7 @@
 from datetime import timedelta
 
-from scylla.policies.retry import CqlResponseKind
+from scylla.policies.retry import CqlResponseKind, OperationType, WriteType
+from scylla.statement import Consistency
 
 class ScyllaError(Exception): ...
 class InternalDriverError(ScyllaError): ...
@@ -62,6 +63,73 @@ class RequestSerializationError(ProtocolError): ...
 
 class UnexpectedResponse(ProtocolError):
     response_kind: CqlResponseKind
+
+# Errors returned by the database
+class DatabaseError(RequestFailedError):
+    reason: str
+
+class Unavailable(DatabaseError):
+    consistency: Consistency
+    required: int
+    alive: int
+
+class ReadTimeout(DatabaseError):
+    consistency: Consistency
+    received: int
+    required: int
+    data_present: bool
+
+class WriteTimeout(DatabaseError):
+    consistency: Consistency
+    received: int
+    required: int
+    write_type: WriteType
+
+class ReadFailure(DatabaseError):
+    consistency: Consistency
+    received: int
+    required: int
+    numfailures: int
+    data_present: bool
+
+class WriteFailure(DatabaseError):
+    consistency: Consistency
+    received: int
+    required: int
+    numfailures: int
+    write_type: WriteType
+
+class FunctionFailure(DatabaseError):
+    keyspace: str
+    function: str
+    arg_types: list[str]
+
+class Overloaded(DatabaseError): ...
+class IsBootstrapping(DatabaseError): ...
+class TruncateError(DatabaseError): ...
+
+class RateLimitReached(DatabaseError):
+    op_type: OperationType
+    rejected_by_coordinator: bool
+
+class CqlSyntaxError(DatabaseError): ...
+class InvalidRequest(DatabaseError): ...
+class Unauthorized(DatabaseError): ...
+class ServerConfigError(DatabaseError): ...
+
+class AlreadyExists(DatabaseError):
+    keyspace: str
+    table: str
+
+class AuthenticationFailed(DatabaseError): ...
+class ServerError(DatabaseError): ...
+class ServerProtocolError(DatabaseError): ...
+
+class Unprepared(DatabaseError):
+    statement_id: bytes
+
+class UnknownDatabaseError(DatabaseError):
+    code: int
 
 # Other errors
 class MetadataRefreshError(ScyllaError): ...

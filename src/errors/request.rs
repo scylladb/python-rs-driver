@@ -5,18 +5,21 @@
 
 use pyo3::prelude::*;
 use scylla::errors::{
-    BadQuery as RustBadQuery, ConnectionPoolError as RustConnectionPoolError,
+    BadQuery as RustBadQuery, ConnectionPoolError as RustConnectionPoolError, DbError,
     ExecutionError as RustExecutionError, RequestAttemptError,
 };
 
 use crate::errors::execution::{DriverPrepareError, DriverUseKeyspaceError};
 use crate::errors::{
-    BrokenConnection, ConnectionBusy, ConnectionPoolBroken, ConnectionPoolInitializing,
+    AlreadyExists, AuthenticationFailed, BrokenConnection, ConnectionBusy, ConnectionPoolBroken,
+    ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure, InvalidRequest, IsBootstrapping,
     MetadataError, NoHostAvailable, NodeDisabledByHostFilter, NonfinishedPagingState,
-    OperationTimedOut, PartitionKeyExtractionFailed, RepreparedIdChanged,
-    RepreparedIdMissingInBatch, RequestFailedError, RequestSerializationError, ResponseParseError,
-    SchemaAgreementError, SerializationError, TooManyStatementsInBatch, UnexpectedResponse,
-    ValuesTooLongForKey,
+    OperationTimedOut, Overloaded, PartitionKeyExtractionFailed, RateLimitReached, ReadFailure,
+    ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestSerializationError,
+    ResponseParseError, SchemaAgreementError, SerializationError, ServerConfigError, ServerError,
+    ServerProtocolError, TooManyStatementsInBatch, TruncateError, Unauthorized, Unavailable,
+    UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey, WriteFailure,
+    WriteTimeout, with_attrs,
 };
 
 /// Maps an `ExecutionError`; `message` is the full description including the failed operation.
@@ -87,7 +90,9 @@ pub(crate) fn request_attempt_error_to_pyerr(
         RequestAttemptError::BodyExtensionsParseError(_)
         | RequestAttemptError::CqlResultParseError(_)
         | RequestAttemptError::CqlErrorParseError(_) => py_err!(ResponseParseError, message),
-        RequestAttemptError::DbError(..) => py_err!(RequestFailedError, message),
+        RequestAttemptError::DbError(error, reason) => {
+            db_error_to_pyerr(py, error, reason, message)
+        }
         RequestAttemptError::UnexpectedResponse(response_kind) => {
             py_err!(py, UnexpectedResponse, message; response_kind)
         }
@@ -102,4 +107,71 @@ pub(crate) fn request_attempt_error_to_pyerr(
         RequestAttemptError::NonfinishedPagingState => py_err!(NonfinishedPagingState, message),
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
+}
+
+/// Maps a `DbError`; `reason` is the error message sent by the server.
+#[deny(clippy::wildcard_enum_match_arm)]
+fn db_error_to_pyerr(py: Python<'_>, error: &DbError, reason: &str, message: String) -> PyErr {
+    let err = match error {
+        DbError::SyntaxError => py_err!(CqlSyntaxError, message),
+        DbError::Invalid => py_err!(InvalidRequest, message),
+        DbError::AlreadyExists { keyspace, table } => {
+            py_err!(py, AlreadyExists, message; keyspace, table)
+        }
+        DbError::FunctionFailure {
+            keyspace,
+            function,
+            arg_types,
+        } => py_err!(py, FunctionFailure, message; keyspace, function, arg_types),
+        DbError::AuthenticationError => py_err!(AuthenticationFailed, message),
+        DbError::Unauthorized => py_err!(Unauthorized, message),
+        DbError::ConfigError => py_err!(ServerConfigError, message),
+        DbError::Unavailable {
+            consistency,
+            required,
+            alive,
+        } => py_err!(py, Unavailable, message; consistency, required, alive),
+        DbError::Overloaded => py_err!(Overloaded, message),
+        DbError::IsBootstrapping => py_err!(IsBootstrapping, message),
+        DbError::TruncateError => py_err!(TruncateError, message),
+        DbError::ReadTimeout {
+            consistency,
+            received,
+            required,
+            data_present,
+        } => py_err!(py, ReadTimeout, message; consistency, received, required, data_present),
+        DbError::WriteTimeout {
+            consistency,
+            received,
+            required,
+            write_type,
+        } => py_err!(py, WriteTimeout, message; consistency, received, required, write_type),
+        DbError::ReadFailure {
+            consistency,
+            received,
+            required,
+            numfailures,
+            data_present,
+        } => py_err!(py, ReadFailure, message;
+            consistency, received, required, numfailures, data_present),
+        DbError::WriteFailure {
+            consistency,
+            received,
+            required,
+            numfailures,
+            write_type,
+        } => py_err!(py, WriteFailure, message;
+            consistency, received, required, numfailures, write_type),
+        DbError::Unprepared { statement_id } => py_err!(py, Unprepared, message; statement_id),
+        DbError::ServerError => py_err!(ServerError, message),
+        DbError::ProtocolError => py_err!(ServerProtocolError, message),
+        DbError::RateLimitReached {
+            op_type,
+            rejected_by_coordinator,
+        } => py_err!(py, RateLimitReached, message; op_type, rejected_by_coordinator),
+        DbError::Other(code) => py_err!(py, UnknownDatabaseError, message; code),
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    };
+
+    with_attrs(py, err, &[("reason", &reason)])
 }
