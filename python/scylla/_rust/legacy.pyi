@@ -1,9 +1,167 @@
 from collections.abc import Callable, Iterable, Iterator
-from typing import Any
+from datetime import timedelta
+from typing import Any, Self
 from uuid import UUID
 
+from scylla._rust.types import UnsetType
+from scylla.cluster import ClusterState, Node
 from scylla.cql_types import CqlColumnType
 from scylla.results import ColumnSpec, PagingState, RowFactoryLike
+from scylla.routing import Target
+from scylla.session import ExecutionProfile
+from scylla.statement import Batch, Consistency, PreparedStatement, SerialConsistency, Statement
+
+class LegacySession:
+    """
+    The legacy (``cassandra-driver`` compatible) session: blocking ``execute()``
+    and ``prepare()``, ``execute_async()`` returning a :class:`ResponseFuture`.
+
+    Created with ``SessionBuilder.connect_legacy()``.
+
+    As in the legacy driver, session defaults and execution profiles do not mix.
+    A session built with ``SessionBuilder.execution_profile()`` raises
+    ``ValueError`` when a session default (``row_factory``, ``default_timeout``,
+    ``default_consistency_level``, ``default_serial_consistency_level``) is set. After one of them is set, the
+    ``execution_profile`` argument raises ``ValueError``.
+    """
+
+    def execute(
+        self,
+        query: PreparedStatement | Statement | Batch | str,
+        parameters: Any | None = None,
+        timeout: timedelta | float | None | UnsetType = ...,
+        trace: bool | None = None,
+        custom_payload: None = None,
+        execution_profile: ExecutionProfile | None = None,
+        paging_state: PagingState | bytes | None = None,
+        host: Target | Node | UUID | None = None,
+        execute_as: None = None,
+    ) -> ResultSet:
+        """
+        Execute ``query`` and block for its :class:`ResultSet`.
+
+        ``timeout`` defaults to the execution profile's; ``None`` disables it.
+        ``trace`` overrides the ``tracing`` attribute of the statement; ``None`` keeps it.
+        ``host`` pins the request to one node (and optionally shard).
+        ``custom_payload`` and ``execute_as`` raise ``NotImplementedError`` when given.
+        """
+
+    def execute_async(
+        self,
+        query: PreparedStatement | Statement | Batch | str,
+        parameters: Any | None = None,
+        trace: bool | None = None,
+        custom_payload: None = None,
+        timeout: timedelta | float | None | UnsetType = ...,
+        execution_profile: ExecutionProfile | None = None,
+        paging_state: PagingState | bytes | None = None,
+        host: Target | Node | UUID | None = None,
+        execute_as: None = None,
+    ) -> ResponseFuture:
+        """Execute ``query`` and return the :class:`ResponseFuture` delivering its result."""
+
+    def prepare(
+        self,
+        query: Statement | str,
+        custom_payload: None = None,
+        keyspace: None = None,
+    ) -> PreparedStatement:
+        """Prepare ``query``, blocking until the server answers."""
+
+    def wait_for_schema_agreement(self, wait_time: None = None, scope: None = None) -> bool:
+        """
+        Block until every reachable node reports the same schema version.
+
+        Returns ``False`` if the nodes do not agree within the session's schema
+        agreement timeout. ``wait_time`` and ``scope`` raise
+        ``NotImplementedError`` when given.
+        """
+
+    def set_keyspace(self, keyspace: str) -> None:
+        """Set the keyspace of every connection, blocking until done. Case-sensitive."""
+
+    def shutdown(self) -> None:
+        """
+        Mark the session shut down: ``execute``, ``execute_async`` and ``prepare``
+        then raise.
+        """
+
+    def __enter__(self) -> Self: ...
+    def __exit__(self, *args: object) -> None:
+        """Call :meth:`shutdown`. An exception raised in the ``with`` block propagates."""
+
+    @property
+    def is_shutdown(self) -> bool: ...
+    @property
+    def keyspace(self) -> str | None:
+        """The keyspace in use, if any."""
+
+    @property
+    def cluster(self) -> ClusterState:
+        """
+        The state of the cluster. Unlike the legacy driver, this is a
+        :class:`~scylla.cluster.ClusterState`, not a ``Cluster``.
+        """
+
+    @property
+    def row_factory(self) -> RowFactoryLike | None:
+        """Row factory of requests that do not set one; ``None`` for the driver default."""
+
+    @row_factory.setter
+    def row_factory(self, row_factory: RowFactoryLike | None) -> None: ...
+    @property
+    def default_fetch_size(self) -> int | None:
+        """
+        Page size of requests whose statement sets none: the driver default until
+        set, ``None`` once paging was disabled for them.
+        """
+
+    @default_fetch_size.setter
+    def default_fetch_size(self, fetch_size: int | None) -> None:
+        """
+        A positive page size, or ``None`` to run such requests unpaged, as the
+        legacy driver did. Raises ``ValueError`` otherwise.
+        """
+
+    @property
+    def default_timeout(self) -> float | None:
+        """
+        Timeout in seconds of a request given none whose statement has none of its
+        own: the one set here, else the default execution profile's. ``None`` for
+        no timeout.
+        """
+
+    @default_timeout.setter
+    def default_timeout(self, timeout: timedelta | float | None | UnsetType) -> None:
+        """Seconds, ``None`` for no timeout, or ``UNSET`` to fall back to the default profile's."""
+
+    @property
+    def default_consistency_level(self) -> Consistency:
+        """
+        Consistency of a request whose statement sets none: the one set here, else
+        the default execution profile's.
+        """
+
+    @default_consistency_level.setter
+    def default_consistency_level(self, consistency: Consistency | UnsetType) -> None:
+        """A consistency, or ``UNSET`` to fall back to the default profile's."""
+
+    @property
+    def default_serial_consistency_level(self) -> SerialConsistency | None:
+        """
+        Serial consistency of a request whose statement sets none: the one set here,
+        else the default execution profile's. ``None`` for no serial consistency.
+        """
+
+    @default_serial_consistency_level.setter
+    def default_serial_consistency_level(self, serial: SerialConsistency | None | UnsetType) -> None:
+        """A serial consistency, ``None`` for none, or ``UNSET`` to fall back to the default profile's."""
+
+    def get_execution_profile(self, name: Any) -> ExecutionProfile:
+        """Not implemented yet; raises ``NotImplementedError``."""
+
+    def execution_profile_clone_update(self, ep: Any, **kwargs: Any) -> ExecutionProfile:
+        """Not implemented yet; raises ``NotImplementedError``."""
 
 class QueryExhausted(Exception):
     """

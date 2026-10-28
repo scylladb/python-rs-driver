@@ -1,13 +1,16 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
 use pyo3::types::PyString;
+use scylla::client::execution_profile::ExecutionProfileHandle;
 use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
 use scylla::statement::batch::BatchStatement;
 use scylla::statement::prepared::PreparedStatement;
 use scylla::statement::unprepared::Statement;
+use scylla::statement::{Consistency, SerialConsistency};
 use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 use scylla_cql::serialize::row::SerializedValues;
 use uuid::Uuid;
@@ -350,6 +353,8 @@ pub(crate) struct ExecutableStatement {
     /// The Rust driver cannot tell an explicit page size from its default. The
     /// legacy session applies its own default only to a statement without one.
     is_page_size_set: bool,
+    /// The Rust driver cannot tell an explicit "no serial consistency" from unset.
+    is_serial_consistency_set: bool,
 }
 
 #[derive(Clone)]
@@ -375,8 +380,68 @@ impl StatementKind {
             Self::Unprepared(statement) => statement.set_tracing(should_trace),
         }
     }
+
+    pub(crate) fn set_request_timeout(&mut self, timeout: Duration) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_request_timeout(Some(timeout)),
+            Self::Unprepared(statement) => statement.set_request_timeout(Some(timeout)),
+        }
+    }
+
+    pub(crate) fn set_page_size(&mut self, page_size: i32) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_page_size(page_size),
+            Self::Unprepared(statement) => statement.set_page_size(page_size),
+        }
+    }
+
+    pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_execution_profile_handle(Some(handle)),
+            Self::Unprepared(statement) => statement.set_execution_profile_handle(Some(handle)),
+        }
+    }
+
+    pub(crate) fn set_consistency(&mut self, consistency: Consistency) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_consistency(consistency),
+            Self::Unprepared(statement) => statement.set_consistency(consistency),
+        }
+    }
+
+    pub(crate) fn set_serial_consistency(&mut self, serial: Option<SerialConsistency>) {
+        match self {
+            Self::Prepared(prepared) => prepared.set_serial_consistency(serial),
+            Self::Unprepared(statement) => statement.set_serial_consistency(serial),
+        }
+    }
+
+    /// The statement's own timeout; `None` defers to its execution profile.
+    pub(crate) fn request_timeout(&self) -> Option<Duration> {
+        match self {
+            Self::Prepared(prepared) => prepared.get_request_timeout(),
+            Self::Unprepared(statement) => statement.get_request_timeout(),
+        }
+    }
+
+    /// The statement's own consistency; `None` defers to its execution profile.
+    pub(crate) fn consistency(&self) -> Option<Consistency> {
+        match self {
+            Self::Prepared(prepared) => prepared.get_consistency(),
+            Self::Unprepared(statement) => statement.get_consistency(),
+        }
+    }
+
+    /// The statement's own execution profile; `None` defers to the session's default.
+    pub(crate) fn execution_profile_handle(&self) -> Option<&ExecutionProfileHandle> {
+        match self {
+            Self::Prepared(prepared) => prepared.get_execution_profile_handle(),
+            Self::Unprepared(statement) => statement.get_execution_profile_handle(),
+        }
+    }
 }
 
+/// Per-execution overrides of the statement's own settings.
 impl ExecutableStatement {
     pub(crate) fn set_target(&mut self, target: PyTargetPolicy) {
         self.kind.set_target(target);
@@ -390,10 +455,47 @@ impl ExecutableStatement {
         (self.kind, self.row_factory)
     }
 
+    pub(crate) fn set_request_timeout(&mut self, timeout: Duration) {
+        self.kind.set_request_timeout(timeout);
+    }
+
+    pub(crate) fn set_page_size(&mut self, page_size: i32) {
+        self.kind.set_page_size(page_size);
+    }
+
+    pub(crate) fn set_execution_profile_handle(&mut self, handle: ExecutionProfileHandle) {
+        self.kind.set_execution_profile_handle(handle);
+    }
+
+    pub(crate) fn set_consistency(&mut self, consistency: Consistency) {
+        self.kind.set_consistency(consistency);
+    }
+
+    pub(crate) fn set_serial_consistency(&mut self, serial: Option<SerialConsistency>) {
+        self.kind.set_serial_consistency(serial);
+        self.is_serial_consistency_set = true;
+    }
+
+    pub(crate) fn request_timeout(&self) -> Option<Duration> {
+        self.kind.request_timeout()
+    }
+
+    pub(crate) fn consistency(&self) -> Option<Consistency> {
+        self.kind.consistency()
+    }
+
+    pub(crate) fn execution_profile_handle(&self) -> Option<&ExecutionProfileHandle> {
+        self.kind.execution_profile_handle()
+    }
+
     /// Whether the statement sets its own page size.
-    #[expect(dead_code, reason = "LegacySession reads it; it lands in a later PR")]
     pub(crate) fn is_page_size_set(&self) -> bool {
         self.is_page_size_set
+    }
+
+    /// Whether the statement sets its own serial consistency, `None` included.
+    pub(crate) fn is_serial_consistency_set(&self) -> bool {
+        self.is_serial_consistency_set
     }
 }
 
@@ -408,6 +510,7 @@ impl<'py> FromPyObject<'_, 'py> for ExecutableStatement {
                     kind: StatementKind::Prepared(o.inner.clone()),
                     row_factory: o.settings.row_factory(),
                     is_page_size_set: o.is_page_size_set,
+                    is_serial_consistency_set: o.is_serial_consistency_set,
                 }));
         }
 
@@ -419,6 +522,7 @@ impl<'py> FromPyObject<'_, 'py> for ExecutableStatement {
                 kind: StatementKind::Unprepared(text.into()),
                 row_factory: None,
                 is_page_size_set: false,
+                is_serial_consistency_set: false,
             });
         }
 
@@ -429,6 +533,7 @@ impl<'py> FromPyObject<'_, 'py> for ExecutableStatement {
                     kind: StatementKind::Unprepared(o.inner.clone()),
                     row_factory: o.settings.row_factory(),
                     is_page_size_set: o.is_page_size_set,
+                    is_serial_consistency_set: o.is_serial_consistency_set,
                 }));
         }
 

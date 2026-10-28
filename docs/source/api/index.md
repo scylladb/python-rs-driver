@@ -24,7 +24,7 @@ The root also exports `Batch`, `BatchType`, `PreparedStatement`, `RequestResult`
 | [`scylla.tracing`](reference/scylla/tracing/index) | Query traces. `QueryTrace` and its `TraceEvent` steps, returned by the `fetch_query_trace()` methods. |
 | [`scylla.routing`](reference/scylla/routing/index) | `Token`, `ReplicaLocator`, `Shard` and `Target`, for code that cares which node a request goes to. |
 | [`scylla.future`](reference/scylla/future/index) | `DriverFuture`, the awaitable returned by the driver. It also offers callbacks and a blocking `result()` for code that is not async. |
-| [`scylla.legacy`](reference/scylla/legacy/index) | The `cassandra-driver` compatible API, for code written against it. For now `ResponseFuture`, which delivers the result of a request through a blocking `result()` or through callbacks, page by page, and `QueryExhausted`, raised when no pages are left. |
+| [`scylla.legacy`](reference/scylla/legacy/index) | The `cassandra-driver` compatible API, for code written against it. `LegacySession`, created with `SessionBuilder.connect_legacy()`, blocks in `execute()` and `prepare()`; its `execute_async()` returns a `ResponseFuture`, which delivers a `ResultSet` through `result()` or callbacks. `QueryExhausted` is raised when no pages are left. |
 
 ```{toctree}
 :hidden:
