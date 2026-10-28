@@ -13,10 +13,7 @@ from dateutil.relativedelta import relativedelta
 from helpers.ddl import ddl
 from helpers.session import connect
 from scylla.cql_types import CqlDate, CqlDuration, CqlTime, CqlTimestamp
-
-# SerializationError is never raised directly, but it shapes the error message.
-# We import ExecuteError which is raised for serialization issues during query execution.
-from scylla.errors import ExecuteError
+from scylla.errors import SerializationError
 from scylla.session import Session
 
 
@@ -286,7 +283,7 @@ async def test_duration_serialization_mixed_sign(session: Session, table_factory
         "duration_table_mixed_sign",
     )
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
 
     assert "all duration fields must have the same sign" in str(exc_info.value).lower()
@@ -346,7 +343,7 @@ async def test_int_serialization_overflow(session: Session, table_factory: Table
 
     val = 9999999999999999999999999
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
 
     assert "value overflow during serialization" in str(exc_info.value).lower()
@@ -376,7 +373,7 @@ async def test_bigint_serialization_overflow(session: Session, table_factory: Ta
 
     val = 99999999999999999999999999999999
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
 
     assert "value overflow during serialization" in str(exc_info.value).lower()
@@ -519,7 +516,7 @@ async def test_inet_serialization_rejects_an_object_with_only_a_packed_attribute
 ):
     table = await table_factory("id int PRIMARY KEY, col inet", "inet_packed_only_table")
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(SerializationError):
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, _PackedOnly()))
 
 
@@ -547,7 +544,7 @@ async def test_smallint_serialization_overflow(session: Session, table_factory: 
 
     val = 999999999999999999999999
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
 
     assert "value overflow during serialization" in str(exc_info.value).lower()
@@ -595,7 +592,7 @@ async def test_tinyint_serialization_overflow(session: Session, table_factory: T
 
     val = 99999999999999999999999
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, val))
 
     assert "value overflow during serialization" in str(exc_info.value).lower()
@@ -705,7 +702,7 @@ async def test_uuid_serialization_rejects_an_object_with_only_a_bytes_attribute(
 ):
     table = await table_factory(f"id int PRIMARY KEY, col {column_type}", f"{column_type}_bytes_only_table")
 
-    with pytest.raises(ExecuteError):
+    with pytest.raises(SerializationError):
         await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, _BytesOnly()))
 
 
@@ -810,7 +807,7 @@ async def test_set_serialization_rejects_dict(
 
     invalid_values = {"brand": "Ford", "model": "Mustang"}
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(
             f"INSERT INTO {table} (id, tags) VALUES (?, ?)",
             {"id": 1, "tags": invalid_values},
@@ -885,7 +882,7 @@ async def test_list_serialization_rejects_tuple(
         (1, 2, 3),
     )
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(
             f"INSERT INTO {table} (id, tags, scores) VALUES (?, ?, ?)",
             invalid_values,
@@ -932,7 +929,7 @@ async def test_tuple_serialization_rejects_list(
         [1, 2, 3],
     )
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(
             f"INSERT INTO {table} (id, tags, scores) VALUES (?, ?, ?)",
             invalid_values,
@@ -946,7 +943,7 @@ async def test_tuple_serialization_rejects_list(
 async def test_tuple_serialization_rejects_too_many_elements(session: Session, table_factory: TableFactory):
     table = await table_factory("id int PRIMARY KEY, v frozen<tuple<int, int>>", "tuple_too_long_table")
 
-    with pytest.raises(ExecuteError) as exc_info:
+    with pytest.raises(SerializationError) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, v) VALUES (?, ?)", (1, (1, 2, 3)))
 
     assert "wrong tuple element count" in str(exc_info.value).lower()
