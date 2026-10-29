@@ -13,7 +13,8 @@ use crate::{
     cluster::node::PyNode,
     errors::ClusterStateTokenError,
     routing::{PyReplicaLocator, PyToken},
-    serialize::value_list::PyValueList,
+    serialize::adapters::Adapters,
+    serialize::value_list::{BoundValuesRef, PyValueList},
 };
 
 #[pyclass(
@@ -27,12 +28,12 @@ pub(crate) struct PyClusterState {
     /// Invariant: Always contains all known nodes by the Rust Driver
     pub(crate) known_nodes: Py<PyDict>,
     pub(crate) keyspaces: Cache<String, PyKeyspace>,
+    /// Adapters for partition key values of user types.
+    adapters: Arc<Adapters>,
 }
 
-impl TryFrom<Arc<ClusterState>> for PyClusterState {
-    type Error = PyErr;
-
-    fn try_from(inner: Arc<ClusterState>) -> Result<Self, Self::Error> {
+impl PyClusterState {
+    pub(crate) fn new(inner: Arc<ClusterState>, adapters: Arc<Adapters>) -> PyResult<Self> {
         let known_nodes = Python::attach(|py| {
             let dict = PyDict::new(py);
             for node in inner.get_nodes_info().iter() {
@@ -44,7 +45,12 @@ impl TryFrom<Arc<ClusterState>> for PyClusterState {
             inner,
             known_nodes,
             keyspaces: Cache::new(),
+            adapters,
         })
+    }
+
+    fn bind<'a>(&'a self, partition_key: &'a PyValueList) -> BoundValuesRef<'a> {
+        BoundValuesRef::new(partition_key, &self.adapters)
     }
 }
 
@@ -89,7 +95,9 @@ impl PyClusterState {
         table: &str,
         partition_key: PyValueList,
     ) -> Result<PyToken, DriverClusterStateTokenError> {
-        let token = self.inner.compute_token(keyspace, table, &partition_key)?;
+        let token = self
+            .inner
+            .compute_token(keyspace, table, &self.bind(&partition_key))?;
         Ok(PyToken::from(token))
     }
 
@@ -127,7 +135,7 @@ impl PyClusterState {
     ) -> Result<Bound<'py, PyList>, DriverClusterStateTokenError> {
         let endpoints_sequence = self
             .inner
-            .get_endpoints(keyspace, table, &partition_key)?
+            .get_endpoints(keyspace, table, &self.bind(&partition_key))?
             .into_iter()
             .map(
                 |(node, shard)| -> Result<(Bound<'_, PyAny>, u32), DriverClusterStateTokenError> {

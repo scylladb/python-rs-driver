@@ -849,6 +849,24 @@ async def test_vector_serialization_tuple(session: Session, table_factory: Table
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+@pytest.mark.parametrize("element_type", ["float", "text"])
+async def test_vector_serialization_rejects_none_element(
+    session: Session, table_factory: TableFactory, element_type: str
+):
+    table = await table_factory(
+        f"id int PRIMARY KEY, embedding vector<{element_type}, 3>",
+        f"vector_none_{element_type}_table",
+    )
+    vector = [1.0, None, 2.0] if element_type == "float" else ["a", None, "b"]
+
+    with pytest.raises(ExecuteError) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, embedding) VALUES (?, ?)", (1, vector))
+
+    assert "vector element cannot be none" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_list_serialization(session: Session, table_factory: TableFactory):
     table = await table_factory(
         "id int PRIMARY KEY, tags list<text>, scores list<int>",
@@ -907,6 +925,7 @@ async def test_tuple_serialization(session: Session, table_factory: TableFactory
         (2, ("tag1", "", ""), (100, 0, 0)),
         (3, ("a", "b", "c"), (1, 2, 3)),
         (4, ("test", "with", "spaces"), (0, -1, 999)),
+        (5, ("a", None, "c"), (1, None, 3)),
     ]
 
     for values in test_cases:
@@ -1059,6 +1078,14 @@ async def test_udt(session: Session, table_factory: TableFactory):
     await session.execute(f"INSERT INTO {table} (id, addr) VALUES (?, ?)", (2, asdict(address)))
 
     await session.execute(f"SELECT * from {table}")
+
+    partial = {"street": None, "city": "Anytown", "zip_code": None}
+    await session.execute(f"INSERT INTO {table} (id, addr) VALUES (?, ?)", (3, partial))
+    result = await session.execute(f"SELECT addr FROM {table} WHERE id = 3")
+    row = await result.first_row()
+
+    assert row is not None
+    assert row["addr"] == partial
 
 
 @pytest.mark.asyncio
