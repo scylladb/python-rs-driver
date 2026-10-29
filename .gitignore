@@ -28,6 +28,8 @@ venv/
 *.egg-info/
 .installed.cfg
 *.egg
+benchmark/*.png
+benchmark/test.db
 
 # Rope
 .ropeproject
