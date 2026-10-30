@@ -4,7 +4,7 @@ use scylla::frame::response::result::ColumnSpec;
 use scylla::response::query_result::QueryResult;
 
 use crate::core::results::{Pager, PendingRequestResult, columns};
-use crate::deserialize::row_factory::PyRowFactory;
+use crate::deserialize::rows::RowReader;
 
 /// A page a `ResponseFuture` received, before its rows are built.
 ///
@@ -12,16 +12,16 @@ use crate::deserialize::row_factory::PyRowFactory;
 pub(crate) struct PendingResponsePage {
     query_result: Arc<QueryResult>,
     query_pager: Pager,
-    factory: PyRowFactory,
+    reader: RowReader,
 }
 
 impl From<PendingRequestResult> for PendingResponsePage {
     fn from(result: PendingRequestResult) -> Self {
-        let (query_result, query_pager, factory) = result.into_parts();
+        let (query_result, query_pager, reader) = result.into_parts();
         Self {
             query_result: Arc::new(query_result),
             query_pager,
-            factory,
+            reader,
         }
     }
 }
@@ -31,9 +31,9 @@ impl PendingResponsePage {
         &self.query_result
     }
 
-    /// The row factory the request resolved to, the same for every page.
-    pub(crate) fn factory(&self) -> &PyRowFactory {
-        &self.factory
+    /// The reader the request resolved to, the same for every page.
+    pub(crate) fn reader(&self) -> &RowReader {
+        &self.reader
     }
 
     /// The pager positioned after this page.
