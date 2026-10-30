@@ -99,7 +99,7 @@ impl RequestState {
             State::Pending { .. } => None,
             State::Received { page, rows, .. } => Some(match rows {
                 Some(rows) => PageRows::Built(clone_rows(py, rows)),
-                None => PageRows::ToBuild(Arc::clone(page.query_result()), page.factory().clone()),
+                None => PageRows::ToBuild(Arc::clone(page.query_result()), page.reader().clone()),
             }),
             State::Failed { err, .. } => Some(PageRows::Built(Err(err.clone_ref(py)))),
         }

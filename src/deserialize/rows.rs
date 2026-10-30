@@ -1,3 +1,4 @@
+use crate::adapters::Adapters;
 use crate::deserialize::error::{DriverDeserializationError, DriverRowIterationError};
 use crate::deserialize::row_factory::{PyRowFactory, RowBuilder};
 use crate::deserialize::value::{PyDeserializeValue, PyDeserializedValue};
@@ -10,6 +11,24 @@ use stable_deref_trait::StableDeref;
 use std::ops::Deref;
 use std::sync::Arc;
 use yoke::{Yoke, Yokeable};
+
+/// How the rows of each page become Python objects.
+#[derive(Clone)]
+pub(crate) struct RowReader {
+    factory: PyRowFactory,
+    #[expect(dead_code)]
+    adapters: Arc<Adapters>,
+}
+
+impl RowReader {
+    pub(crate) fn new(factory: PyRowFactory, adapters: Arc<Adapters>) -> Self {
+        Self { factory, adapters }
+    }
+
+    pub(crate) fn factory(&self) -> &PyRowFactory {
+        &self.factory
+    }
+}
 
 /// A page together with the row builder resolved against its columns.
 #[derive(Clone)]
@@ -25,12 +44,12 @@ impl ResolvedPage {
     pub(crate) fn new(
         py: Python<'_>,
         query_result: Arc<QueryResult>,
-        factory: &PyRowFactory,
+        reader: &RowReader,
     ) -> PyResult<Self> {
         let Some(rows) = query_result.deserialized_metadata_and_rows() else {
             return Ok(Self::NonRows(query_result));
         };
-        let builder = RowBuilder::resolve(py, factory, rows.metadata().col_specs())?;
+        let builder = RowBuilder::resolve(py, &reader.factory, rows.metadata().col_specs())?;
 
         Ok(Self::Rows {
             query_result,
@@ -75,9 +94,9 @@ impl RowsIteratorKind {
         &mut self,
         py: Python,
         query_result: Arc<QueryResult>,
-        factory: &PyRowFactory,
+        reader: &RowReader,
     ) -> PyResult<()> {
-        *self = Self::new(ResolvedPage::new(py, query_result, factory)?);
+        *self = Self::new(ResolvedPage::new(py, query_result, reader)?);
         Ok(())
     }
 

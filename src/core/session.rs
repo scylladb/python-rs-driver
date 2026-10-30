@@ -21,6 +21,7 @@ use crate::cluster::state::PyClusterState;
 use crate::core::results::{Pager, PendingRequestResult};
 use crate::core::traces::TraceLog;
 use crate::deserialize::row_factory::PyRowFactory;
+use crate::deserialize::rows::RowReader;
 use crate::errors::execution::{
     DriverExecuteError, DriverMetadataRefreshError, DriverPrepareError, DriverSchemaAgreementError,
     DriverStatementConversionError, DriverUseKeyspaceError,
@@ -106,6 +107,18 @@ impl SessionCore {
             .unwrap_or(PyRowFactory::NamedTuple)
     }
 
+    /// The reader for one request: its row factory and the session's adapters.
+    fn row_reader(
+        &self,
+        explicit: Option<PyRowFactory>,
+        statement: Option<PyRowFactory>,
+    ) -> RowReader {
+        RowReader::new(
+            self.choose_row_factory(explicit, statement),
+            Arc::clone(&self.adapters),
+        )
+    }
+
     /// Executes `statement`, returning the future that performs the request.
     pub(crate) fn execute(
         self,
@@ -119,7 +132,7 @@ impl SessionCore {
         DriverExecuteError,
     > {
         let (kind, statement_factory) = statement.into_parts();
-        let effective_factory = self.choose_row_factory(explicit_factory, statement_factory);
+        let reader = self.row_reader(explicit_factory, statement_factory);
 
         let request = if paged {
             ExecutionParams::Paged {
@@ -139,15 +152,12 @@ impl SessionCore {
         Ok(async move {
             match request {
                 ExecutionParams::Unpaged { prepared } => {
-                    self.execute_unpaged(prepared, effective_factory).await
+                    self.execute_unpaged(prepared, reader).await
                 }
                 ExecutionParams::Paged {
                     prepared,
                     paging_state,
-                } => {
-                    self.execute_paged(prepared, paging_state, effective_factory)
-                        .await
-                }
+                } => self.execute_paged(prepared, paging_state, reader).await,
             }
         })
     }
@@ -181,8 +191,7 @@ impl SessionCore {
         explicit_factory: Option<PyRowFactory>,
     ) -> impl Future<Output = Result<PendingRequestResult, DriverExecuteError>> + Send + 'static
     {
-        let effective_factory =
-            self.choose_row_factory(explicit_factory, batch.options.settings.row_factory());
+        let reader = self.row_reader(explicit_factory, batch.options.settings.row_factory());
 
         async move {
             // The driver serializes the values in this future, so they borrow its copy of the core.
@@ -197,7 +206,7 @@ impl SessionCore {
             Ok(PendingRequestResult::new(
                 result,
                 Pager::unpaged(self.inner, traces),
-                effective_factory,
+                reader,
             ))
         }
     }
@@ -251,7 +260,7 @@ impl SessionCore {
     async fn execute_unpaged(
         self,
         prepared: BoundStatement,
-        factory: PyRowFactory,
+        reader: RowReader,
     ) -> Result<PendingRequestResult, DriverExecuteError> {
         let result = match prepared {
             BoundStatement::Prepared(p, serialized_values) => self
@@ -271,7 +280,7 @@ impl SessionCore {
         Ok(PendingRequestResult::new(
             result,
             Pager::unpaged(self.inner, traces),
-            factory,
+            reader,
         ))
     }
 
@@ -279,7 +288,7 @@ impl SessionCore {
         self,
         prepared: Arc<BoundStatement>,
         paging_state: PagingState,
-        factory: PyRowFactory,
+        reader: RowReader,
     ) -> Result<PendingRequestResult, DriverExecuteError> {
         // Already on the runtime, as `Session.execute` spawns its future there.
         let (result, paging_response) = fetch_page(
@@ -294,7 +303,7 @@ impl SessionCore {
         Ok(PendingRequestResult::new(
             result,
             Pager::paged(paging_response, self.inner, prepared, traces),
-            factory,
+            reader,
         ))
     }
 }
