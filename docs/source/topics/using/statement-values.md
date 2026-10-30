@@ -147,3 +147,28 @@ await session.execute("INSERT INTO readings (id, temperature) VALUES (?, ?)", (1
 ```
 
 If a type has both, the adapter takes precedence. So you can change how the driver writes a class from a library that defines `__cql_value__`.
+
+### User defined types
+
+Register a class for a user defined type, and the driver writes and reads values of that type as objects of the class:
+
+```python
+@dataclass
+class Address:
+    street: str
+    zip: int
+
+
+adapters = Adapters()
+adapters.register_udt("shop", "address", Address)
+
+session = await SessionBuilder().contact_points(["127.0.0.1"]).adapters(adapters).connect()
+
+await session.execute("INSERT INTO shop.users (id, address) VALUES (?, ?)", (1, Address("Main St", 12345)))
+```
+
+The driver gets the fields from the type in the schema and matches them by name:
+
+- To write a value, the driver reads one attribute for each field. A missing attribute is an error. Other attributes are ignored. A `dict` is still written as before.
+- To read a value, the driver calls `Address(**fields)` with one keyword argument for each field. The class must accept all of them.
+- The registered class takes precedence over an adapter for the same class.
