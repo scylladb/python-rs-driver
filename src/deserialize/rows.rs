@@ -220,13 +220,12 @@ impl Iterator for ColumnDeserializer<'_, '_> {
         };
 
         Some(
-            PyDeserializedValue::deserialize_py(column.spec.typ(), column.slice, self.py).map_err(
-                |err| {
+            PyDeserializedValue::deserialize_py(column.spec.typ(), column.slice, self.py, None)
+                .map_err(|err| {
                     err.at_column_name(column.spec.name())
                         .at_column_index(column.index)
                         .into()
-                },
-            ),
+                }),
         )
     }
 
