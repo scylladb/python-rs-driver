@@ -360,11 +360,12 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 context,
             ),
 
-            // Supports UDTs passed as Python dicts.
-            // For Python dataclass instances, convert to dict first (e.g., using dataclasses.asdict()).
-            ColumnType::UserDefinedType { definition, .. } => {
-                writer.write_compound_or_reject(PyUdtWrapper::new(self, definition), typ, context)
-            }
+            // Supports UDTs passed as Python dicts, and objects of the class registered for the UDT.
+            ColumnType::UserDefinedType { definition, .. } => writer.write_compound_or_reject(
+                PyUdtWrapper::new(self, definition, context.adapters),
+                typ,
+                context,
+            ),
 
             ColumnType::Tuple(elements_types) => writer.write_compound_or_reject(
                 PyTupleWrapper::new(self, elements_types),
@@ -938,30 +939,36 @@ impl<'py, 'a> PySerializeValue for PyVectorWrapper<'py, 'a> {
     }
 }
 
-struct PyUdtWrapper<'py, 'a> {
-    inner: &'a Bound<'py, PyDict>,
-    definition: &'a Arc<UserDefinedType<'a>>,
+/// Where the fields of a UDT value are read from.
+enum UdtFields<'a, 'py> {
+    Dict(&'a Bound<'py, PyDict>),
+    /// An object of the class registered for the UDT, read by attribute.
+    Object(&'a Bound<'py, PyAny>),
 }
 
-impl<'py> Deref for PyUdtWrapper<'py, '_> {
-    type Target = Bound<'py, PyDict>;
-    fn deref(&self) -> &Self::Target {
-        self.inner
-    }
+struct PyUdtWrapper<'py, 'a> {
+    fields: UdtFields<'a, 'py>,
+    definition: &'a Arc<UserDefinedType<'a>>,
 }
 
 impl<'py, 'a> PyUdtWrapper<'py, 'a> {
     fn new(
         value: &PyAnyWrapper<'a, 'py>,
         definition: &'a Arc<UserDefinedType<'a>>,
+        adapters: &Adapters,
     ) -> Result<Self, Mismatch> {
-        let dict: &Bound<PyDict> = value
-            .cast::<PyDict>()
-            .map_err(|_| Mismatch::Collection(TypeExpected::Udt))?;
-        Ok(PyUdtWrapper {
-            inner: dict,
-            definition,
-        })
+        let fields = if let Ok(dict) = value.cast::<PyDict>() {
+            UdtFields::Dict(dict)
+        } else if adapters
+            .udt_class(&definition.keyspace, &definition.name)
+            // An `isinstance` that raises counts as no match, so the value gets the mismatch error.
+            .is_some_and(|cls| value.is_instance(cls.bind(value.py())).unwrap_or(false))
+        {
+            UdtFields::Object(value)
+        } else {
+            return Err(Mismatch::Collection(TypeExpected::Udt));
+        };
+        Ok(PyUdtWrapper { fields, definition })
     }
 }
 
@@ -975,9 +982,11 @@ impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
         let mut builder = cell_writer.into_value_builder();
 
         for (field_name, field_type) in &self.definition.field_types {
-            let item: Bound<PyAny> = self
-                .inner
-                .get_item(field_name)
+            let item = match self.fields {
+                UdtFields::Dict(dict) => dict.get_item(field_name.as_ref()),
+                UdtFields::Object(object) => object.getattr_opt(field_name.as_ref()),
+            };
+            let item: Bound<PyAny> = item
                 .map_err(DriverSerializationError::python_interop_failed)?
                 .ok_or_else(|| {
                     mk_typck_err::<PyDict>(

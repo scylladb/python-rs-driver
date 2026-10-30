@@ -145,7 +145,6 @@ impl Adapters {
     }
 
     /// The class registered for the UDT `name` in `keyspace`.
-    #[expect(dead_code)]
     pub(crate) fn udt_class(&self, keyspace: &str, name: &str) -> Option<&Py<PyType>> {
         self.udt_classes.get(keyspace)?.get(name)
     }
