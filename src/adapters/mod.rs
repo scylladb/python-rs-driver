@@ -1,4 +1,6 @@
-//! Adapters that change values of user types into values the serializer accepts.
+//! Adapters that convert values of user types when the driver writes or reads them.
+
+pub(crate) mod resolved;
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
