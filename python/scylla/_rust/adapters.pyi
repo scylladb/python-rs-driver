@@ -61,3 +61,34 @@ class Adapters:
         TypeError
             If ``adapter`` is not callable.
         """
+    def register_udt(self, keyspace: str, name: str, cls: type) -> None:
+        """
+        Register the class for a user defined type.
+
+        The driver writes an object of the class, or of a subclass, to a column
+        of this type. It reads one attribute for each field of the type. A
+        missing attribute is an error. Other attributes are ignored.
+
+        The driver reads a value of this type as an object of the class. It
+        calls ``cls(**fields)`` with one keyword argument for each field of the
+        type. A null field gives ``None``.
+
+        The attribute names and the keyword arguments must be the same as the
+        field names in the schema.
+
+        If the type already has a class, the new class replaces it.
+
+        Parameters
+        ----------
+        keyspace : str
+            The keyspace of the type, as in the schema.
+        name : str
+            The name of the type, as in the schema.
+        cls : type
+            The class of the values.
+
+        Raises
+        ------
+        TypeError
+            If ``cls`` is not a class.
+        """

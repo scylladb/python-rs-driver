@@ -14,6 +14,9 @@ use pyo3::types::PyType;
 
 type WriterMap = HashMap<TypeKey, Py<PyAny>>;
 
+/// UDT classes by keyspace, then by UDT name, so a lookup borrows the names from the metadata.
+type UdtClassMap = HashMap<String, HashMap<String, Py<PyType>>>;
+
 /// A Python type, compared by identity. The key owns the type, so its address stays valid.
 #[derive(Debug, Clone)]
 struct TypeKey {
@@ -87,6 +90,16 @@ impl PyAdapters {
             .insert(TypeKey::new(cls), adapter.unbind());
         Ok(())
     }
+
+    fn register_udt(&self, py: Python<'_>, keyspace: String, name: String, cls: Bound<'_, PyType>) {
+        self.registry
+            .lock_py_attached(py)
+            .unwrap()
+            .udt_classes
+            .entry(keyspace)
+            .or_default()
+            .insert(name, cls.unbind());
+    }
 }
 
 impl PyAdapters {
@@ -101,6 +114,7 @@ impl PyAdapters {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Adapters {
     writers: WriterMap,
+    udt_classes: UdtClassMap,
 }
 
 impl Adapters {
@@ -128,6 +142,12 @@ impl Adapters {
                 .skip(1)
                 .find_map(|base| self.writer_for_type(py, base.cast::<PyType>().ok()?))
         })
+    }
+
+    /// The class registered for the UDT `name` in `keyspace`.
+    #[expect(dead_code)]
+    pub(crate) fn udt_class(&self, keyspace: &str, name: &str) -> Option<&Py<PyType>> {
+        self.udt_classes.get(keyspace)?.get(name)
     }
 }
 
