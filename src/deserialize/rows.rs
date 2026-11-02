@@ -210,7 +210,6 @@ pub(crate) struct PageRows<'a> {
 /// consumed.
 pub(crate) struct ColumnDeserializer<'a, 'py> {
     columns: ColumnIterator<'a, 'a>,
-    #[expect(dead_code)]
     adapters: &'a ResolvedAdapters,
     py: Python<'py>,
 }
@@ -232,6 +231,8 @@ impl<'a, 'py> ColumnDeserializer<'a, 'py> {
 impl Iterator for ColumnDeserializer<'_, '_> {
     type Item = Result<PyDeserializedValue, DriverRowIterationError>;
 
+    // Without it, each value returns the large result enum through memory.
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let column = match self.columns.next()? {
             Ok(column) => column,
@@ -243,12 +244,17 @@ impl Iterator for ColumnDeserializer<'_, '_> {
         };
 
         Some(
-            PyDeserializedValue::deserialize_py(column.spec.typ(), column.slice, self.py, None)
-                .map_err(|err| {
-                    err.at_column_name(column.spec.name())
-                        .at_column_index(column.index)
-                        .into()
-                }),
+            PyDeserializedValue::deserialize_py(
+                column.spec.typ(),
+                column.slice,
+                self.py,
+                self.adapters.get(column.index),
+            )
+            .map_err(|err| {
+                err.at_column_name(column.spec.name())
+                    .at_column_index(column.index)
+                    .into()
+            }),
         )
     }
 

@@ -7,15 +7,16 @@ use pyo3::types::{PyDict, PyType};
 use scylla_cql::frame::response::result::{CollectionType, ColumnSpec, ColumnType};
 
 use crate::adapters::Adapters;
+use crate::deserialize::error::DriverDeserializationError;
+use crate::deserialize::value::PyDeserializedValue;
 
 /// What to do with a value after its built-in deserialization.
 pub(crate) enum ReadAdapter {
     /// `cls(**fields)`, for a UDT with a registered class.
-    UdtClass(#[expect(dead_code)] Py<PyType>),
+    UdtClass(Py<PyType>),
 }
 
 impl ReadAdapter {
-    #[expect(dead_code)]
     fn apply<'py>(&self, value: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         match self {
             // A null UDT stays None: only a field dict goes to the class.
@@ -29,7 +30,6 @@ impl ReadAdapter {
 
 /// The adapters of a value and below it. Exists only where at least one adapter applies.
 pub(crate) struct AdapterTree {
-    #[expect(dead_code)]
     adapter: Option<ReadAdapter>,
     /// The item; the key and the value; or the fields by position.
     /// `None` where no adapter applies to that child or below it.
@@ -91,11 +91,27 @@ impl AdapterTree {
     pub(crate) fn field(&self, index: usize) -> Option<&Self> {
         self.child(index)
     }
+
+    /// Applies the adapter of this value, if it has one, to its deserialized form.
+    pub(crate) fn apply(
+        &self,
+        py: Python<'_>,
+        value: PyDeserializedValue,
+    ) -> Result<PyDeserializedValue, DriverDeserializationError> {
+        let Some(adapter) = &self.adapter else {
+            return Ok(value);
+        };
+        let Ok(value) = value.into_pyobject(py);
+        adapter
+            .apply(value)
+            .map(PyDeserializedValue::new)
+            .map_err(DriverDeserializationError::python_conversion_failed)
+    }
 }
 
 /// The adapter trees of the columns of a page. Empty if no adapter applies to any column.
 #[derive(Clone, Default)]
-pub(crate) struct ResolvedAdapters(#[expect(dead_code)] Option<Arc<[Option<AdapterTree>]>>);
+pub(crate) struct ResolvedAdapters(Option<Arc<[Option<AdapterTree>]>>);
 
 impl ResolvedAdapters {
     pub(crate) fn resolve(py: Python<'_>, specs: &[ColumnSpec<'_>], adapters: &Adapters) -> Self {
@@ -112,7 +128,6 @@ impl ResolvedAdapters {
         Self(Some(trees))
     }
 
-    #[expect(dead_code)]
     pub(crate) fn get(&self, column: usize) -> Option<&AdapterTree> {
         self.0.as_deref()?.get(column)?.as_ref()
     }
