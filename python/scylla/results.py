@@ -15,10 +15,14 @@ from ._rust.results import (  # pyright: ignore[reportMissingModuleSource]
     SinglePageIterator,
     TupleRowFactory,
 )
-from .cql_types import CqlValue
 
-RowBuilder: TypeAlias = Callable[[tuple[CqlValue, ...]], Any]
-"""Builds a single row from its column values, in column order."""
+RowBuilder: TypeAlias = Callable[[tuple[Any, ...]], Any]
+"""
+Builds a single row from its column values, in column order.
+
+Without adapters, each value is a ``CqlValue``. A registered reader or user
+defined type class can give a value of any type.
+"""
 
 
 RowFactoryLike: TypeAlias = RowFactory | RowBuilder

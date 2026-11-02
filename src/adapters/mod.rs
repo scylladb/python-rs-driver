@@ -176,7 +176,6 @@ impl Adapters {
     }
 
     /// The reader with the most specific key that matches `typ`.
-    #[expect(dead_code)]
     fn reader_for(&self, typ: &ColumnType<'_>) -> Option<&Py<PyAny>> {
         self.readers
             .iter()
