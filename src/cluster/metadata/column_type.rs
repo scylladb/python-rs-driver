@@ -1,5 +1,7 @@
+use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::{Py, PyClassInitializer, PyResult, Python, pyclass};
+use pyo3::types::PyType;
+use pyo3::{PyClassInitializer, PyTypeInfo};
 use scylla::cluster::metadata::{CollectionType, ColumnType, NativeType};
 
 /// Macro to generate native type subclasses
@@ -24,6 +26,23 @@ macro_rules! native_type_class {
     };
 }
 
+/// Generates the native type classes and [`native_type_of`].
+macro_rules! native_types {
+    ($($py_class:ident = $py_name:literal => $native:ident,)*) => {
+        $(native_type_class!($py_class, $py_name);)*
+
+        /// The native type that `cls` describes, if `cls` is a native type class.
+        #[expect(dead_code)]
+        pub(crate) fn native_type_of(cls: &Bound<'_, PyType>) -> Option<NativeType> {
+            let py = cls.py();
+            $(if cls.is(<$py_class as PyTypeInfo>::type_object(py)) {
+                return Some(NativeType::$native);
+            })*
+            None
+        }
+    };
+}
+
 /// Macro to case PyClassInitializer to PyResult<Py<PyCqlColumnType>>
 /// Takes a `py` Python token and a PyClassInitializer expression
 /// Usage: create_and_extract!(py, PyCqlAsciiType::new())
@@ -42,27 +61,28 @@ impl PyCqlNativeType {
     }
 }
 
-// Generate all native type classes
-native_type_class!(PyCqlAsciiType, "CqlAsciiType");
-native_type_class!(PyCqlBooleanType, "CqlBooleanType");
-native_type_class!(PyCqlBlobType, "CqlBlobType");
-native_type_class!(PyCqlCounterType, "CqlCounterType");
-native_type_class!(PyCqlDateType, "CqlDateType");
-native_type_class!(PyCqlDecimalType, "CqlDecimalType");
-native_type_class!(PyCqlDoubleType, "CqlDoubleType");
-native_type_class!(PyCqlDurationType, "CqlDurationType");
-native_type_class!(PyCqlFloatType, "CqlFloatType");
-native_type_class!(PyCqlIntType, "CqlIntType");
-native_type_class!(PyCqlBigIntType, "CqlBigIntType");
-native_type_class!(PyCqlTextType, "CqlTextType");
-native_type_class!(PyCqlTimestampType, "CqlTimestampType");
-native_type_class!(PyCqlInetType, "CqlInetType");
-native_type_class!(PyCqlSmallIntType, "CqlSmallIntType");
-native_type_class!(PyCqlTinyIntType, "CqlTinyIntType");
-native_type_class!(PyCqlTimeType, "CqlTimeType");
-native_type_class!(PyCqlTimeuuidType, "CqlTimeuuidType");
-native_type_class!(PyCqlUuidType, "CqlUuidType");
-native_type_class!(PyCqlVarintType, "CqlVarintType");
+native_types! {
+    PyCqlAsciiType = "CqlAsciiType" => Ascii,
+    PyCqlBooleanType = "CqlBooleanType" => Boolean,
+    PyCqlBlobType = "CqlBlobType" => Blob,
+    PyCqlCounterType = "CqlCounterType" => Counter,
+    PyCqlDateType = "CqlDateType" => Date,
+    PyCqlDecimalType = "CqlDecimalType" => Decimal,
+    PyCqlDoubleType = "CqlDoubleType" => Double,
+    PyCqlDurationType = "CqlDurationType" => Duration,
+    PyCqlFloatType = "CqlFloatType" => Float,
+    PyCqlIntType = "CqlIntType" => Int,
+    PyCqlBigIntType = "CqlBigIntType" => BigInt,
+    PyCqlTextType = "CqlTextType" => Text,
+    PyCqlTimestampType = "CqlTimestampType" => Timestamp,
+    PyCqlInetType = "CqlInetType" => Inet,
+    PyCqlSmallIntType = "CqlSmallIntType" => SmallInt,
+    PyCqlTinyIntType = "CqlTinyIntType" => TinyInt,
+    PyCqlTimeType = "CqlTimeType" => Time,
+    PyCqlTimeuuidType = "CqlTimeuuidType" => Timeuuid,
+    PyCqlUuidType = "CqlUuidType" => Uuid,
+    PyCqlVarintType = "CqlVarintType" => Varint,
+}
 
 #[pyclass(module = "scylla.cql_types", name = "CqlCollectionType", subclass, extends=PyCqlColumnType, frozen, get_all)]
 pub(crate) struct PyCqlCollectionType {
