@@ -172,3 +172,26 @@ The driver gets the fields from the type in the schema and matches them by name:
 - To write a value, the driver reads one attribute for each field. A missing attribute is an error. Other attributes are ignored. A `dict` is still written as before.
 - To read a value, the driver calls `Address(**fields)` with one keyword argument for each field. The class must accept all of them.
 - The registered class takes precedence over an adapter for the same class.
+
+### Reading values as your own types
+
+A reader converts each value of a CQL type that the driver reads. Register it for a CQL type from `scylla.cql_types`:
+
+```python
+from scylla.cql_types import CqlFloatType, CqlListType, CqlTimestampType, CqlVectorType
+
+adapters = Adapters()
+adapters.register_reader(CqlTimestampType, lambda value: value.to_datetime())
+adapters.register_reader(CqlVectorType[CqlFloatType], numpy.asarray)
+adapters.register_reader(CqlListType[CqlTimestampType], tuple)
+```
+
+The driver calls a reader with the value that it reads without the reader. The rules are:
+
+- A class with type arguments, such as `CqlListType[CqlTimestampType]`, selects only that type. A collection, tuple or vector class with no type arguments, such as `CqlVectorType`, selects all types of that kind. Such a class can also be a type argument: `CqlListType[CqlListType]` selects a list of lists.
+- If more than one reader matches a value, the driver uses the most specific one. For `list<list<int>>`, `CqlListType[CqlListType[CqlIntType]]` comes first, then `CqlListType[CqlListType]`, then `CqlListType`. The driver compares the keys from the outside to the inside, and the elements of a map or tuple from left to right. At the first place where the keys are different, a type with type arguments wins over a class with no type arguments. So for `tuple<list<int>, list<int>>`, `CqlTupleType[CqlListType[CqlIntType], CqlListType]` wins over `CqlTupleType[CqlListType, CqlListType[CqlIntType]]`.
+- A CQL type object from the schema metadata, such as `column.typ`, is also a valid key.
+- Matching ignores `frozen` and the dimensions of a vector. `CqlListType[CqlIntType]` also matches `frozen<list<int>>`, and `CqlVectorType[CqlFloatType]` matches float vectors of all sizes.
+- A reader also applies to the elements of collections, tuples, vectors and user defined types. The driver converts the elements before the value that contains them. In the example above, the reader for `list<timestamp>` gets a list of `datetime` objects.
+- The driver does not call a reader for a null or empty value. The exception is a null list, set or map: the driver reads it as an empty one, so the reader gets an empty `list`, `set` or `dict`.
+- Use `register_udt` for a user defined type.
