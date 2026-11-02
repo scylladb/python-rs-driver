@@ -19,7 +19,7 @@ pyo3 = { version = "=0.29.0", features = ["bigdecimal", "num-bigint", "uuid", "c
 tokio = { version = "1.42.0", features = ["full"] }
 
 scylla = { git = "https://github.com/scylladb/scylla-rust-driver", rev = "ea6ed753521d145927ff12e83a62f5b0b547c402", features = ["chrono-04", "bigdecimal-04", "num-bigint-04", "unstable-python-rs", "openssl-010"] }
-scylla-cql-core = { git = "https://github.com/scylladb/scylla-rust-driver", rev = "ea6ed753521d145927ff12e83a62f5b0b547c402", features = ["chrono-04", "bigdecimal-04", "num-bigint-04", "unstable-python-rs"] }
+scylla-cql-core = { git = "https://github.com/scylladb/scylla-rust-driver", rev = "b3bb375e13e5016d7f72aadccad9d4d35c4127db", features = ["chrono-04", "bigdecimal-04", "num-bigint-04", "unstable-python-rs"] }
 scylla-cql = { git = "https://github.com/scylladb/scylla-rust-driver", rev = "ea6ed753521d145927ff12e83a62f5b0b547c402", features = ["chrono-04", "bigdecimal-04", "num-bigint-04", "unstable-python-rs"] }
 
 yoke = "0.8.1"
