@@ -230,3 +230,191 @@ fn element_types<'py>(typ: &Bound<'py, PyAny>) -> PyArgs<'py> {
             .collect(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+
+    use scylla::frame::response::result::{CollectionType, ColumnType, NativeType};
+
+    use super::ReadKey::{self, Any, List, Map, Native, Set, Tuple, Vector};
+
+    fn int() -> ColumnType<'static> {
+        ColumnType::Native(NativeType::Int)
+    }
+
+    fn text() -> ColumnType<'static> {
+        ColumnType::Native(NativeType::Text)
+    }
+
+    fn list(item: ColumnType<'static>, frozen: bool) -> ColumnType<'static> {
+        ColumnType::Collection {
+            frozen,
+            typ: CollectionType::List(Box::new(item)),
+        }
+    }
+
+    fn set(item: ColumnType<'static>) -> ColumnType<'static> {
+        ColumnType::Collection {
+            frozen: false,
+            typ: CollectionType::Set(Box::new(item)),
+        }
+    }
+
+    fn map(key: ColumnType<'static>, value: ColumnType<'static>) -> ColumnType<'static> {
+        ColumnType::Collection {
+            frozen: false,
+            typ: CollectionType::Map(Box::new(key), Box::new(value)),
+        }
+    }
+
+    fn vector(item: ColumnType<'static>, dimensions: u16) -> ColumnType<'static> {
+        ColumnType::Vector {
+            typ: Box::new(item),
+            dimensions,
+        }
+    }
+
+    fn key_int() -> ReadKey {
+        Native(NativeType::Int)
+    }
+
+    fn b(key: ReadKey) -> Box<ReadKey> {
+        Box::new(key)
+    }
+
+    /// The key that `reader_for` picks: the most specific match, the last one on a tie.
+    fn best<'k>(keys: &'k [ReadKey], typ: &ColumnType<'_>) -> Option<&'k ReadKey> {
+        keys.iter()
+            .filter(|key| key.matches(typ))
+            .max_by(|a, b| a.cmp_specificity(b))
+    }
+
+    #[test]
+    fn bare_class_matches_every_element_type() {
+        let any_list = List(b(Any));
+        assert!(any_list.matches(&list(int(), false)));
+        assert!(any_list.matches(&list(text(), true)));
+        assert!(any_list.matches(&list(list(int(), true), false)));
+        assert!(!any_list.matches(&set(int())));
+        assert!(Set(b(Any)).matches(&set(int())));
+        assert!(Map(b(Any), b(Any)).matches(&map(text(), list(int(), true))));
+    }
+
+    #[test]
+    fn type_arguments_select_one_type() {
+        let int_list = List(b(key_int()));
+        assert!(int_list.matches(&list(int(), false)));
+        assert!(!int_list.matches(&list(text(), false)));
+        assert!(
+            Map(b(Native(NativeType::Text)), b(List(b(key_int()))))
+                .matches(&map(text(), list(int(), true)))
+        );
+        assert!(!Map(b(key_int()), b(Any)).matches(&map(text(), int())));
+    }
+
+    #[test]
+    fn frozen_and_vector_dimensions_do_not_matter() {
+        assert!(List(b(List(b(key_int())))).matches(&list(list(int(), true), true)));
+        let float_vector = Vector(b(Native(NativeType::Float)));
+        assert!(float_vector.matches(&vector(ColumnType::Native(NativeType::Float), 2)));
+        assert!(float_vector.matches(&vector(ColumnType::Native(NativeType::Float), 3)));
+        assert!(!float_vector.matches(&vector(int(), 2)));
+    }
+
+    #[test]
+    fn tuple_without_arguments_matches_every_length() {
+        assert!(Tuple(None).matches(&ColumnType::Tuple(vec![int()])));
+        assert!(Tuple(None).matches(&ColumnType::Tuple(vec![int(), text()])));
+        let pair = Tuple(Some(vec![key_int(), Any]));
+        assert!(pair.matches(&ColumnType::Tuple(vec![int(), text()])));
+        assert!(!pair.matches(&ColumnType::Tuple(vec![int()])));
+        assert!(!pair.matches(&ColumnType::Tuple(vec![text(), text()])));
+    }
+
+    #[test]
+    fn type_arguments_beat_a_bare_class() {
+        let keys = [List(b(Any)), List(b(key_int()))];
+        assert_eq!(best(&keys, &list(int(), false)), Some(&keys[1]));
+        assert_eq!(best(&keys, &list(text(), false)), Some(&keys[0]));
+    }
+
+    #[test]
+    fn most_specific_nested_key_wins() {
+        let keys = [
+            List(b(Any)),
+            List(b(List(b(Any)))),
+            List(b(List(b(key_int())))),
+        ];
+        assert_eq!(best(&keys, &list(list(int(), true), true)), Some(&keys[2]));
+        assert_eq!(best(&keys, &list(list(text(), true), true)), Some(&keys[1]));
+        assert_eq!(best(&keys, &list(int(), false)), Some(&keys[0]));
+    }
+
+    #[test]
+    fn tuple_elements_decide_from_left_to_right() {
+        let right = Tuple(Some(vec![List(b(Any)), List(b(key_int()))]));
+        let left = Tuple(Some(vec![List(b(key_int())), List(b(Any))]));
+        let typ = ColumnType::Tuple(vec![list(int(), false), list(int(), false)]);
+        let keys = [right, left];
+        assert_eq!(best(&keys, &typ), Some(&keys[1]));
+    }
+
+    #[test]
+    fn map_key_decides_before_value() {
+        let typ = map(list(int(), true), list(int(), true));
+        let value_specific = Map(b(List(b(Any))), b(List(b(key_int()))));
+        let key_specific = Map(b(List(b(key_int()))), b(List(b(Any))));
+        let keys = [value_specific, key_specific];
+        assert_eq!(best(&keys, &typ), Some(&keys[1]));
+    }
+
+    #[test]
+    fn specificity_of_each_kind_of_key() {
+        use Ordering::{Equal, Greater, Less};
+
+        let cases = [
+            (Any, Any, Equal),
+            (Any, key_int(), Less),
+            (key_int(), Any, Greater),
+            (key_int(), key_int(), Equal),
+            (List(b(Any)), List(b(key_int())), Less),
+            (Set(b(key_int())), Set(b(Any)), Greater),
+            (Vector(b(Any)), Vector(b(key_int())), Less),
+            // The keys are equal, so the values decide.
+            (Map(b(Any), b(Any)), Map(b(Any), b(key_int())), Less),
+            (
+                Map(b(key_int()), b(Any)),
+                Map(b(Any), b(key_int())),
+                Greater,
+            ),
+            (Tuple(None), Tuple(None), Equal),
+            (Tuple(None), Tuple(Some(vec![key_int()])), Less),
+            (Tuple(Some(vec![key_int()])), Tuple(None), Greater),
+            // The equal first elements do not decide.
+            (
+                Tuple(Some(vec![key_int(), Any])),
+                Tuple(Some(vec![key_int(), key_int()])),
+                Less,
+            ),
+            (
+                Tuple(Some(vec![key_int(), key_int()])),
+                Tuple(Some(vec![key_int(), key_int()])),
+                Equal,
+            ),
+        ];
+        for (mine, theirs, expected) in cases {
+            assert_eq!(
+                mine.cmp_specificity(&theirs),
+                expected,
+                "{mine:?} against {theirs:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "reader_for compares only keys that match the same column type")]
+    fn keys_of_different_kinds_are_a_bug() {
+        List(b(Any)).cmp_specificity(&Set(b(Any)));
+    }
+}
