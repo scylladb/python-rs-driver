@@ -39,7 +39,9 @@ use std::net::IpAddr;
 // eliminating the need of rewriting DeserializeValue trait would be more beneficial
 // We could switch back to using `DeserializeValue` trait.
 pub(crate) trait PyDeserializeValue<'frame, 'metadata, 'py>: Sized {
-    /// `adapters` is the adapter tree of this value. Each child gets its subtree.
+    /// `adapters` is the adapter tree of this value.
+    /// Only `PyDeserializedValue` applies the adapter of the value.
+    /// The other types only pass the subtrees to their children.
     fn deserialize_py(
         typ: &'metadata ColumnType<'metadata>,
         v: Option<FrameSlice<'frame>>,
@@ -49,7 +51,7 @@ pub(crate) trait PyDeserializeValue<'frame, 'metadata, 'py>: Sized {
 }
 
 impl PyDeserializedValue {
-    fn new(value: Bound<'_, PyAny>) -> Self {
+    pub(crate) fn new(value: Bound<'_, PyAny>) -> Self {
         Self {
             value: value.into(),
         }
@@ -96,7 +98,10 @@ impl<'frame, 'metadata, 'py> PyDeserializeValue<'frame, 'metadata, 'py> for PyDe
         py: Python<'py>,
         adapters: Option<&AdapterTree>,
     ) -> Result<Self, DriverDeserializationError> {
-        deser_cql_py_value(py, typ, v, adapters)
+        match adapters {
+            None => deser_cql_py_value(py, typ, v, None),
+            Some(tree) => tree.apply(py, deser_cql_py_value(py, typ, v, Some(tree))?),
+        }
     }
 }
 
