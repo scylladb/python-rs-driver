@@ -148,6 +148,11 @@ impl Adapters {
     pub(crate) fn udt_class(&self, keyspace: &str, name: &str) -> Option<&Py<PyType>> {
         self.udt_classes.get(keyspace)?.get(name)
     }
+
+    /// Whether reading a value can need more than its built-in deserialization.
+    pub(crate) fn has_read_adapters(&self) -> bool {
+        !self.udt_classes.is_empty()
+    }
 }
 
 #[pymodule]
