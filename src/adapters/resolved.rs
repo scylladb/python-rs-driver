@@ -7,6 +7,7 @@ use pyo3::types::{PyDict, PyType};
 use scylla::frame::response::result::{CollectionType, ColumnSpec, ColumnType};
 
 use crate::adapters::Adapters;
+use crate::cql_types::CqlEmpty;
 use crate::deserialize::error::DriverDeserializationError;
 use crate::deserialize::value::PyDeserializedValue;
 
@@ -14,6 +15,8 @@ use crate::deserialize::value::PyDeserializedValue;
 pub(crate) enum ReadAdapter {
     /// `cls(**fields)`, for a UDT with a registered class.
     UdtClass(Py<PyType>),
+    /// `reader(value)`, for a type with a registered reader.
+    Reader(Py<PyAny>),
 }
 
 impl ReadAdapter {
@@ -24,6 +27,8 @@ impl ReadAdapter {
                 Ok(fields) => cls.bind(value.py()).call((), Some(fields)),
                 Err(_) => Ok(value),
             },
+            Self::Reader(_) if value.is_none() || value.is_instance_of::<CqlEmpty>() => Ok(value),
+            Self::Reader(reader) => reader.bind(value.py()).call1((value,)),
         }
     }
 }
@@ -40,17 +45,23 @@ impl AdapterTree {
     /// Walks `typ`. `None` if no adapter applies to it or below it.
     fn resolve(py: Python<'_>, typ: &ColumnType<'_>, adapters: &Adapters) -> Option<Self> {
         let child = |typ| Self::resolve(py, typ, adapters);
+        let reader = || {
+            adapters
+                .reader_for(typ)
+                .map(|reader| ReadAdapter::Reader(reader.clone_ref(py)))
+        };
         let (adapter, children): (_, Box<[_]>) = match typ {
+            ColumnType::Native(_) => (reader(), Box::new([])),
             ColumnType::Collection {
                 typ: CollectionType::List(item) | CollectionType::Set(item),
                 ..
             }
-            | ColumnType::Vector { typ: item, .. } => (None, Box::new([child(item)])),
+            | ColumnType::Vector { typ: item, .. } => (reader(), Box::new([child(item)])),
             ColumnType::Collection {
                 typ: CollectionType::Map(key, value),
                 ..
-            } => (None, Box::new([child(key), child(value)])),
-            ColumnType::Tuple(fields) => (None, fields.iter().map(child).collect()),
+            } => (reader(), Box::new([child(key), child(value)])),
+            ColumnType::Tuple(fields) => (reader(), fields.iter().map(child).collect()),
             ColumnType::UserDefinedType { definition, .. } => (
                 adapters
                     .udt_class(&definition.keyspace, &definition.name)
