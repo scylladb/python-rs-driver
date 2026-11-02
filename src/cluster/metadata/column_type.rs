@@ -32,7 +32,6 @@ macro_rules! native_types {
         $(native_type_class!($py_class, $py_name);)*
 
         /// The native type that `cls` describes, if `cls` is a native type class.
-        #[expect(dead_code)]
         pub(crate) fn native_type_of(cls: &Bound<'_, PyType>) -> Option<NativeType> {
             let py = cls.py();
             $(if cls.is(<$py_class as PyTypeInfo>::type_object(py)) {

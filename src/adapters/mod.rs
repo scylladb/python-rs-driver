@@ -1,5 +1,7 @@
 //! Adapters that convert values of user types when the driver writes or reads them.
 
+mod error;
+mod read_key;
 pub(crate) mod resolved;
 
 use std::borrow::Borrow;
@@ -11,6 +13,9 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
 use pyo3::types::PyType;
+use scylla::frame::response::result::ColumnType;
+
+use read_key::ReadKey;
 
 type WriterMap = HashMap<TypeKey, Py<PyAny>>;
 
@@ -91,6 +96,23 @@ impl PyAdapters {
         Ok(())
     }
 
+    fn register_reader(
+        &self,
+        py: Python<'_>,
+        cql_type: ReadKey,
+        reader: Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        if !reader.is_callable() {
+            return Err(PyTypeError::new_err("The reader must be callable."));
+        }
+        let readers = &mut self.registry.lock_py_attached(py).unwrap().readers;
+        match readers.iter_mut().find(|(key, _)| *key == cql_type) {
+            Some((_, existing)) => *existing = reader.unbind(),
+            None => readers.push((cql_type, reader.unbind())),
+        }
+        Ok(())
+    }
+
     fn register_udt(&self, py: Python<'_>, keyspace: String, name: String, cls: Bound<'_, PyType>) {
         self.registry
             .lock_py_attached(py)
@@ -114,6 +136,10 @@ impl PyAdapters {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Adapters {
     writers: WriterMap,
+    /// Searched once per column of a page. We expect users to register few readers.
+    /// A map indexed by type would need a lot of complex code, probably for no gain.
+    /// If profiling shows a cost here, change it to a map.
+    readers: Vec<(ReadKey, Py<PyAny>)>,
     udt_classes: UdtClassMap,
 }
 
@@ -149,9 +175,19 @@ impl Adapters {
         self.udt_classes.get(keyspace)?.get(name)
     }
 
+    /// The reader with the most specific key that matches `typ`.
+    #[expect(dead_code)]
+    fn reader_for(&self, typ: &ColumnType<'_>) -> Option<&Py<PyAny>> {
+        self.readers
+            .iter()
+            .filter(|(key, _)| key.matches(typ))
+            .max_by(|(a, _), (b, _)| a.cmp_specificity(b))
+            .map(|(_, reader)| reader)
+    }
+
     /// Whether reading a value can need more than its built-in deserialization.
     pub(crate) fn has_read_adapters(&self) -> bool {
-        !self.udt_classes.is_empty()
+        !self.readers.is_empty() || !self.udt_classes.is_empty()
     }
 }
 
