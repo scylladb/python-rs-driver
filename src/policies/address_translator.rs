@@ -264,7 +264,7 @@ pub(crate) fn address_translator(_py: Python<'_>, module: &Bound<'_, PyModule>) 
 
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub enum DriverAddressTranslationError {
+pub(crate) enum DriverAddressTranslationError {
     #[error("Address translation failed: {source}")]
     TranslationError { source: Box<TranslationError> },
 

@@ -294,12 +294,9 @@ pub(crate) fn tls(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
 /// Errors that can occur while building an [`openssl::ssl::SslContext`] from a TLS config.
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, thiserror::Error)]
-pub enum TlsConfigError {
+pub(crate) enum TlsConfigError {
     #[error("failed to create SSL context builder: {0}")]
     ContextCreationFailed(String),
-
-    #[error("failed to load default CA certificate locations: {0}")]
-    DefaultVerifyPathsLoadFailed(String),
 
     #[error("failed to load CA locations (cafile: {cafile:?}, capath: {capath:?}): {cause}")]
     CaLocationsLoadFailed {
