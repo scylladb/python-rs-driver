@@ -122,7 +122,8 @@ impl RequestResult {
     ///
     /// # Errors
     ///
-    /// Raises `TraceUnavailable` if the driver cannot fetch the trace.
+    /// Raises `TraceUnavailable` if the trace is not available yet, the same class as `execute`
+    /// if a query to the trace tables fails, and `ResponseParseError` if the rows cannot be read.
     fn fetch_first_page_query_trace(
         &self,
         py: Python<'_>,
@@ -134,7 +135,9 @@ impl RequestResult {
     ///
     /// # Errors
     ///
-    /// Raises `TraceUnavailable` if the driver cannot fetch one of the traces.
+    /// Raises `TraceUnavailable` if one of the traces is not available yet, the same class as
+    /// `execute` if a query to the trace tables fails, and `ResponseParseError` if the rows
+    /// cannot be read.
     fn fetch_all_query_traces(
         &self,
         py: Python<'_>,

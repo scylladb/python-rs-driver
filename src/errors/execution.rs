@@ -3,11 +3,12 @@ use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 
 use crate::errors::request::{
     execution_error_to_pyerr, metadata_error_to_pyerr, new_session_error_to_pyerr,
-    prepare_error_to_pyerr, schema_agreement_error_to_pyerr, use_keyspace_error_to_pyerr,
+    prepare_error_to_pyerr, schema_agreement_error_to_pyerr, tracing_error_to_pyerr,
+    use_keyspace_error_to_pyerr,
 };
 use crate::errors::{
     AlreadyPrepared, InternalDriverError, InvalidStatementType, PagingStateNotAllowed,
-    RowFactoryError, StatementConversionError, TraceUnavailable, get_type_name, with_cause,
+    RowFactoryError, StatementConversionError, get_type_name, with_cause,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -304,7 +305,13 @@ impl DriverTraceError {
 
 impl From<DriverTraceError> for PyErr {
     fn from(e: DriverTraceError) -> PyErr {
-        TraceUnavailable::new_err(e.to_string())
+        let message = e.to_string();
+        Python::attach(|py| match e {
+            DriverTraceError::RustDriverTracingError { source } => {
+                tracing_error_to_pyerr(py, &source, message)
+            }
+            DriverTraceError::RuntimeTaskJoinFailed(_) => py_err!(InternalDriverError, message),
+        })
     }
 }
 

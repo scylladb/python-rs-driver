@@ -68,6 +68,9 @@ class OperationTimedOut(ExecutionError, TimeoutError):
 
 class NoHostAvailable(ExecutionError): ...
 
+class TraceUnavailable(ExecutionError):
+    """Raised when a query trace is not available yet."""
+
 class MetadataError(ExecutionError):
     """Failures specific to cluster metadata. Request failures raise their own class."""
 
@@ -196,9 +199,6 @@ class RetryPolicyError(ScyllaError): ...
 class RowFactoryError(ScyllaError): ...
 class QueryMetadataError(ScyllaError): ...
 class SpeculativeExecutionPolicyError(ScyllaError): ...
-
-class TraceUnavailable(ScyllaError):
-    """Raised when the driver cannot fetch a query trace."""
 
 class FutureCancelledError(Exception):
     """Raised when a `DriverFuture` is cancelled via `cancel()`."""

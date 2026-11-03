@@ -170,8 +170,10 @@ class Session:
         Raises
         ------
         TraceUnavailable
-            If the trace is not available after all attempts, or if the driver
-            cannot read it.
+            If the trace is not available after all attempts.
+        ExecutionError
+            If a query to the trace tables failed. The class is the same as for `execute`.
+            If the driver cannot read the trace rows, the class is `ResponseParseError`.
         """
 
     def await_schema_agreement(self) -> DriverFuture[uuid.UUID]:
