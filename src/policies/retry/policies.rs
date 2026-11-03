@@ -49,7 +49,7 @@ impl RetrySession for PyCustomRetrySession {
     fn decide_should_retry(&mut self, request_info: RequestInfo) -> RetryDecision {
         Python::attach(|py| {
             let py_retry_session = self.inner.bind(py);
-            let py_request_info = PyRequestInfo::from(&request_info);
+            let py_request_info = PyRequestInfo::new(py, &request_info);
 
             let result = py_retry_session
                 .call_method1(intern!(py, "decide_should_retry"), (py_request_info,));

@@ -8,7 +8,7 @@ use scylla::errors::{CqlResponseKind, OperationType, WriteType};
 use scylla::statement::Consistency;
 
 use crate::enums::PyConsistency;
-use crate::policies::retry::types::{PyCqlResponseKind, PyOperationType, PyWriteType};
+use crate::errors::types::{PyCqlResponseKind, PyOperationType, PyWriteType};
 
 /// Sets each `(name, value)` pair as an attribute of the exception instance; a failing attribute is logged and skipped.
 pub(crate) fn with_attrs(py: Python<'_>, err: PyErr, attrs: &[(&str, &dyn ToPyAttr)]) -> PyErr {
