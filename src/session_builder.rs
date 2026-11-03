@@ -1,10 +1,13 @@
+use crate::RUNTIME;
+use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{
     PyCompression, PyConsistency, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay,
 };
 use crate::errors::config::DriverSessionConfigError;
 use crate::errors::execution::DriverSessionConnectionError;
 use crate::execution_profile::PyExecutionProfile;
-use crate::future::{DriverFuture, boxed_py_future};
+use crate::future::{DriverFuture, boxed_py_future, catch_unwind};
+use crate::legacy::PyLegacySession;
 use crate::policies::address_translator::PyAddressTranslator;
 use crate::policies::authenticator_provider::PyAuthenticatorProvider;
 use crate::policies::host_filter::PyHostFilter;
@@ -61,6 +64,7 @@ impl SessionBuilder {
             inner.execution_profile = execution_profile.clone();
             inner.config.default_execution_profile_handle =
                 execution_profile.get().inner.clone().into_handle();
+            inner.is_execution_profile_set = true;
         }
         slf
     }
@@ -496,18 +500,7 @@ impl SessionBuilder {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<PySession, DriverSessionConnectionError>> {
-        let (config, default_row_factory) = {
-            let inner = self.inner.lock_py_attached(py).unwrap();
-            (
-                inner.config.clone(),
-                inner
-                    .execution_profile
-                    .get()
-                    .row_factory
-                    .as_ref()
-                    .map(|f| f.extracted.clone()),
-            )
-        };
+        let (config, default_row_factory) = self.connect_params(py);
 
         DriverFuture::spawn_on_tokio(
             py,
@@ -518,6 +511,38 @@ impl SessionBuilder {
                     Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
                 }
             }),
+        )
+    }
+
+    /// Blocks until connected, returning the legacy (`cassandra-driver` compatible) session.
+    fn connect_legacy(&self, py: Python<'_>) -> PyResult<PyLegacySession> {
+        let (config, default_row_factory) = self.connect_params(py);
+        let uses_profiles = self
+            .inner
+            .lock_py_attached(py)
+            .unwrap()
+            .is_execution_profile_set;
+
+        let connect = scylla::client::session::Session::connect(config);
+        let session = RUNTIME
+            .block_on(py, catch_unwind(connect))?
+            .map_err(DriverSessionConnectionError::new_session_error)?;
+        PyLegacySession::new(Arc::new(session), default_row_factory, uses_profiles)
+    }
+}
+
+impl SessionBuilder {
+    /// The session config, and the row factory of the default execution profile.
+    fn connect_params(&self, py: Python<'_>) -> (SessionConfig, Option<PyRowFactory>) {
+        let inner = self.inner.lock_py_attached(py).unwrap();
+        (
+            inner.config.clone(),
+            inner
+                .execution_profile
+                .get()
+                .row_factory
+                .as_ref()
+                .map(|f| f.extracted.clone()),
         )
     }
 }
@@ -547,6 +572,8 @@ struct PySessionBuilderConfig {
     pub shard_aware_local_port_range: (u16, u16),
     #[pyo3(get)]
     pub tls_context: Option<Py<PyTlsConfig>>,
+    /// `execution_profile()` was called: a legacy session then uses execution profiles.
+    is_execution_profile_set: bool,
 }
 
 impl PySessionBuilderConfig {
@@ -574,6 +601,7 @@ impl PySessionBuilderConfig {
             address_translator: None,
             timestamp_generator: None,
             tls_context: None,
+            is_execution_profile_set: false,
         })
     }
 }

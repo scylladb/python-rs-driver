@@ -135,7 +135,7 @@ impl Callback {
     /// Invoke this callback with `value` as its only argument.
     /// Errors are logged and swallowed.
     fn invoke(&self, py: Python<'_>, value: &Py<PyAny>) {
-        if let Err(err) = self.callable.call1(py, (value.clone_ref(py),)) {
+        if let Err(err) = self.callable.call1(py, (value,)) {
             log::error!("DriverFuture callback raised an exception: {}", err);
         }
     }
