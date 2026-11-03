@@ -10,7 +10,8 @@ use scylla::errors::{
     MetadataFetchError as RustMetadataFetchError, MetadataFetchErrorKind,
     NewSessionError as RustNewSessionError, NextPageError, NextRowError,
     PrepareError as RustPrepareError, RequestAttemptError, RequestError as RustRequestError,
-    SchemaAgreementError as RustSchemaAgreementError, UseKeyspaceError as RustUseKeyspaceError,
+    SchemaAgreementError as RustSchemaAgreementError, TracingError as RustTracingError,
+    UseKeyspaceError as RustUseKeyspaceError,
 };
 
 use crate::errors::{
@@ -22,9 +23,9 @@ use crate::errors::{
     PartitionKeyExtractionFailed, PreparedStatementIdsMismatch, RateLimitReached, ReadFailure,
     ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestSerializationError,
     RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout, ServerConfigError, ServerError,
-    ServerProtocolError, SessionConfigError, TooManyStatementsInBatch, TruncateError, Unauthorized,
-    Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey,
-    WriteFailure, WriteTimeout, with_attrs,
+    ServerProtocolError, SessionConfigError, TooManyStatementsInBatch, TraceUnavailable,
+    TruncateError, Unauthorized, Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared,
+    ValuesTooLongForKey, WriteFailure, WriteTimeout, with_attrs,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -68,6 +69,29 @@ pub(crate) fn new_session_error_to_pyerr(
         RustNewSessionError::MetadataError(e) => metadata_error_to_pyerr(py, e, message),
         RustNewSessionError::UseKeyspaceError(e) => use_keyspace_error_to_pyerr(py, e, message),
         RustNewSessionError::IllegalConfig(_) => py_err!(SessionConfigError, message),
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+/// Maps a query trace fetch error; failures of the `system_traces` queries keep their own class.
+#[deny(clippy::wildcard_enum_match_arm)]
+pub(crate) fn tracing_error_to_pyerr(
+    py: Python<'_>,
+    err: &RustTracingError,
+    message: String,
+) -> PyErr {
+    match err {
+        RustTracingError::ExecutionError(e) => execution_error_to_pyerr(py, e, message),
+        RustTracingError::PrepareError(e) => prepare_error_to_pyerr(py, e, message),
+        RustTracingError::TracesSessionIntoRowsResultError(_)
+        | RustTracingError::TracesSessionInvalidColumnType(_)
+        | RustTracingError::TracesSessionDeserializationFailed(_)
+        | RustTracingError::TracesEventsIntoRowsResultError(_)
+        | RustTracingError::TracesEventsInvalidColumnType(_)
+        | RustTracingError::TracesEventsDeserializationFailed(_) => {
+            py_err!(ResponseParseError, message)
+        }
+        RustTracingError::EmptyResults => py_err!(TraceUnavailable, message),
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }

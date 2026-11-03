@@ -2,13 +2,15 @@ use std::time::Duration;
 
 use pyo3::exceptions::PyTimeoutError;
 use pyo3::prelude::*;
-use scylla::errors::{DbError, ExecutionError, RequestAttemptError};
+use scylla::deserialize::TypeCheckError;
+use scylla::errors::{DbError, ExecutionError, RequestAttemptError, TracingError};
 use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
 
-use crate::errors::request::execution_error_to_pyerr;
+use crate::errors::request::{execution_error_to_pyerr, tracing_error_to_pyerr};
 use crate::errors::{
-    AlreadyExists, DatabaseError, OperationTimedOut, ReadTimeout, SerializeFailedError, Unavailable,
+    AlreadyExists, DatabaseError, OperationTimedOut, ReadTimeout, ResponseParseError,
+    SerializeFailedError, TraceUnavailable, Unavailable,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -96,6 +98,39 @@ fn request_timeout_is_a_timedelta() {
             attr::<Duration>(py, &err, "timeout"),
             Duration::from_millis(1500)
         );
+    });
+}
+
+#[test]
+fn failed_trace_query_raises_the_execute_class() {
+    Python::initialize();
+    let err = TracingError::ExecutionError(ExecutionError::RequestTimeout(Duration::from_secs(2)));
+    Python::attach(|py| {
+        let err = tracing_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<OperationTimedOut>(py));
+        assert!(!err.is_instance_of::<TraceUnavailable>(py));
+    });
+}
+
+#[test]
+fn missing_trace_raises_trace_unavailable() {
+    Python::initialize();
+    let err = TracingError::EmptyResults;
+    Python::attach(|py| {
+        let err = tracing_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<TraceUnavailable>(py));
+    });
+}
+
+#[test]
+fn unreadable_trace_rows_raise_response_parse_error() {
+    Python::initialize();
+    let err = TracingError::TracesSessionInvalidColumnType(TypeCheckError::new(std::fmt::Error));
+    Python::attach(|py| {
+        let err = tracing_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<ResponseParseError>(py));
+        // Retrying does not help, so it must not look like a trace that is not there yet.
+        assert!(!err.is_instance_of::<TraceUnavailable>(py));
     });
 }
 

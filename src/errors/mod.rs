@@ -101,6 +101,7 @@ create_exception_multi!(
     (ExecutionError, PyTimeoutError)
 );
 create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
+create_exception!(scylla.errors, TraceUnavailable, ExecutionError);
 create_exception!(scylla.errors, MetadataError, ExecutionError);
 create_exception!(scylla.errors, MetadataFetchFailed, MetadataError);
 create_exception!(scylla.errors, InvalidClusterMetadata, MetadataError);
@@ -195,8 +196,6 @@ create_exception!(scylla.errors, FutureCancelledError, PyException);
 create_exception!(scylla.errors, SpeculativeExecutionPolicyError, ScyllaError);
 
 create_exception!(scylla.errors, QueryMetadataError, ScyllaError);
-
-create_exception!(scylla.errors, TraceUnavailable, ScyllaError);
 
 // Policy: DriverError types are pure Rust and contain PyErr only as source
 // in cases where the error originated from Python code (e.g. during extraction or user callbacks).
