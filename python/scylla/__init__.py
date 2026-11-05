@@ -13,6 +13,7 @@ them:
   factories.
 - ``scylla.cql_types`` - the CQL type system: type descriptors, the ``CqlValue``
   aliases and ``CqlEmpty``.
+- ``scylla.adapters`` - values of your own types: ``Adapters``.
 - ``scylla.cluster`` - what the driver knows about the cluster: nodes,
   keyspaces, tables.
 - ``scylla.policies`` - load balancing, retries, speculative execution, host
@@ -26,6 +27,7 @@ them:
   ``ResponseFuture`` and ``ResultSet``.
 """
 
+from .adapters import Adapters
 from .errors import ScyllaError
 from .results import RequestResult
 from .session import ExecutionProfile, Session, SessionBuilder
@@ -33,6 +35,7 @@ from .statement import UNSET, Batch, BatchType, Consistency, PreparedStatement, 
 
 __all__ = [
     "UNSET",
+    "Adapters",
     "Batch",
     "BatchType",
     "Consistency",
