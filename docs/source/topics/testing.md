@@ -103,12 +103,29 @@ pushes to `main`. It first runs `scripts/coverage_tests.py`, then starts the
 cluster and runs `make coverage`. The job summary shows the result of each
 check, and the reports are kept as the `coverage` artifact of the run.
 
+The job then uploads the three reports to
+[Codecov](https://codecov.io/gh/scylladb/python-rs-driver) in one upload,
+which merges them. `codecov.yml` holds its settings:
+
+- Codecov's statuses on a pull request are informational: they show the
+  change in coverage, and never fail.
+- Only a run in which every suite and check passed uploads. A partial report
+  would become the baseline later pull requests are compared against. A commit
+  without an upload is compared against the nearest ancestor that has one.
+- Pull requests from forks get no upload token. Their upload is best effort,
+  and a failed upload does not fail their job.
+
 ### Maintenance
 
 Pinned versions, to update by hand:
 
 - cargo-llvm-cov: `CARGO_LLVM_COV_VERSION` in `.github/workflows/coverage.yml`,
   and the install command above.
+- The Codecov CLI: the `version` input of the upload step in
+  `.github/workflows/coverage.yml`. Renovate updates the action, not this.
+
+The upload needs the repository's Codecov upload token in the
+`CODECOV_TOKEN` repository secret.
 
 coverage.py is pinned in the `coverage` dependency group in `pyproject.toml`,
 which Renovate updates.
