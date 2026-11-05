@@ -1,7 +1,8 @@
 name: Coverage
 
 # Measures test coverage of the Python package and the Rust extension with
-# scripts/coverage.sh. See docs/source/topics/testing.md.
+# scripts/coverage.sh and uploads it to Codecov. See
+# docs/source/topics/testing.md.
 
 on:
   push:
@@ -89,6 +90,25 @@ jobs:
             target/coverage/pytest.xml
             target/coverage/rust-tests.log
           if-no-files-found: warn
+
+      # No `if: always()`: the script writes reports even when a suite fails,
+      # and a partial report on main would become the baseline every later
+      # pull request is compared against. Without an upload, Codecov compares
+      # against the nearest ancestor that has one.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # The Codecov CLI version the action downloads.
+          version: v11.3.1
+          files: target/coverage/reports/python.xml,target/coverage/reports/rust-native.lcov,target/coverage/reports/rust-python.lcov
+          disable_search: true
+          # disable_search leaves the CLI's own plugins on; turn them off too.
+          plugins: noop
+          # Pull requests from forks get no token and upload on a best-effort
+          # basis. Renovate pushes its branches to this repository, so its
+          # pull requests have the token.
+          fail_ci_if_error: ${{ github.repository == 'scylladb/python-rs-driver' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
 
       - name: Stop and cleanup ScyllaDB cluster
         if: always()
