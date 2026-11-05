@@ -1,6 +1,8 @@
 
 # ScyllaDB Python-rs Driver
 
+[![codecov](https://codecov.io/gh/scylladb/python-rs-driver/graph/badge.svg)](https://codecov.io/gh/scylladb/python-rs-driver)
+
 This is a client-side driver for [ScyllaDB] written as a thin wrapper around [Rust Driver].
 Although optimized for ScyllaDB, the driver is also compatible with [Apache Cassandra®].
 

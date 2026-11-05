@@ -1,0 +1,23 @@
+# Codecov settings. The Coverage workflow is the only uploader, see
+# docs/source/topics/testing.md.
+codecov:
+  # Report as soon as the upload arrives: no other CI job adds coverage.
+  require_ci_to_pass: false
+  notify:
+    wait_for_ci: false
+
+coverage:
+  status:
+    # Informational: the statuses show the change in coverage but never fail
+    # a pull request. Whether a change is tested well enough is the
+    # reviewers' call.
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
