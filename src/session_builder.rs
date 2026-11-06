@@ -1,4 +1,5 @@
 use crate::RUNTIME;
+use crate::adapters::{Adapters, PyAdapters};
 use crate::deserialize::row_factory::PyRowFactory;
 use crate::enums::{
     PyCompression, PyConsistency, PyPoolSize, PySelfIdentity, PyWriteCoalescingDelay,
@@ -66,6 +67,15 @@ impl SessionBuilder {
                 execution_profile.get().inner.clone().into_handle();
             inner.is_execution_profile_set = true;
         }
+        slf
+    }
+
+    fn adapters<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        adapters: Py<PyAdapters>,
+    ) -> PyRef<'py, Self> {
+        slf.inner.lock_py_attached(py).unwrap().adapters = Some(adapters);
         slf
     }
 
@@ -500,14 +510,16 @@ impl SessionBuilder {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<PySession, DriverSessionConnectionError>> {
-        let (config, default_row_factory) = self.connect_params(py);
+        let (config, default_row_factory, adapters) = self.connect_params(py);
 
         DriverFuture::spawn_on_tokio(
             py,
             boxed_py_future(async move {
                 match scylla::client::session::Session::connect(config).await {
-                    Ok(session) => PySession::new(Arc::new(session), default_row_factory)
-                        .map_err(DriverSessionConnectionError::python_conversion_error),
+                    Ok(session) => {
+                        PySession::new(Arc::new(session), default_row_factory, Arc::new(adapters))
+                            .map_err(DriverSessionConnectionError::python_conversion_error)
+                    }
                     Err(err) => Err(DriverSessionConnectionError::new_session_error(err)),
                 }
             }),
@@ -516,7 +528,7 @@ impl SessionBuilder {
 
     /// Blocks until connected, returning the legacy (`cassandra-driver` compatible) session.
     fn connect_legacy(&self, py: Python<'_>) -> PyResult<PyLegacySession> {
-        let (config, default_row_factory) = self.connect_params(py);
+        let (config, default_row_factory, adapters) = self.connect_params(py);
         let uses_profiles = self
             .inner
             .lock_py_attached(py)
@@ -527,13 +539,19 @@ impl SessionBuilder {
         let session = RUNTIME
             .block_on(py, catch_unwind(connect))?
             .map_err(DriverSessionConnectionError::new_session_error)?;
-        PyLegacySession::new(Arc::new(session), default_row_factory, uses_profiles)
+        PyLegacySession::new(
+            Arc::new(session),
+            default_row_factory,
+            Arc::new(adapters),
+            uses_profiles,
+        )
     }
 }
 
 impl SessionBuilder {
-    /// The session config, and the row factory of the default execution profile.
-    fn connect_params(&self, py: Python<'_>) -> (SessionConfig, Option<PyRowFactory>) {
+    /// The session config, the row factory of the default execution profile,
+    /// and a snapshot of the adapters.
+    fn connect_params(&self, py: Python<'_>) -> (SessionConfig, Option<PyRowFactory>, Adapters) {
         let inner = self.inner.lock_py_attached(py).unwrap();
         (
             inner.config.clone(),
@@ -543,6 +561,11 @@ impl SessionBuilder {
                 .row_factory
                 .as_ref()
                 .map(|f| f.extracted.clone()),
+            inner
+                .adapters
+                .as_ref()
+                .map(|adapters| adapters.get().snapshot(py))
+                .unwrap_or_default(),
         )
     }
 }
@@ -572,6 +595,8 @@ struct PySessionBuilderConfig {
     pub shard_aware_local_port_range: (u16, u16),
     #[pyo3(get)]
     pub tls_context: Option<Py<PyTlsConfig>>,
+    #[pyo3(get)]
+    pub adapters: Option<Py<PyAdapters>>,
     /// `execution_profile()` was called: a legacy session then uses execution profiles.
     is_execution_profile_set: bool,
 }
@@ -601,6 +626,7 @@ impl PySessionBuilderConfig {
             address_translator: None,
             timestamp_generator: None,
             tls_context: None,
+            adapters: None,
             is_execution_profile_set: false,
         })
     }

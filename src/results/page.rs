@@ -97,13 +97,13 @@ impl Page {
         &self,
         py: Python<'_>,
     ) -> PyResult<DriverFuture<Option<PendingPage>, PyErr>> {
-        let (query_pager, row_factory) = self.core.clone_pager_and_factory();
+        let (query_pager, reader) = self.core.clone_pager_and_reader();
 
         DriverFuture::spawn_on_tokio(
             py,
             boxed_py_future(async move {
                 Ok(query_pager
-                    .fetch_next_pending_page(row_factory, TaskExecutionMode::Inline)
+                    .fetch_next_pending_page(reader, TaskExecutionMode::Inline)
                     .await?
                     .map(PendingPage))
             }),
