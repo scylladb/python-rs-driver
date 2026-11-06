@@ -30,7 +30,11 @@ class Session:
         Raises
         ------
         UseKeyspaceError
-            If an error occurred when trying to use the provided keyspace.
+            If the keyspace name is invalid or the server switched to a different keyspace.
+        RequestFailedError
+            If the request failed, e.g. `InvalidRequest` for a keyspace that doesn't exist.
+        OperationTimedOut
+            If the request timed out.
         """
 
     def prepare(self, statement: Statement | str) -> DriverFuture[PreparedStatement]:
@@ -166,8 +170,10 @@ class Session:
         Raises
         ------
         TraceUnavailable
-            If the trace is not available after all attempts, or if the driver
-            cannot read it.
+            If the trace is not available after all attempts.
+        ExecutionError
+            If a query to the trace tables failed. The class is the same as for `execute`.
+            If the driver cannot read the trace rows, the class is `ResponseParseError`.
         """
 
     def await_schema_agreement(self) -> DriverFuture[uuid.UUID]:
@@ -184,8 +190,14 @@ class Session:
 
         Raises
         ------
-        RuntimeError
-            If the schema agreement could not be reached.
+        SchemaAgreementTimeout
+            If the nodes did not agree before the schema agreement timeout.
+        RequiredHostAbsent
+            If a host required for schema agreement is not in the connection pool.
+        ConnectionPoolError
+            If the driver could not get a connection to a node.
+        RequestFailedError
+            If a schema version request failed or the driver could not read its response.
         """
 
     def check_schema_agreement(self) -> DriverFuture[uuid.UUID | None]:
@@ -202,8 +214,12 @@ class Session:
 
         Raises
         ------
-        RuntimeError
-            If the schema agreement check failed.
+        RequiredHostAbsent
+            If a host required for schema agreement is not in the connection pool.
+        ConnectionPoolError
+            If the driver could not get a connection to a node.
+        RequestFailedError
+            If a schema version request failed or the driver could not read its response.
         """
 
     def refresh_metadata(self) -> DriverFuture[None]:
@@ -216,6 +232,10 @@ class Session:
 
         Raises
         ------
-        MetadataRefreshError
-            If the metadata refresh failed.
+        MetadataError
+            If a system table could not be read or returned invalid data.
+        ConnectionPoolError
+            If the driver could not get a connection to a node.
+        RequestFailedError
+            If a metadata request failed.
         """

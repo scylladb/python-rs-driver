@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use scylla::errors::{CqlResponseKind, OperationType, WriteType};
 use scylla::statement::Consistency;
+use uuid::Uuid;
 
 use crate::enums::PyConsistency;
 use crate::policies::retry::types::{PyCqlResponseKind, PyOperationType, PyWriteType};
@@ -55,6 +56,16 @@ impl_to_py_attr_by_value!(Vec<String>);
 impl_to_py_attr_by_value!(Duration);
 impl_to_py_attr_by_value!([u8]);
 impl_to_py_attr_by_value!(Vec<u8>);
+impl_to_py_attr_by_value!(Uuid);
+
+impl<T: ToPyAttr> ToPyAttr for Option<T> {
+    fn to_py_attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match self {
+            Some(value) => value.to_py_attr(py),
+            None => Ok(py.None().into_bound(py)),
+        }
+    }
+}
 
 impl ToPyAttr for Bytes {
     fn to_py_attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {

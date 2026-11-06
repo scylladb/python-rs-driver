@@ -164,6 +164,23 @@ class SessionBuilder:
         -------
         DriverFuture[Session]
             A future resolving to a connected session ready to execute queries.
+
+        Raises
+        ------
+        ContactPointError
+            If no known node is given, or no hostname resolves.
+        SessionConfigError
+            If the configuration is not valid.
+        ConnectionPoolError
+            If the driver could not connect to a node.
+        MetadataError
+            If the driver could not read the cluster metadata.
+        UseKeyspaceError
+            If the driver could not set the keyspace given to `use_keyspace`.
+        RequestFailedError
+            If a request sent during the connection failed.
+        OperationTimedOut
+            If a request sent during the connection timed out.
         """
 
     def connect_legacy(self) -> LegacySession:

@@ -1,13 +1,16 @@
 use pyo3::prelude::*;
 use scylla::errors::UseKeyspaceError as RustUseKeyspaceError;
 
-use crate::errors::request::execution_error_to_pyerr;
-use crate::errors::{
-    BadKeyspaceNameError, InternalDriverError, KeyspaceNameMismatchError, MetadataRefreshError,
-    PagingStateNotAllowed, PrepareError, RequestError, RequestTimeoutError, RowFactoryError,
-    RuntimeTaskJoinFailedError, SchemaAgreementError, SerializationError, SessionConnectionError,
-    StatementConversionError, TraceUnavailable, get_type_name, with_cause,
+use crate::errors::request::{
+    execution_error_to_pyerr, metadata_error_to_pyerr, new_session_error_to_pyerr,
+    prepare_error_to_pyerr, schema_agreement_error_to_pyerr, tracing_error_to_pyerr,
+    use_keyspace_error_to_pyerr,
 };
+use crate::errors::{
+    AlreadyPrepared, InternalDriverError, InvalidStatementType, PagingStateNotAllowed,
+    RowFactoryError, StatementConversionError, get_type_name, with_cause,
+};
+use crate::serialize::error::serialization_error_to_pyerr;
 
 /* Connection errors */
 
@@ -44,10 +47,16 @@ impl DriverSessionConnectionError {
 
 impl From<DriverSessionConnectionError> for PyErr {
     fn from(e: DriverSessionConnectionError) -> PyErr {
-        match e {
+        let message = e.to_string();
+        Python::attach(|py| match e {
+            DriverSessionConnectionError::RuntimeTaskJoinFailed(_) => {
+                py_err!(InternalDriverError, message)
+            }
+            DriverSessionConnectionError::NewSessionError { source } => {
+                new_session_error_to_pyerr(py, &source, message)
+            }
             DriverSessionConnectionError::PythonConversionError { source } => source,
-            _ => SessionConnectionError::new_err(e.to_string()),
-        }
+        })
     }
 }
 
@@ -92,15 +101,13 @@ impl From<DriverStatementConversionError> for PyErr {
         let message = e.to_string();
         match e {
             DriverStatementConversionError::InvalidStatementType { .. } => {
-                StatementConversionError::new_err(message)
+                py_err!(InvalidStatementType, message)
             }
             DriverStatementConversionError::StatementStringConversionFailed { source } => {
-                with_cause(StatementConversionError::new_err(message), *source)
+                with_cause(py_err!(StatementConversionError, message), *source)
             }
-            // Raised as a `PrepareError` rather than a `StatementConversionError`:
-            // the type is a valid statement, it just cannot be prepared again.
             DriverStatementConversionError::CannotPreparePreparedStatement => {
-                PrepareError::new_err(message)
+                py_err!(AlreadyPrepared, message)
             }
         }
     }
@@ -164,7 +171,9 @@ impl From<DriverExecuteError> for PyErr {
             DriverExecuteError::RustDriverExecutionError { source } => {
                 execution_error_to_pyerr(py, &source, message)
             }
-            DriverExecuteError::SerializationFailed { .. } => py_err!(SerializationError, message),
+            DriverExecuteError::SerializationFailed { source } => {
+                serialization_error_to_pyerr(py, &source, message)
+            }
             DriverExecuteError::RuntimeTaskJoinFailed(_) => py_err!(InternalDriverError, message),
             DriverExecuteError::RowFactoryFailed { source } => {
                 with_cause(py_err!(RowFactoryError, message), source)
@@ -176,28 +185,19 @@ impl From<DriverExecuteError> for PyErr {
 /// Errors that can occur during preparation of a statement.
 #[derive(Debug, thiserror::Error)]
 #[must_use]
-pub(crate) enum DriverPrepareError {
-    /// The Rust driver failed while preparing a statement.
-    #[allow(clippy::enum_variant_names)]
-    #[error("Failed to prepare statement: {source}")]
-    RustDriverPrepareError {
-        source: Box<scylla::errors::PrepareError>,
-    },
-}
+#[error("Failed to prepare statement: {0}")]
+pub(crate) struct DriverPrepareError(Box<scylla::errors::PrepareError>);
 
-impl DriverPrepareError {
-    /* Constructors */
-
-    pub(crate) fn rust_driver_prepare_error(source: scylla::errors::PrepareError) -> Self {
-        Self::RustDriverPrepareError {
-            source: Box::new(source),
-        }
+impl From<scylla::errors::PrepareError> for DriverPrepareError {
+    fn from(source: scylla::errors::PrepareError) -> Self {
+        Self(Box::new(source))
     }
 }
 
 impl From<DriverPrepareError> for PyErr {
     fn from(e: DriverPrepareError) -> PyErr {
-        PrepareError::new_err(e.to_string())
+        let message = e.to_string();
+        Python::attach(|py| prepare_error_to_pyerr(py, &e.0, message))
     }
 }
 
@@ -229,7 +229,15 @@ impl DriverSchemaAgreementError {
 
 impl From<DriverSchemaAgreementError> for PyErr {
     fn from(e: DriverSchemaAgreementError) -> PyErr {
-        SchemaAgreementError::new_err(e.to_string())
+        let message = e.to_string();
+        Python::attach(|py| match e {
+            DriverSchemaAgreementError::RustDriverSchemaAgreementError { source } => {
+                schema_agreement_error_to_pyerr(py, &source, message)
+            }
+            DriverSchemaAgreementError::RuntimeTaskJoinFailed(_) => {
+                py_err!(InternalDriverError, message)
+            }
+        })
     }
 }
 
@@ -259,7 +267,15 @@ impl DriverMetadataRefreshError {
 
 impl From<DriverMetadataRefreshError> for PyErr {
     fn from(e: DriverMetadataRefreshError) -> PyErr {
-        MetadataRefreshError::new_err(e.to_string())
+        let message = e.to_string();
+        Python::attach(|py| match e {
+            DriverMetadataRefreshError::RustDriverMetadataError { source } => {
+                metadata_error_to_pyerr(py, &source, message)
+            }
+            DriverMetadataRefreshError::RuntimeTaskJoinFailed(_) => {
+                py_err!(InternalDriverError, message)
+            }
+        })
     }
 }
 
@@ -289,7 +305,13 @@ impl DriverTraceError {
 
 impl From<DriverTraceError> for PyErr {
     fn from(e: DriverTraceError) -> PyErr {
-        TraceUnavailable::new_err(e.to_string())
+        let message = e.to_string();
+        Python::attach(|py| match e {
+            DriverTraceError::RustDriverTracingError { source } => {
+                tracing_error_to_pyerr(py, &source, message)
+            }
+            DriverTraceError::RuntimeTaskJoinFailed(_) => py_err!(InternalDriverError, message),
+        })
     }
 }
 
@@ -307,27 +329,13 @@ pub(crate) enum DriverUseKeyspaceError {
 impl From<DriverUseKeyspaceError> for PyErr {
     fn from(e: DriverUseKeyspaceError) -> Self {
         let message = e.to_string();
-        match e {
-            DriverUseKeyspaceError::RustDriverUseKeyspaceError(source) =>
-            {
-                #[deny(clippy::wildcard_enum_match_arm)]
-                match source {
-                    RustUseKeyspaceError::BadKeyspaceName(_) => {
-                        BadKeyspaceNameError::new_err(message)
-                    }
-                    RustUseKeyspaceError::RequestError(_) => RequestError::new_err(message),
-                    RustUseKeyspaceError::KeyspaceNameMismatch { .. } => {
-                        KeyspaceNameMismatchError::new_err(message)
-                    }
-                    RustUseKeyspaceError::RequestTimeout(_) => {
-                        RequestTimeoutError::new_err(message)
-                    }
-                    _ => unreachable!("clippy testifies that the match is exhaustive"),
-                }
+        Python::attach(|py| match e {
+            DriverUseKeyspaceError::RustDriverUseKeyspaceError(source) => {
+                use_keyspace_error_to_pyerr(py, &source, message)
             }
             DriverUseKeyspaceError::RuntimeTaskJoinFailed(_) => {
-                RuntimeTaskJoinFailedError::new_err(message)
+                py_err!(InternalDriverError, message)
             }
-        }
+        })
     }
 }

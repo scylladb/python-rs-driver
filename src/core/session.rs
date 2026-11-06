@@ -150,7 +150,7 @@ impl SessionCore {
                     is_page_size_set,
                     ..StatementOptions::new(prepared, is_serial_consistency_set, settings)
                 })),
-                Err(err) => Err(DriverPrepareError::rust_driver_prepare_error(err)),
+                Err(err) => Err(DriverPrepareError::from(err)),
             }
         }
     }

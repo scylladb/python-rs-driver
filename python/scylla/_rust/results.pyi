@@ -210,7 +210,10 @@ class Page:
         Raises
         ------
         TraceUnavailable
-            If the driver cannot fetch the trace.
+            If the trace is not available yet.
+        ExecutionError
+            If a query to the trace tables failed. The class is the same as for `execute`.
+            If the driver cannot read the trace rows, the class is `ResponseParseError`.
         """
 
 class RequestResult:
@@ -295,7 +298,10 @@ class RequestResult:
         Raises
         ------
         TraceUnavailable
-            If the driver cannot fetch the trace.
+            If the trace is not available yet.
+        ExecutionError
+            If a query to the trace tables failed. The class is the same as for `execute`.
+            If the driver cannot read the trace rows, the class is `ResponseParseError`.
         """
 
     def fetch_all_query_traces(self) -> DriverFuture[list[QueryTrace]]:
@@ -305,7 +311,10 @@ class RequestResult:
         Raises
         ------
         TraceUnavailable
-            If the driver cannot fetch one of the traces.
+            If one of the traces is not available yet.
+        ExecutionError
+            If a query to the trace tables failed. The class is the same as for `execute`.
+            If the driver cannot read the trace rows, the class is `ResponseParseError`.
         """
 
 class AsyncRowsIterator(AsyncIterator[Any]):
