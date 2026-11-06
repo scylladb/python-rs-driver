@@ -21,11 +21,13 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     HostFilterError,
     InternalDriverError,
     InvalidRequest,
+    InvalidValueSerializationError,
     IsBootstrapping,
     KeyspaceNameMismatchError,
     LoadBalancingPolicyError,
     MetadataError,
     MetadataRefreshError,
+    MissingValue,
     NodeDisabledByHostFilter,
     NoHostAvailable,
     NonfinishedPagingState,
@@ -81,6 +83,7 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     ValuesTooLongForKey,
     WriteFailure,
     WriteTimeout,
+    WrongNumberOfValues,
 )
 
 __all__ = [
@@ -106,11 +109,13 @@ __all__ = [
     "HostFilterError",
     "InternalDriverError",
     "InvalidRequest",
+    "InvalidValueSerializationError",
     "IsBootstrapping",
     "KeyspaceNameMismatchError",
     "LoadBalancingPolicyError",
     "MetadataError",
     "MetadataRefreshError",
+    "MissingValue",
     "NoHostAvailable",
     "NodeDisabledByHostFilter",
     "NonfinishedPagingState",
@@ -166,4 +171,5 @@ __all__ = [
     "ValuesTooLongForKey",
     "WriteFailure",
     "WriteTimeout",
+    "WrongNumberOfValues",
 ]

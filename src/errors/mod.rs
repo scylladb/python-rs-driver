@@ -1,5 +1,5 @@
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyTimeoutError, PyValueError};
+use pyo3::exceptions::{PyException, PyOverflowError, PyTimeoutError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -12,6 +12,7 @@ pub(crate) mod execution;
 pub(crate) mod request;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
+pub(crate) use macros::py_err;
 
 /* Python exception classes */
 
@@ -43,6 +44,36 @@ create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
 create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
 create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
 create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
+create_exception!(scylla.errors, WrongNumberOfValues, BadQuery);
+create_exception!(scylla.errors, MissingValue, BadQuery);
+
+create_exception!(scylla.errors, SerializationError, BadQuery);
+create_exception!(
+    scylla.errors,
+    UnsupportedTypeSerializationError,
+    SerializationError
+);
+create_exception_multi!(
+    scylla.errors,
+    TypeMismatchSerializationError,
+    (SerializationError, PyTypeError)
+);
+create_exception_multi!(
+    scylla.errors,
+    ValueOverflowSerializationError,
+    (SerializationError, PyOverflowError)
+);
+create_exception_multi!(
+    scylla.errors,
+    InvalidValueSerializationError,
+    (SerializationError, PyValueError)
+);
+create_exception!(scylla.errors, SerializeFailedError, SerializationError);
+create_exception!(
+    scylla.errors,
+    PySerializationFailedError,
+    SerializationError
+);
 
 /* Failures while executing a request */
 
@@ -109,29 +140,6 @@ create_exception!(scylla.errors, MetadataRefreshError, ScyllaError);
 create_exception!(scylla.errors, StatementConfigError, ScyllaError);
 
 create_exception!(scylla.errors, BatchError, ScyllaError);
-
-create_exception!(scylla.errors, SerializationError, ScyllaError);
-create_exception!(
-    scylla.errors,
-    UnsupportedTypeSerializationError,
-    SerializationError
-);
-create_exception!(
-    scylla.errors,
-    TypeMismatchSerializationError,
-    SerializationError
-);
-create_exception!(
-    scylla.errors,
-    ValueOverflowSerializationError,
-    SerializationError
-);
-create_exception!(scylla.errors, SerializeFailedError, SerializationError);
-create_exception!(
-    scylla.errors,
-    PySerializationFailedError,
-    SerializationError
-);
 
 create_exception!(scylla.errors, ClusterStateTokenError, ScyllaError);
 create_exception!(scylla.errors, UseKeyspaceError, ScyllaError);
@@ -223,6 +231,8 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "PagingStateNotAllowed",
         py.get_type::<PagingStateNotAllowed>(),
     )?;
+    module.add("WrongNumberOfValues", py.get_type::<WrongNumberOfValues>())?;
+    module.add("MissingValue", py.get_type::<MissingValue>())?;
     module.add("ExecutionError", py.get_type::<ExecutionError>())?;
     module.add("OperationTimedOut", py.get_type::<OperationTimedOut>())?;
     module.add("NoHostAvailable", py.get_type::<NoHostAvailable>())?;
@@ -312,6 +322,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add(
         "ValueOverflowSerializationError",
         py.get_type::<ValueOverflowSerializationError>(),
+    )?;
+    module.add(
+        "InvalidValueSerializationError",
+        py.get_type::<InvalidValueSerializationError>(),
     )?;
     module.add(
         "SerializeFailedError",
