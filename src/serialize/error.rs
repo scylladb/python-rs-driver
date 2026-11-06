@@ -2,6 +2,13 @@ use std::error::Error;
 use std::fmt;
 
 use pyo3::prelude::*;
+use scylla::serialize::value::{
+    BuiltinSerializationError, BuiltinSerializationErrorKind,
+    BuiltinTypeCheckError as ValueTypeCheckError, MapSerializationErrorKind,
+    SetOrListSerializationErrorKind, TupleSerializationErrorKind, UdtSerializationErrorKind,
+};
+use scylla::value::ValueOverflow;
+use scylla_cql::serialize::value::VectorSerializationErrorKind;
 
 use crate::errors::{
     InvalidValueSerializationError, MissingValue, PySerializationFailedError, SerializeFailedError,
@@ -208,9 +215,74 @@ fn kind_to_pyerr(
             py_err!(py, PySerializationFailedError, message; parameter),
             source.clone_ref(py),
         ),
-        SerializationErrorKind::ScyllaSerializeFailed { .. } => {
+        SerializationErrorKind::ScyllaSerializeFailed { source } => {
+            value_error_to_pyerr(source, py, message, parameter)
+        }
+    }
+}
+
+/// Maps a failure of one value, following collection element errors down to the innermost cause.
+fn value_error_to_pyerr(
+    err: &scylla::serialize::SerializationError,
+    py: Python<'_>,
+    message: String,
+    parameter: &Option<ParameterReference>,
+) -> PyErr {
+    // An element failed in our own serializer; the location is only set on the top-level value.
+    if let Some(e) = err.downcast_ref::<DriverSerializationError>() {
+        return kind_to_pyerr(&e.kind, py, message, parameter);
+    }
+    if err.downcast_ref::<ValueTypeCheckError>().is_some() {
+        return py_err!(py, TypeMismatchSerializationError, message; parameter);
+    }
+    if err.downcast_ref::<ValueOverflow>().is_some() {
+        return py_err!(py, ValueOverflowSerializationError, message; parameter);
+    }
+    if let Some(e) = err.downcast_ref::<BuiltinSerializationError>() {
+        return builtin_value_error_to_pyerr(&e.kind, py, message, parameter);
+    }
+    py_err!(py, SerializeFailedError, message; parameter)
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn builtin_value_error_to_pyerr(
+    kind: &BuiltinSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    parameter: &Option<ParameterReference>,
+) -> PyErr {
+    match kind {
+        BuiltinSerializationErrorKind::ValueOverflow => {
+            py_err!(py, ValueOverflowSerializationError, message; parameter)
+        }
+        BuiltinSerializationErrorKind::VectorError(
+            VectorSerializationErrorKind::InvalidNumberOfElements(..),
+        ) => py_err!(py, InvalidValueSerializationError, message; parameter),
+        BuiltinSerializationErrorKind::SetOrListError(
+            SetOrListSerializationErrorKind::ElementSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::VectorError(
+            VectorSerializationErrorKind::ElementSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::MapError(
+            MapSerializationErrorKind::KeySerializationFailed(inner)
+            | MapSerializationErrorKind::ValueSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::TupleError(
+            TupleSerializationErrorKind::ElementSerializationFailed { err: inner, .. },
+        )
+        | BuiltinSerializationErrorKind::UdtError(
+            UdtSerializationErrorKind::FieldSerializationFailed { err: inner, .. },
+        ) => value_error_to_pyerr(inner, py, message, parameter),
+        BuiltinSerializationErrorKind::SizeOverflow
+        | BuiltinSerializationErrorKind::SetOrListError(_)
+        | BuiltinSerializationErrorKind::VectorError(_)
+        | BuiltinSerializationErrorKind::MapError(_)
+        | BuiltinSerializationErrorKind::TupleError(_)
+        | BuiltinSerializationErrorKind::UdtError(_) => {
             py_err!(py, SerializeFailedError, message; parameter)
         }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }
 
@@ -229,8 +301,8 @@ impl From<DriverSerializationError> for PyErr {
     }
 }
 
-/// Maps a Rust driver serialization error, recovering our own `DriverSerializationError` from inside it;
-/// `message` is the full description including the failed operation.
+/// Maps a Rust driver serialization error, recovering our own `DriverSerializationError` from
+/// inside it; `message` is the full description including the failed operation.
 pub(crate) fn serialization_error_to_pyerr(
     py: Python<'_>,
     err: &scylla::serialize::SerializationError,
