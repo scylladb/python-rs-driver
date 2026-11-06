@@ -32,6 +32,12 @@ pub(crate) enum SerializationErrorKind {
     /// The duration fields have different signs, which CQL cannot represent.
     #[error("All duration fields must have the same sign")]
     MixedSignDuration,
+    /// The number of values is not the number of bind markers.
+    #[error("Wrong number of values: expected {expected}, got {received}")]
+    WrongNumberOfValues { expected: usize, received: usize },
+    /// The mapping has no value for a named bind marker; the location names it.
+    #[error("Missing value")]
+    MissingValue,
     /// An error occurred while interacting with Python objects during serialization.
     #[error("Python interop failed: {source}")]
     PythonInteropFailed { source: Box<PyErr> },
@@ -120,6 +126,20 @@ impl DriverSerializationError {
         }
     }
 
+    pub(crate) fn wrong_number_of_values(expected: usize, received: usize) -> Self {
+        Self {
+            kind: SerializationErrorKind::WrongNumberOfValues { expected, received },
+            location: None,
+        }
+    }
+
+    pub(crate) fn missing_value(name: impl Into<Box<str>>) -> Self {
+        Self {
+            kind: SerializationErrorKind::MissingValue,
+            location: Some(ParameterReference::Name(name.into())),
+        }
+    }
+
     pub(crate) fn scylla_serialize_failed(source: scylla::serialize::SerializationError) -> Self {
         Self {
             kind: SerializationErrorKind::ScyllaSerializeFailed { source },
@@ -162,9 +182,9 @@ impl From<DriverSerializationError> for PyErr {
             SerializationErrorKind::ValueOverflow => {
                 (ValueOverflowSerializationError::new_err(message), None)
             }
-            SerializationErrorKind::MixedSignDuration => {
-                (SerializationError::new_err(message), None)
-            }
+            SerializationErrorKind::MixedSignDuration
+            | SerializationErrorKind::WrongNumberOfValues { .. }
+            | SerializationErrorKind::MissingValue => (SerializationError::new_err(message), None),
             SerializationErrorKind::PythonInteropFailed { source } => {
                 (PySerializationFailedError::new_err(message), Some(*source))
             }
