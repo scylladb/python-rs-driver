@@ -44,6 +44,8 @@ create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
 create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
 create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
 create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
+create_exception!(scylla.errors, WrongNumberOfValues, BadQuery);
+create_exception!(scylla.errors, MissingValue, BadQuery);
 
 create_exception!(scylla.errors, SerializationError, BadQuery);
 create_exception!(
@@ -229,6 +231,8 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "PagingStateNotAllowed",
         py.get_type::<PagingStateNotAllowed>(),
     )?;
+    module.add("WrongNumberOfValues", py.get_type::<WrongNumberOfValues>())?;
+    module.add("MissingValue", py.get_type::<MissingValue>())?;
     module.add("ExecutionError", py.get_type::<ExecutionError>())?;
     module.add("OperationTimedOut", py.get_type::<OperationTimedOut>())?;
     module.add("NoHostAvailable", py.get_type::<NoHostAvailable>())?;

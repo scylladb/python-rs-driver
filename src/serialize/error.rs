@@ -4,9 +4,9 @@ use std::fmt;
 use pyo3::prelude::*;
 
 use crate::errors::{
-    InvalidValueSerializationError, PySerializationFailedError, SerializationError,
-    SerializeFailedError, ToPyAttr, TypeMismatchSerializationError,
-    UnsupportedTypeSerializationError, ValueOverflowSerializationError, py_err, with_cause,
+    InvalidValueSerializationError, MissingValue, PySerializationFailedError, SerializeFailedError,
+    ToPyAttr, TypeMismatchSerializationError, UnsupportedTypeSerializationError,
+    ValueOverflowSerializationError, WrongNumberOfValues, py_err, with_cause,
 };
 
 /// Errors that can occur during serialization of Python values into CQL values.
@@ -200,10 +200,10 @@ fn kind_to_pyerr(
         SerializationErrorKind::MixedSignDuration => {
             py_err!(py, InvalidValueSerializationError, message; parameter)
         }
-        SerializationErrorKind::WrongNumberOfValues { .. }
-        | SerializationErrorKind::MissingValue => {
-            py_err!(py, SerializationError, message; parameter)
+        SerializationErrorKind::WrongNumberOfValues { expected, received } => {
+            py_err!(py, WrongNumberOfValues, message; expected, received)
         }
+        SerializationErrorKind::MissingValue => py_err!(py, MissingValue, message; parameter),
         SerializationErrorKind::PythonInteropFailed { source } => with_cause(
             py_err!(py, PySerializationFailedError, message; parameter),
             source.clone_ref(py),

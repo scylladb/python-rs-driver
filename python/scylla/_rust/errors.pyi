@@ -32,6 +32,13 @@ class TooManyStatementsInBatch(BadQuery):
 class PartitionKeyExtractionFailed(BadQuery): ...
 class PagingStateNotAllowed(BadQuery): ...
 
+class WrongNumberOfValues(BadQuery):
+    expected: int
+    received: int
+
+class MissingValue(BadQuery):
+    parameter: str
+
 class SerializationError(BadQuery):
     parameter: str | int | None
 
