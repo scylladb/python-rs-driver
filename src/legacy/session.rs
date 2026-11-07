@@ -12,8 +12,8 @@ use pyo3::types::{PyBytes, PyDict, PyTuple};
 use scylla::client::execution_profile::{ExecutionProfile, ExecutionProfileHandle};
 use scylla::client::session::Session;
 use scylla::errors::SchemaAgreementError;
+use scylla::response::PagingState;
 use scylla::statement::{Consistency, SerialConsistency, Statement};
-use scylla_cql::frame::request::query::PagingState;
 
 use crate::RUNTIME;
 use crate::batch::{BatchState, PyBatch};

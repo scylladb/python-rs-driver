@@ -20,7 +20,6 @@ tokio = { version = "1.42.0", features = ["full"] }
 
 scylla = { version = "=1.10.0", features = ["chrono-04", "bigdecimal-04", "num-bigint-04", "unstable-python-rs", "openssl-010"] }
 scylla-cql-core = { version = "=1.10.0", features = ["chrono-04", "bigdecimal-04", "num-bigint-04", "unstable-python-rs"] }
-scylla-cql = { version = "=3.0.0", features = ["chrono-04", "bigdecimal-04", "num-bigint-04", "unstable-python-rs"] }
 
 yoke = "0.8.1"
 stable_deref_trait = "1.2"

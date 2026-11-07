@@ -2,10 +2,10 @@ use crate::deserialize::error::{DriverDeserializationError, DriverRowIterationEr
 use crate::deserialize::row_factory::{PyRowFactory, RowBuilder};
 use crate::deserialize::value::{PyDeserializeValue, PyDeserializedValue};
 use pyo3::{Py, PyAny, PyResult, Python};
+use scylla::deserialize::FrameSlice;
+use scylla::deserialize::row::ColumnIterator;
 use scylla::response::query_result::QueryResult;
-use scylla_cql::deserialize::FrameSlice;
-use scylla_cql::deserialize::result::RawRowIterator;
-use scylla_cql::deserialize::row::ColumnIterator;
+use scylla_cql_core::deserialize::result::RawRowIterator;
 use stable_deref_trait::StableDeref;
 use std::ops::Deref;
 use std::sync::Arc;

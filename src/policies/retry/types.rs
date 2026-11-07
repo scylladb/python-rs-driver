@@ -4,7 +4,7 @@
 use pyo3::prelude::*;
 use scylla::errors::OperationType;
 use scylla::errors::WriteType;
-use scylla_cql::frame::response::CqlResponseKind;
+use scylla::frame::response::CqlResponseKind;
 
 #[pyclass(
     module = "scylla.policies.retry",

@@ -1,5 +1,5 @@
 use pyo3::{Bound, Python, pyclass, pymethods};
-use scylla_cql::frame::request::query::PagingState;
+use scylla::response::PagingState;
 
 /// Represents paging state for paged queries.
 ///
