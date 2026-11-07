@@ -44,8 +44,11 @@ async def test_use_keyspace_case_sensitive():
         )
         await ddl(session, f'CREATE TABLE IF NOT EXISTS "{ks}".test_table (id int PRIMARY KEY)')
 
+        # A failed `use_keyspace` can leave its session unable to execute requests.
+        # Thus, the failing call uses a separate session.
+        failing_session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
         with pytest.raises(RequestError):
-            await session.use_keyspace(ks)
+            await failing_session.use_keyspace(ks)
 
         await session.use_keyspace(ks, case_sensitive=True)
         await session.execute("INSERT INTO test_table (id) VALUES (1)")
