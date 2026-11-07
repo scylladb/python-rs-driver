@@ -32,7 +32,7 @@ use scylla::serialize::value::{
 use scylla::serialize::writers::{CellWriter, WrittenCellProof};
 use scylla::value::{Counter, CqlDate, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
 
-use scylla_cql::serialize::value::{
+use scylla_cql_core::serialize::value::{
     VectorSerializationErrorKind, serialize_next_constant_length_elem_unstable,
     serialize_next_variable_length_elem_unstable,
 };

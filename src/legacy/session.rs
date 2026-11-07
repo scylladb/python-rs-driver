@@ -13,7 +13,7 @@ use scylla::client::execution_profile::{ExecutionProfile, ExecutionProfileHandle
 use scylla::client::session::Session;
 use scylla::errors::SchemaAgreementError;
 use scylla::statement::{Consistency, SerialConsistency, Statement};
-use scylla_cql::frame::request::query::PagingState;
+use scylla_cql_core::frame::request::query::PagingState;
 
 use crate::RUNTIME;
 use crate::batch::{BatchState, PyBatch};

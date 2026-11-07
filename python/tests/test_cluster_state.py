@@ -18,6 +18,7 @@ from scylla.cql_types import (
     CqlTextType,
     CqlTupleType,
 )
+from scylla.errors import ClusterStateTokenError
 from scylla.routing import ReplicaLocator, Shard, Token
 from scylla.session import Session, SessionBuilder
 from scylla.statement import Statement
@@ -279,6 +280,16 @@ async def test_get_token_endpoints_matches_replica_locator(
     assert len(replicas_from_locator) > 0
     assert len(replicas_from_get_token) > 0
     assert replicas_from_get_token == replicas_from_locator
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_get_token_endpoints_unknown_keyspace_raises(
+    cluster_state: ClusterState,
+) -> None:
+    token = cluster_state.compute_token(KEYSPACE, TABLE, [TEST_PARTITION_KEY])
+    with pytest.raises(ClusterStateTokenError, match="no_such_keyspace_xyz"):
+        cluster_state.get_token_endpoints("no_such_keyspace_xyz", TABLE, token)
 
 
 @pytest.mark.asyncio

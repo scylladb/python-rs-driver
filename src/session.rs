@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 use scylla::client::session::Session;
-use scylla_cql::frame::request::query::PagingState;
+use scylla_cql_core::frame::request::query::PagingState;
 use uuid::Uuid;
 
 use crate::batch::PyBatch;
