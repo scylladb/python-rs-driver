@@ -141,6 +141,13 @@ async def test_custom_retry_policy_new_session_called_when_set_on_statement():
 
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
 
+    # A request that succeeds on its first attempt does not start a retry session.
+    succeeding_policy = RecordingRetryPolicy()
+    succeeding = Statement("SELECT host_id FROM system.local WHERE key='local'")
+    succeeding.retry_policy = succeeding_policy
+    await session.execute(succeeding)
+    assert succeeding_policy.new_session_called is False
+
     # A failed attempt starts a retry session.
     failing_policy = RecordingRetryPolicy()
     failing = Statement("THIS STATEMENT FAILS")
