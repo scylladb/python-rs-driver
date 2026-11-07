@@ -139,14 +139,15 @@ async def test_custom_retry_policy_new_session_called_when_set_on_statement():
             self.new_session_called = True
             return RecordingRetrySession()
 
-    policy = RecordingRetryPolicy()
     session = await SessionBuilder().contact_points([("127.0.0.2", 9042)]).connect()
-    statement = Statement("SELECT * FROM system.local")
-    statement.retry_policy = policy
 
-    await session.execute(statement)
-
-    assert policy.new_session_called is True
+    # A failed attempt starts a retry session.
+    failing_policy = RecordingRetryPolicy()
+    failing = Statement("THIS STATEMENT FAILS")
+    failing.retry_policy = failing_policy
+    with pytest.raises(CqlSyntaxError):
+        await session.execute(failing)
+    assert failing_policy.new_session_called is True
 
 
 @pytest.mark.asyncio
