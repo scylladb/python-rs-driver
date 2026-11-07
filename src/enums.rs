@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyString;
 use scylla::client::{PoolSize, SelfIdentity, WriteCoalescingDelay};
 use scylla::statement::{Consistency, SerialConsistency};
-use scylla_cql::frame::Compression;
+use scylla_cql_core::frame::Compression;
 use std::num::{NonZeroU64, NonZeroUsize};
 
 #[pyclass(

@@ -5,8 +5,8 @@ use pyo3::types::PyList;
 use pyo3::{Bound, Py, PyAny, PyErr, PyResult};
 use scylla::client::session::Session;
 use scylla::response::query_result::QueryResult;
-use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
-use scylla_cql::frame::response::result::ColumnSpec;
+use scylla_cql_core::frame::request::query::{PagingState, PagingStateResponse};
+use scylla_cql_core::frame::response::result::ColumnSpec;
 use uuid::Uuid;
 
 use crate::TaskExecutionMode;

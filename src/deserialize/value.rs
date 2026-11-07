@@ -12,11 +12,11 @@ use pyo3::{Bound, IntoPyObject, Py, PyAny, PyResult, Python};
 use scylla::deserialize::value::FrameSliceWithMetadata;
 use scylla::deserialize::value::VectorIterator;
 use scylla::deserialize::value::{DeserializeValue, ListlikeIterator, MapIterator, UdtIterator};
-use scylla_cql::deserialize::{DeserializationError, FrameSlice};
-use scylla_cql::frame::response::result::ColumnType;
-use scylla_cql::frame::response::result::ColumnType::Native;
-use scylla_cql::frame::response::result::{CollectionType, NativeType};
-use scylla_cql::value::{
+use scylla_cql_core::deserialize::{DeserializationError, FrameSlice};
+use scylla_cql_core::frame::response::result::ColumnType;
+use scylla_cql_core::frame::response::result::ColumnType::Native;
+use scylla_cql_core::frame::response::result::{CollectionType, NativeType};
+use scylla_cql_core::value::{
     Counter, CqlDate, CqlDecimalBorrowed, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid,
     CqlVarintBorrowed,
 };

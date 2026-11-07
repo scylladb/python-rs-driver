@@ -11,8 +11,8 @@ use scylla::statement::batch::BatchStatement;
 use scylla::statement::prepared::PreparedStatement;
 use scylla::statement::unprepared::Statement;
 use scylla::statement::{Consistency, SerialConsistency};
-use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
-use scylla_cql::serialize::row::SerializedValues;
+use scylla_cql_core::frame::request::query::{PagingState, PagingStateResponse};
+use scylla_cql_core::serialize::row::SerializedValues;
 use uuid::Uuid;
 
 use crate::batch::BatchState;

@@ -790,7 +790,6 @@ dependencies = [
  "pyo3-build-config",
  "pyo3-log",
  "scylla 1.10.0",
- "scylla-cql",
  "scylla-cql-core",
  "stable_deref_trait",
  "thiserror",

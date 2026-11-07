@@ -1,6 +1,6 @@
 use pyo3::types::PyInt;
 use pyo3::{Bound, IntoPyObject, PyErr, Python};
-use scylla_cql::value::CqlVarintBorrowed;
+use scylla_cql_core::value::CqlVarintBorrowed;
 
 pub(crate) struct CqlVarintWrapper<'b> {
     val: CqlVarintBorrowed<'b>,
