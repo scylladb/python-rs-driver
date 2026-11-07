@@ -24,6 +24,20 @@ class Session:
         Sends `USE <keyspace>` request on all connections.
         This allows to write `SELECT * FROM table` instead of `SELECT * FROM keyspace.table`
 
+        When the call succeeds, all connections of the session use the new keyspace.
+        Requests that run during the call can use the new keyspace or the previous one.
+        The driver runs one call at a time. If two calls run concurrently,
+        either keyspace can be the result.
+
+        A connection that fails to switch to the new keyspace is closed.
+        Thus, if the call fails on all connections, the session cannot execute requests:
+        the connections that the driver opens in their place cannot switch to a keyspace
+        that does not exist. A call with a keyspace that exists makes the session recover.
+        The recovery is not immediate. It occurs when the driver opens new connections.
+
+        While the session has no connections, the call sends no `USE` request.
+        Thus, the call succeeds even for a keyspace that does not exist.
+
         Note that even failed `use_keyspace` can change currently used keyspace - the request is sent on all connections and
         can overwrite previously used keyspace.
 

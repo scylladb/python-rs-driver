@@ -102,7 +102,8 @@ impl PyClusterState {
     ) -> PyResult<Bound<'py, PyList>> {
         let token_endpoints_sequence = self
             .inner
-            .get_token_endpoints(keyspace, table, token.inner)
+            .try_get_token_endpoints(keyspace, table, token.inner)
+            .unwrap_or_default()
             .into_iter()
             .map(|(node, shard)| -> PyResult<(Bound<'_, PyAny>, u32)> {
                 let py_node = self.known_nodes.bind(py).get_item(node.host_id)?;

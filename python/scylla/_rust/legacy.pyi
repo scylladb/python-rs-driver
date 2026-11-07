@@ -78,7 +78,14 @@ class LegacySession:
         """
 
     def set_keyspace(self, keyspace: str) -> None:
-        """Set the keyspace of every connection, blocking until done. Case-sensitive."""
+        """
+        Set the keyspace of every connection, blocking until done. Case-sensitive.
+
+        A connection that fails to switch to the new keyspace is closed.
+        Thus, a call that fails on all connections leaves the session unable to
+        execute requests. A call with a keyspace that exists makes the session recover.
+        For the details, see :meth:`scylla.session.Session.use_keyspace`.
+        """
 
     def shutdown(self) -> None:
         """

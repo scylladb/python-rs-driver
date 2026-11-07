@@ -496,7 +496,7 @@ class SessionBuilder:
         """
         Sets the server-side timeout for metadata queries.
 
-        The default is 2 seconds.
+        The default is 30 seconds.
 
         Parameters
         ----------
