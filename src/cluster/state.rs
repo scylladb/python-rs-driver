@@ -99,21 +99,28 @@ impl PyClusterState {
         table: &str,
         token: &PyToken,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyList>> {
+    ) -> Result<Bound<'py, PyList>, DriverClusterStateTokenError> {
         let token_endpoints_sequence = self
             .inner
-            .get_token_endpoints(keyspace, table, token.inner)
+            .try_get_token_endpoints(keyspace, table, token.inner)?
             .into_iter()
-            .map(|(node, shard)| -> PyResult<(Bound<'_, PyAny>, u32)> {
-                let py_node = self.known_nodes.bind(py).get_item(node.host_id)?;
-                let py_node =
-                    py_node.expect("node can't be known by Rust Driver and simultaneously None");
-                Ok((py_node, shard))
-            });
+            .map(
+                |(node, shard)| -> Result<(Bound<'_, PyAny>, u32), DriverClusterStateTokenError> {
+                    let py_node = self
+                        .known_nodes
+                        .bind(py)
+                        .get_item(node.host_id)
+                        .map_err(DriverClusterStateTokenError::python_conversion_failed)?;
+                    let py_node = py_node
+                        .expect("node can't be known by Rust Driver and simultaneously None");
+                    Ok((py_node, shard))
+                },
+            );
         let list = PyList::empty(py);
         for token_endpoint in token_endpoints_sequence {
             let (py_node, shard) = token_endpoint?;
-            list.append((py_node, shard))?;
+            list.append((py_node, shard))
+                .map_err(DriverClusterStateTokenError::python_conversion_failed)?;
         }
         Ok(list)
     }

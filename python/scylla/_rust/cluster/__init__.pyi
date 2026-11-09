@@ -88,6 +88,10 @@ class ClusterState:
         """
         Returns a list of `[Node, Shard]` tuples that are considered
         to be replicas for a given token.
+
+        Raises:
+            ClusterStateTokenError: If the cluster state has no metadata
+                for `keyspace`.
         """
     def get_endpoints(self, keyspace: str, table: str, partition_key: object) -> list[tuple[Node, Shard]]:
         """

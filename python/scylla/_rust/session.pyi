@@ -24,6 +24,20 @@ class Session:
         Sends `USE <keyspace>` request on all connections.
         This allows to write `SELECT * FROM table` instead of `SELECT * FROM keyspace.table`
 
+        When the call succeeds, all connections of the session use the new keyspace.
+        Requests that run during the call can use the new keyspace or the previous one.
+        The driver runs one call at a time. If two calls run concurrently,
+        either keyspace can be the result.
+
+        A connection that fails to switch to the new keyspace is closed.
+        Thus, if the call fails on all connections, the session cannot execute requests:
+        the connections that the driver opens in their place cannot switch to a keyspace
+        that does not exist. A call with a keyspace that exists makes the session recover.
+        The recovery is not immediate. It occurs when the driver opens new connections.
+
+        While the session has no connections, the call sends no `USE` request.
+        Thus, the call succeeds even for a keyspace that does not exist.
+
         Note that even failed `use_keyspace` can change currently used keyspace - the request is sent on all connections and
         can overwrite previously used keyspace.
 
@@ -31,6 +45,25 @@ class Session:
         ------
         UseKeyspaceError
             If an error occurred when trying to use the provided keyspace.
+
+        Warnings
+        --------
+        A keyspace switch can make a prepared statement unusable.
+        The server uses the current keyspace to calculate the ID of a prepared statement.
+        The driver can prepare a statement again at any time, for example after a node restarts.
+        After a keyspace switch, the new ID can be different from the old one.
+        Then, an execution of the statement can raise `RepreparedIdChanged`.
+        To fix this, prepare the statement again.
+
+        - Do not use a prepared statement without an explicit keyspace,
+          for example `SELECT col FROM table`, if you prepared it
+          while the session used a different keyspace.
+        - ScyllaDB always uses the current keyspace to calculate the ID.
+          This is also true for a statement with an explicit keyspace,
+          for example `SELECT col FROM ks.table`. Thus, with ScyllaDB, do not use
+          any prepared statement that you prepared while the session used a different keyspace.
+          One solution is to set the keyspace once, with `SessionBuilder.use_keyspace`,
+          and not to change it.
         """
 
     def prepare(self, statement: Statement | str) -> DriverFuture[PreparedStatement]:

@@ -517,7 +517,7 @@ class RetryPolicy(Protocol):
 
     def __init__(self) -> None: ...
     def new_session(self) -> RetrySession: ...
-    """Called for each new request, starts a session of deciding about retries."""
+    """Starts a session of deciding about retries for one request."""
 
 class DefaultRetryPolicy:
     """Retries when there is a high chance that a retry might help."""

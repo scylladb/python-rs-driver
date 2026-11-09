@@ -3,7 +3,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{PyDateTime, PyTzInfo};
-use scylla_cql::value::{CqlDate, CqlDuration, CqlTime, CqlTimestamp};
+use scylla::value::{CqlDate, CqlDuration, CqlTime, CqlTimestamp};
 
 use crate::relativedelta::{Relativedelta, RelativedeltaError};
 

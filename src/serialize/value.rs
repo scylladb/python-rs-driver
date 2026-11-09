@@ -32,9 +32,9 @@ use scylla::serialize::value::{
 use scylla::serialize::writers::{CellWriter, WrittenCellProof};
 use scylla::value::{Counter, CqlDate, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
 
-use scylla_cql::serialize::value::{
-    VectorSerializationErrorKind, serialize_next_constant_length_elem_unstable,
-    serialize_next_variable_length_elem_unstable,
+use scylla::serialize::value::VectorSerializationErrorKind;
+use scylla_cql_core::serialize::value::{
+    serialize_next_constant_length_elem_unstable, serialize_next_variable_length_elem_unstable,
 };
 
 /// Wrapper around a Python value (`PyAny`) used for Python → CQL serialization.
