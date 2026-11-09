@@ -70,6 +70,9 @@ wheels=("$out"/wheel/*.whl)
 uv pip install --python "$out/venv" --no-deps --reinstall "${wheels[0]}" || die "cannot install the wheel"
 # Drop the native suite's profiles and those the build scripts just wrote.
 cargo llvm-cov clean --profraw-only || die "cargo llvm-cov clean failed"
+# That keeps the profiles merged for the native report. If the Python suite
+# then wrote no profile, the next report would reuse them without an error.
+rm -f "${CARGO_TARGET_DIR:?}"/*.profdata || die "cannot remove the merged profiles"
 export COVERAGE_FILE=$PWD/$out/python/.coverage
 uv run --no-sync coverage run -m pytest -v --junitxml="$out/pytest.xml" || failed "Python tests failed"
 if uv run --no-sync coverage combine; then

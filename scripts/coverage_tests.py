@@ -145,6 +145,16 @@ class CoverageScriptTest(unittest.TestCase):
         self.assertIn("cannot build the extension", result.stderr)
         self.assertEqual(self.calls(), SUCCESS_CALLS[:7])
 
+    def test_native_merged_profiles_are_removed_before_the_python_suite(self) -> None:
+        # cargo llvm-cov report reuses a stale .profdata when no profile was written.
+        target = self.repo / "target" / "llvm-cov-target"
+        target.mkdir(parents=True)
+        stale = target / "python-rs-driver.profdata"
+        stale.write_text("")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(stale.exists())
+
     def test_install_failure_stops(self) -> None:
         result = self.run_script(fail="uv pip install")
         self.assertEqual(result.returncode, 1)
