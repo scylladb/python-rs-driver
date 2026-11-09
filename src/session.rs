@@ -5,6 +5,7 @@ use scylla::client::session::Session;
 use scylla_cql::frame::request::query::PagingState;
 use uuid::Uuid;
 
+use crate::adapters::Adapters;
 use crate::batch::PyBatch;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::PendingRequestResult;
@@ -35,9 +36,10 @@ impl PySession {
     pub(crate) fn new(
         inner: Arc<Session>,
         default_row_factory: Option<PyRowFactory>,
+        adapters: Arc<Adapters>,
     ) -> Result<Self, PyErr> {
         Ok(Self {
-            core: SessionCore::new(inner, default_row_factory)?,
+            core: SessionCore::new(inner, default_row_factory, adapters)?,
         })
     }
 }

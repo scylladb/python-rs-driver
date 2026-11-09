@@ -16,6 +16,7 @@ use scylla::statement::{Consistency, SerialConsistency, Statement};
 use scylla_cql::frame::request::query::PagingState;
 
 use crate::RUNTIME;
+use crate::adapters::Adapters;
 use crate::batch::{BatchState, PyBatch};
 use crate::cluster::state::PyClusterState;
 use crate::core::session::{ExecutableStatement, PreparableStatement, SessionCore};
@@ -166,10 +167,11 @@ impl PyLegacySession {
     pub(crate) fn new(
         inner: Arc<Session>,
         default_row_factory: Option<PyRowFactory>,
+        adapters: Arc<Adapters>,
         uses_profiles: bool,
     ) -> Result<Self, PyErr> {
         Ok(Self {
-            core: SessionCore::new(inner, default_row_factory)?,
+            core: SessionCore::new(inner, default_row_factory, adapters)?,
             settings: Mutex::new(SessionSettings {
                 fetch_size: FetchSize::Driver,
                 mode: if uses_profiles {
