@@ -44,6 +44,9 @@ fi
 
 # Instrument the workspace crate, and keep its build apart from the normal one.
 export CARGO_TARGET_DIR=$PWD/target/llvm-cov-target
+# An inherited value would send the profiles elsewhere while the reports
+# look for them here.
+unset CARGO_LLVM_COV_TARGET_DIR
 cov_env=$(cargo llvm-cov show-env --sh --remap-path-prefix) || die "cargo llvm-cov show-env failed"
 eval "$cov_env"
 cargo llvm-cov clean --workspace || die "cargo llvm-cov clean failed"

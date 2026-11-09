@@ -39,6 +39,9 @@ done
 if [[ $call == "make test-rust" ]]; then
     echo "test result: ok. 1 passed; 0 failed"
 fi
+if [[ $call == "cargo llvm-cov show-env"* ]]; then
+    echo "${CARGO_LLVM_COV_TARGET_DIR-unset}" >> "$STUB_LOG.env"
+fi
 # The real report reuses a merged .profdata it finds: record whether one is there.
 if [[ $call == "cargo llvm-cov report"* ]]; then
     merged=(${CARGO_TARGET_DIR:-/nonexistent}/*.profdata)
@@ -94,8 +97,9 @@ class CoverageScriptTest(unittest.TestCase):
             (self.bin / tool).symlink_to(stub)
         self.log = self.tmp / "calls.log"
 
-    def run_script(self, fail: str = "") -> subprocess.CompletedProcess[str]:
+    def run_script(self, fail: str = "", **extra_env: str) -> subprocess.CompletedProcess[str]:
         env = {"PATH": str(self.bin), "STUB_LOG": str(self.log), "STUB_FAIL": fail, "HOME": str(self.tmp)}
+        env.update(extra_env)
         return subprocess.run(
             ["/usr/bin/env", "bash", "scripts/coverage.sh"],
             cwd=self.repo,
@@ -162,6 +166,12 @@ class CoverageScriptTest(unittest.TestCase):
         # Gone when the Python suite's report is made, not merely by the end.
         states = Path(f"{self.log}.profdata").read_text().splitlines()
         self.assertEqual(states, ["rust-native.lcov present", "rust-python.lcov absent"])
+
+    def test_inherited_profile_directory_is_ignored(self) -> None:
+        # cargo-llvm-cov would write the profiles there, but the reports look in the target directory.
+        result = self.run_script(CARGO_LLVM_COV_TARGET_DIR=str(self.tmp / "elsewhere"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(f"{self.log}.env").read_text().splitlines(), ["unset"])
 
     def test_install_failure_stops(self) -> None:
         result = self.run_script(fail="uv pip install")
