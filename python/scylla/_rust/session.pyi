@@ -45,6 +45,25 @@ class Session:
         ------
         UseKeyspaceError
             If an error occurred when trying to use the provided keyspace.
+
+        Warnings
+        --------
+        A keyspace switch can make a prepared statement unusable.
+        The server uses the current keyspace to calculate the ID of a prepared statement.
+        The driver can prepare a statement again at any time, for example after a node restarts.
+        After a keyspace switch, the new ID can be different from the old one.
+        Then, an execution of the statement can raise `RepreparedIdChanged`.
+        To fix this, prepare the statement again.
+
+        - Do not use a prepared statement without an explicit keyspace,
+          for example `SELECT col FROM table`, if you prepared it
+          while the session used a different keyspace.
+        - ScyllaDB always uses the current keyspace to calculate the ID.
+          This is also true for a statement with an explicit keyspace,
+          for example `SELECT col FROM ks.table`. Thus, with ScyllaDB, do not use
+          any prepared statement that you prepared while the session used a different keyspace.
+          One solution is to set the keyspace once, with `SessionBuilder.use_keyspace`,
+          and not to change it.
         """
 
     def prepare(self, statement: Statement | str) -> DriverFuture[PreparedStatement]:
