@@ -1,3 +1,4 @@
+use crate::adapters::resolved::AdapterTree;
 use crate::cql_types::{CqlEmpty, PyCqlDate, PyCqlDuration, PyCqlTime, PyCqlTimestamp};
 use crate::deserialize::conversion::CqlVarintWrapper;
 use crate::deserialize::error::DriverDeserializationError;
@@ -38,15 +39,19 @@ use std::net::IpAddr;
 // eliminating the need of rewriting DeserializeValue trait would be more beneficial
 // We could switch back to using `DeserializeValue` trait.
 pub(crate) trait PyDeserializeValue<'frame, 'metadata, 'py>: Sized {
+    /// `adapters` is the adapter tree of this value.
+    /// Only `PyDeserializedValue` applies the adapter of the value.
+    /// The other types only pass the subtrees to their children.
     fn deserialize_py(
         typ: &'metadata ColumnType<'metadata>,
         v: Option<FrameSlice<'frame>>,
         py: Python<'py>,
+        adapters: Option<&AdapterTree>,
     ) -> Result<PyDeserializedValue, DriverDeserializationError>;
 }
 
 impl PyDeserializedValue {
-    fn new(value: Bound<'_, PyAny>) -> Self {
+    pub(crate) fn new(value: Bound<'_, PyAny>) -> Self {
         Self {
             value: value.into(),
         }
@@ -91,8 +96,12 @@ impl<'frame, 'metadata, 'py> PyDeserializeValue<'frame, 'metadata, 'py> for PyDe
         typ: &'metadata ColumnType<'metadata>,
         v: Option<FrameSlice<'frame>>,
         py: Python<'py>,
+        adapters: Option<&AdapterTree>,
     ) -> Result<Self, DriverDeserializationError> {
-        deser_cql_py_value(py, typ, v)
+        match adapters {
+            None => deser_cql_py_value(py, typ, v, None),
+            Some(tree) => tree.apply(py, deser_cql_py_value(py, typ, v, Some(tree))?),
+        }
     }
 }
 
@@ -108,12 +117,14 @@ fn deserialize_sequence<'frame, 'metadata, 'py, T, FBuild>(
     typ: &'metadata ColumnType<'metadata>,
     v: FrameSlice<'frame>,
     py: Python<'py>,
+    adapters: Option<&AdapterTree>,
     mut builder: FBuild,
 ) -> Result<(), DriverDeserializationError>
 where
     T: PyDeserializeValue<'frame, 'metadata, 'py>,
     FBuild: FnMut(PyDeserializedValue) -> PyResult<()>,
 {
+    let item_adapters = adapters.and_then(AdapterTree::item);
     let list_iter =
         ListlikeIterator::<FrameSliceWithMetadata<'frame, 'metadata>>::deserialize(typ, Some(v))
             .map_err(DriverDeserializationError::scylla_decode_failed)?;
@@ -127,6 +138,7 @@ where
             raw_elem_with_metadata.column_type,
             raw_elem_with_metadata.frame_slice,
             py,
+            item_adapters,
         )
         .map_err(|e| e.in_sequence_index(i))?;
 
@@ -146,6 +158,7 @@ where
         typ: &'metadata ColumnType<'metadata>,
         v: Option<FrameSlice<'frame>>,
         py: Python<'py>,
+        adapters: Option<&AdapterTree>,
     ) -> Result<PyDeserializedValue, DriverDeserializationError> {
         let Some(v) = v else {
             return Ok(PyDeserializedValue::new(PyList::empty(py).into_any()));
@@ -153,7 +166,7 @@ where
 
         let list = PyList::empty(py);
 
-        deserialize_sequence::<T, _>(typ, v, py, |item| list.append(item))?;
+        deserialize_sequence::<T, _>(typ, v, py, adapters, |item| list.append(item))?;
 
         Ok(PyDeserializedValue::new(list.into_any()))
     }
@@ -173,6 +186,7 @@ where
         typ: &'metadata ColumnType<'metadata>,
         v: Option<FrameSlice<'frame>>,
         py: Python<'py>,
+        adapters: Option<&AdapterTree>,
     ) -> Result<PyDeserializedValue, DriverDeserializationError> {
         let Some(v) = v else {
             return Ok(PyDeserializedValue::new(PyDict::new(py).into_any()));
@@ -185,6 +199,8 @@ where
         .map_err(DriverDeserializationError::scylla_decode_failed)?;
 
         let dict = PyDict::new(py);
+        let key_adapters = adapters.and_then(AdapterTree::key);
+        let value_adapters = adapters.and_then(AdapterTree::value);
 
         for (i, kv_result) in map_iter.enumerate() {
             let (raw_key_with_metadata, raw_value_with_metadata) = kv_result
@@ -195,6 +211,7 @@ where
                 raw_key_with_metadata.column_type,
                 raw_key_with_metadata.frame_slice,
                 py,
+                key_adapters,
             )
             .map_err(|e| e.in_map_index(i))?;
 
@@ -202,6 +219,7 @@ where
                 raw_value_with_metadata.column_type,
                 raw_value_with_metadata.frame_slice,
                 py,
+                value_adapters,
             )
             .map_err(|e| e.in_map_index(i))?;
 
@@ -226,6 +244,7 @@ where
         typ: &'metadata ColumnType<'metadata>,
         v: Option<FrameSlice<'frame>>,
         py: Python<'py>,
+        adapters: Option<&AdapterTree>,
     ) -> Result<PyDeserializedValue, DriverDeserializationError> {
         let Some(v) = v else {
             return Ok(PyDeserializedValue::new(
@@ -237,7 +256,7 @@ where
 
         let set = PySet::empty(py).map_err(DriverDeserializationError::python_conversion_failed)?;
 
-        deserialize_sequence::<T, _>(typ, v, py, |item| set.add(item))?;
+        deserialize_sequence::<T, _>(typ, v, py, adapters, |item| set.add(item))?;
 
         Ok(PyDeserializedValue::new(set.into_any()))
     }
@@ -255,10 +274,12 @@ where
         typ: &'metadata ColumnType<'metadata>,
         v: Option<FrameSlice<'frame>>,
         py: Python<'py>,
+        adapters: Option<&AdapterTree>,
     ) -> Result<PyDeserializedValue, DriverDeserializationError> {
         let Some(val) = v else {
             return Ok(PyDeserializedValue::none(py));
         };
+        let item_adapters = adapters.and_then(AdapterTree::item);
 
         let vector_iterator =
             VectorIterator::<FrameSliceWithMetadata<'frame, 'metadata>>::deserialize(
@@ -277,6 +298,7 @@ where
                 raw_value_with_metadata.column_type,
                 raw_value_with_metadata.frame_slice,
                 py,
+                item_adapters,
             )
             .map_err(|e| e.in_vector_index(i))?;
 
@@ -293,6 +315,7 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
     py: Python<'py>,
     typ: &'metadata ColumnType<'metadata>,
     val: Option<FrameSlice<'frame>>,
+    adapters: Option<&AdapterTree>,
 ) -> Result<PyDeserializedValue, DriverDeserializationError> {
     if let Some(v) = val
         && v.as_slice().is_empty()
@@ -466,15 +489,17 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
         } => match col_typ {
             // CQL List → Python list
             CollectionType::List(_type_name) => {
-                List::<PyDeserializedValue>::deserialize_py(typ, val, py)?
+                List::<PyDeserializedValue>::deserialize_py(typ, val, py, adapters)?
             }
             // CQL Map → Python dict
             CollectionType::Map(_key_type, _value_type) => {
-                Map::<PyDeserializedValue, PyDeserializedValue>::deserialize_py(typ, val, py)?
+                Map::<PyDeserializedValue, PyDeserializedValue>::deserialize_py(
+                    typ, val, py, adapters,
+                )?
             }
             // CQL Set → Python set
             CollectionType::Set(_type_name) => {
-                Set::<PyDeserializedValue>::deserialize_py(typ, val, py)?
+                Set::<PyDeserializedValue>::deserialize_py(typ, val, py, adapters)?
             }
             _ => {
                 return Err(DriverDeserializationError::unsupported_type(format!(
@@ -495,13 +520,18 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
 
             let dict = PyDict::new(py);
 
-            for ((col_name, col_type), res) in iter {
+            for (i, ((col_name, col_type), res)) in iter.enumerate() {
                 let v = res
                     .map_err(DriverDeserializationError::scylla_decode_failed)
                     .map_err(|e| e.in_udt_field(col_name.clone()))?;
 
-                let val = PyDeserializedValue::deserialize_py(col_type, v.flatten(), py)
-                    .map_err(|e| e.in_udt_field(col_name.clone()))?;
+                let val = PyDeserializedValue::deserialize_py(
+                    col_type,
+                    v.flatten(),
+                    py,
+                    adapters.and_then(|tree| tree.field(i)),
+                )
+                .map_err(|e| e.in_udt_field(col_name.clone()))?;
 
                 dict.set_item(col_name.clone(), val)
                     .map_err(DriverDeserializationError::python_conversion_failed)
@@ -511,7 +541,9 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
             PyDeserializedValue::new(dict.into_any())
         }
         // CQL Vector → Python list
-        ColumnType::Vector { .. } => Vector::<PyDeserializedValue>::deserialize_py(typ, val, py)?,
+        ColumnType::Vector { .. } => {
+            Vector::<PyDeserializedValue>::deserialize_py(typ, val, py, adapters)?
+        }
         // CQL Tuple → Python tuple
         ColumnType::Tuple(type_names) => {
             let Some(mut v) = val else {
@@ -526,7 +558,14 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                     // DeserializationError → DriverDeserializationError
                     .map_err(DriverDeserializationError::scylla_decode_failed)
                     // Option<&[u8]> → PyDeserializedValue
-                    .and_then(|raw| PyDeserializedValue::deserialize_py(typ, raw, py))
+                    .and_then(|raw| {
+                        PyDeserializedValue::deserialize_py(
+                            typ,
+                            raw,
+                            py,
+                            adapters.and_then(|tree| tree.field(i)),
+                        )
+                    })
                     // Add context about which tuple index failed
                     .map_err(|e| e.in_tuple_index(i));
                 PyValueOrError::new(result)

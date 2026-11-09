@@ -15,17 +15,19 @@ use scylla_cql::frame::request::query::{PagingState, PagingStateResponse};
 use scylla_cql::serialize::row::SerializedValues;
 use uuid::Uuid;
 
+use crate::adapters::Adapters;
 use crate::batch::BatchState;
 use crate::cluster::state::PyClusterState;
 use crate::core::results::{Pager, PendingRequestResult};
 use crate::core::traces::TraceLog;
 use crate::deserialize::row_factory::PyRowFactory;
+use crate::deserialize::rows::RowReader;
 use crate::errors::execution::{
     DriverExecuteError, DriverMetadataRefreshError, DriverPrepareError, DriverSchemaAgreementError,
     DriverStatementConversionError, DriverUseKeyspaceError,
 };
 use crate::policies::load_balancing::PyTargetPolicy;
-use crate::serialize::value_list::PyValueList;
+use crate::serialize::value_list::{BoundBatchValues, BoundValues, BoundValuesRef, PyValueList};
 use crate::statement::{
     PyPreparedStatement, PyStatement, PyStatementSettings, StatementClass, StatementOptions,
 };
@@ -40,19 +42,27 @@ pub(crate) struct SessionCore {
     cluster_state: Arc<Mutex<Py<PyClusterState>>>,
     /// Row factory of the default execution profile, taken at connect time.
     default_row_factory: Option<PyRowFactory>,
+    /// Adapters for values of user types, frozen at connect time.
+    adapters: Arc<Adapters>,
 }
 
 impl SessionCore {
     pub(crate) fn new(
         inner: Arc<Session>,
         default_row_factory: Option<PyRowFactory>,
+        adapters: Arc<Adapters>,
     ) -> Result<Self, PyErr> {
-        let cluster_state =
-            Python::attach(|py| Py::new(py, PyClusterState::try_from(inner.get_cluster_state())?))?;
+        let cluster_state = Python::attach(|py| {
+            Py::new(
+                py,
+                PyClusterState::new(inner.get_cluster_state(), Arc::clone(&adapters))?,
+            )
+        })?;
         Ok(Self {
             cluster_state: Arc::new(Mutex::new(cluster_state)),
             inner,
             default_row_factory,
+            adapters,
         })
     }
 }
@@ -86,6 +96,18 @@ impl SessionCore {
             .unwrap_or(PyRowFactory::NamedTuple)
     }
 
+    /// The reader for one request: its row factory and the session's adapters.
+    fn row_reader(
+        &self,
+        explicit: Option<PyRowFactory>,
+        statement: Option<PyRowFactory>,
+    ) -> RowReader {
+        RowReader::new(
+            self.choose_row_factory(explicit, statement),
+            Arc::clone(&self.adapters),
+        )
+    }
+
     /// Executes `statement`, returning the future that performs the request.
     pub(crate) fn execute(
         self,
@@ -99,11 +121,11 @@ impl SessionCore {
         DriverExecuteError,
     > {
         let (kind, statement_factory) = statement.into_parts();
-        let effective_factory = self.choose_row_factory(explicit_factory, statement_factory);
+        let reader = self.row_reader(explicit_factory, statement_factory);
 
         let request = if paged {
             ExecutionParams::Paged {
-                prepared: Arc::new(BoundStatement::new(kind, values)?),
+                prepared: Arc::new(BoundStatement::new(kind, values, &self.adapters)?),
                 paging_state: paging_state.unwrap_or_else(PagingState::start),
             }
         } else {
@@ -112,22 +134,19 @@ impl SessionCore {
             }
 
             ExecutionParams::Unpaged {
-                prepared: BoundStatement::new(kind, values)?,
+                prepared: BoundStatement::new(kind, values, &self.adapters)?,
             }
         };
 
         Ok(async move {
             match request {
                 ExecutionParams::Unpaged { prepared } => {
-                    self.execute_unpaged(prepared, effective_factory).await
+                    self.execute_unpaged(prepared, reader).await
                 }
                 ExecutionParams::Paged {
                     prepared,
                     paging_state,
-                } => {
-                    self.execute_paged(prepared, paging_state, effective_factory)
-                        .await
-                }
+                } => self.execute_paged(prepared, paging_state, reader).await,
             }
         })
     }
@@ -161,13 +180,14 @@ impl SessionCore {
         explicit_factory: Option<PyRowFactory>,
     ) -> impl Future<Output = Result<PendingRequestResult, DriverExecuteError>> + Send + 'static
     {
-        let effective_factory =
-            self.choose_row_factory(explicit_factory, batch.options.settings.row_factory());
+        let reader = self.row_reader(explicit_factory, batch.options.settings.row_factory());
 
         async move {
+            // The driver serializes the values in this future, so they borrow its copy of the core.
+            let values = BoundBatchValues::new(batch.values, &self.adapters);
             let result = self
                 .inner
-                .batch(&batch.options.inner, batch.values)
+                .batch(&batch.options.inner, values)
                 .await
                 .map_err(DriverExecuteError::rust_driver_execution_error)?;
 
@@ -175,7 +195,7 @@ impl SessionCore {
             Ok(PendingRequestResult::new(
                 result,
                 Pager::unpaged(self.inner, traces),
-                effective_factory,
+                reader,
             ))
         }
     }
@@ -219,7 +239,7 @@ impl SessionCore {
         if !Arc::ptr_eq(&rust_current_cluster_state, python_snapshot_cluster_state) {
             *py_cluster_state = Py::new(
                 py,
-                PyClusterState::try_from(self.inner.get_cluster_state())?,
+                PyClusterState::new(self.inner.get_cluster_state(), Arc::clone(&self.adapters))?,
             )?;
         }
 
@@ -229,7 +249,7 @@ impl SessionCore {
     async fn execute_unpaged(
         self,
         prepared: BoundStatement,
-        factory: PyRowFactory,
+        reader: RowReader,
     ) -> Result<PendingRequestResult, DriverExecuteError> {
         let result = match prepared {
             BoundStatement::Prepared(p, serialized_values) => self
@@ -249,7 +269,7 @@ impl SessionCore {
         Ok(PendingRequestResult::new(
             result,
             Pager::unpaged(self.inner, traces),
-            factory,
+            reader,
         ))
     }
 
@@ -257,7 +277,7 @@ impl SessionCore {
         self,
         prepared: Arc<BoundStatement>,
         paging_state: PagingState,
-        factory: PyRowFactory,
+        reader: RowReader,
     ) -> Result<PendingRequestResult, DriverExecuteError> {
         // Already on the runtime, as `Session.execute` spawns its future there.
         let (result, paging_response) = fetch_page(
@@ -272,7 +292,7 @@ impl SessionCore {
         Ok(PendingRequestResult::new(
             result,
             Pager::paged(paging_response, self.inner, prepared, traces),
-            factory,
+            reader,
         ))
     }
 }
@@ -322,22 +342,27 @@ enum ExecutionParams {
 /// so it is done up front on the calling thread
 pub(crate) enum BoundStatement {
     Prepared(PreparedStatement, SerializedValues),
-    Unprepared(Statement, PyValueList),
+    Unprepared(Statement, BoundValues),
 }
 
 impl BoundStatement {
     pub(crate) fn new(
         statement: StatementKind,
         values: PyValueList,
+        adapters: &Arc<Adapters>,
     ) -> Result<Self, DriverExecuteError> {
         Ok(match statement {
             StatementKind::Prepared(p) => {
                 let serialized_values = p
-                    .serialize_values_unstable(&values)
+                    .serialize_values_unstable(&BoundValuesRef::new(&values, adapters))
                     .map_err(DriverExecuteError::serialization_failed)?;
                 BoundStatement::Prepared(p, serialized_values)
             }
-            StatementKind::Unprepared(q) => BoundStatement::Unprepared(q, values),
+            // The driver serializes these values in the request future, again for each page, so
+            // they keep their own clone of the adapters.
+            StatementKind::Unprepared(q) => {
+                BoundStatement::Unprepared(q, BoundValues::new(values, Arc::clone(adapters)))
+            }
         })
     }
 }

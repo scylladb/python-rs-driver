@@ -199,12 +199,12 @@ impl ResponseInner {
     /// may touch the future, so no lock is held while it runs: two threads
     /// asking at once both build, and the first to finish stores its rows.
     fn build_rows(&self, py: Python<'_>, rows: PageRows) -> Rows {
-        let (query_result, factory) = match rows {
+        let (query_result, reader) = match rows {
             PageRows::Built(rows) => return rows,
-            PageRows::ToBuild(query_result, factory) => (query_result, factory),
+            PageRows::ToBuild(query_result, reader) => (query_result, reader),
         };
 
-        let built = build_rows(py, Arc::clone(&query_result), &factory);
+        let built = build_rows(py, Arc::clone(&query_result), &reader);
         self.shared
             .lock_py_attached(py)
             .request
@@ -304,7 +304,7 @@ impl PyResponseFuture {
     /// dict one; `None` also before a page arrived.
     pub(crate) fn custom_row_factory(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         let shared = self.inner.shared.lock_py_attached(py);
-        match shared.request.last_page()?.factory() {
+        match shared.request.last_page()?.reader().factory() {
             PyRowFactory::NamedTuple | PyRowFactory::Dict | PyRowFactory::Tuple => None,
             PyRowFactory::Class(factory)
             | PyRowFactory::Deferred(factory)
@@ -418,14 +418,14 @@ impl PyResponseFuture {
     /// Starts fetching the next page; callbacks fire again when it arrives.
     /// Raises `QueryExhausted` if there is none.
     pub(crate) fn start_fetching_next_page(&self, py: Python<'_>) -> PyResult<()> {
-        let (query_pager, row_factory) = {
+        let (query_pager, reader) = {
             let mut shared = self.inner.shared.lock_py_attached(py);
             if shared.request.is_pending() {
                 return Err(ScyllaError::new_err("a request is already in flight"));
             }
-            let pager_and_factory = match shared.request.last_page() {
+            let pager_and_reader = match shared.request.last_page() {
                 Some(page) if page.pager().has_more_pages() => {
-                    (page.pager().clone(), page.factory().clone())
+                    (page.pager().clone(), page.reader().clone())
                 }
                 _ => return Err(QueryExhausted::new_err("no more pages")),
             };
@@ -433,13 +433,13 @@ impl PyResponseFuture {
             if let Some(undelivered) = shared.request.switch_to_pending(py) {
                 shared.drainer.queue(undelivered);
             }
-            pager_and_factory
+            pager_and_reader
         };
 
         let next_page = async move {
             // Already on the runtime, as the future runs there.
             query_pager
-                .fetch_next_pending_page(row_factory, TaskExecutionMode::Inline)
+                .fetch_next_pending_page(reader, TaskExecutionMode::Inline)
                 .await?
                 .ok_or_else(|| QueryExhausted::new_err("no more pages"))
         };
