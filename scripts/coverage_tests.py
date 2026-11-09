@@ -39,6 +39,12 @@ done
 if [[ $call == "make test-rust" ]]; then
     echo "test result: ok. 1 passed; 0 failed"
 fi
+# The real report reuses a merged .profdata it finds: record whether one is there.
+if [[ $call == "cargo llvm-cov report"* ]]; then
+    merged=(${CARGO_TARGET_DIR:-/nonexistent}/*.profdata)
+    [[ -e ${merged[0]} ]] && state=present || state=absent
+    echo "${args[-1]##*/} $state" >> "$STUB_LOG.profdata"
+fi
 exit 0
 """
 
@@ -153,7 +159,9 @@ class CoverageScriptTest(unittest.TestCase):
         stale.write_text("")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(stale.exists())
+        # Gone when the Python suite's report is made, not merely by the end.
+        states = Path(f"{self.log}.profdata").read_text().splitlines()
+        self.assertEqual(states, ["rust-native.lcov present", "rust-python.lcov absent"])
 
     def test_install_failure_stops(self) -> None:
         result = self.run_script(fail="uv pip install")
