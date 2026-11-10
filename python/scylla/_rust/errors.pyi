@@ -42,6 +42,18 @@ class RowSerializationError(SerializationError):
     container. The Python error is the `__cause__`.
     """
 
+class WrongNumberOfValues(RowSerializationError):
+    """Raised when the number of values is not the number of bind markers."""
+
+    expected: int
+    received: int
+
+class MissingValue(RowSerializationError):
+    """Raised when the values mapping has no value for a named bind marker."""
+
+    bind_marker: str
+    """The name of the bind marker that has no value."""
+
 class ValueSerializationError(SerializationError):
     """Raised when the driver cannot serialize one bound value."""
 

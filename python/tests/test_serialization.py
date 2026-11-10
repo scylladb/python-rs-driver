@@ -15,10 +15,13 @@ from helpers.session import connect
 from scylla.cql_types import CqlDate, CqlDuration, CqlTime, CqlTimestamp
 from scylla.errors import (
     InvalidValueSerializationError,
+    MissingValue,
+    RowSerializationError,
     SerializationError,
     TypeMismatchSerializationError,
     ValueOverflowSerializationError,
     ValueSerializationError,
+    WrongNumberOfValues,
 )
 from scylla.session import Session
 
@@ -821,6 +824,32 @@ async def test_set_serialization_rejects_dict(
         )
 
     assert exc_info.value.bind_marker == "tags"
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_serialization_rejects_wrong_number_of_values(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, col int", "wrong_value_count")
+
+    with pytest.raises(WrongNumberOfValues) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1,))
+
+    assert isinstance(exc_info.value, RowSerializationError)
+    assert isinstance(exc_info.value, SerializationError)
+    assert exc_info.value.expected == 2
+    assert exc_info.value.received == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_serialization_rejects_missing_named_value(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, col int", "missing_named_value")
+
+    with pytest.raises(MissingValue) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, col) VALUES (:id, :col)", {"id": 1, "other": 2})
+
+    assert isinstance(exc_info.value, RowSerializationError)
+    assert exc_info.value.bind_marker == "col"
 
 
 @pytest.mark.asyncio

@@ -3,9 +3,10 @@ use std::fmt;
 use pyo3::prelude::*;
 
 use crate::errors::{
-    InvalidValueSerializationError, PySerializationFailedError, RowSerializationError,
-    SerializeFailedError, ToPyAttr, TypeMismatchSerializationError,
-    UnsupportedTypeSerializationError, ValueOverflowSerializationError, py_err, with_cause,
+    InvalidValueSerializationError, MissingValue, PySerializationFailedError,
+    RowSerializationError, SerializeFailedError, ToPyAttr, TypeMismatchSerializationError,
+    UnsupportedTypeSerializationError, ValueOverflowSerializationError, WrongNumberOfValues,
+    py_err, with_cause,
 };
 
 /// Errors that can occur while serializing the values of one statement as a row.
@@ -120,8 +121,12 @@ impl DriverRowSerializationError {
     /// Builds the Python exception by reference, since the error may be reachable only through a shared Rust driver error.
     fn to_pyerr(&self, py: Python<'_>, message: String) -> PyErr {
         match self {
-            Self::WrongNumberOfValues { .. } | Self::MissingValue { .. } => {
-                py_err!(RowSerializationError, message)
+            Self::WrongNumberOfValues { expected, received } => {
+                py_err!(py, WrongNumberOfValues, message; expected, received)
+            }
+            Self::MissingValue { bind_marker } => {
+                let bind_marker: &str = bind_marker;
+                py_err!(py, MissingValue, message; bind_marker)
             }
             Self::PythonInteropFailed { source } => with_cause(
                 py_err!(RowSerializationError, message),

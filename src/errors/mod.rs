@@ -48,6 +48,8 @@ create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
 create_exception!(scylla.errors, SerializationError, BadQuery);
 
 create_exception!(scylla.errors, RowSerializationError, SerializationError);
+create_exception!(scylla.errors, WrongNumberOfValues, RowSerializationError);
+create_exception!(scylla.errors, MissingValue, RowSerializationError);
 
 create_exception!(scylla.errors, ValueSerializationError, SerializationError);
 create_exception!(
@@ -315,6 +317,8 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "RowSerializationError",
         py.get_type::<RowSerializationError>(),
     )?;
+    module.add("WrongNumberOfValues", py.get_type::<WrongNumberOfValues>())?;
+    module.add("MissingValue", py.get_type::<MissingValue>())?;
     module.add(
         "ValueSerializationError",
         py.get_type::<ValueSerializationError>(),

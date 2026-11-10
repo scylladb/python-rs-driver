@@ -27,6 +27,7 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     LoadBalancingPolicyError,
     MetadataError,
     MetadataRefreshError,
+    MissingValue,
     NodeDisabledByHostFilter,
     NoHostAvailable,
     NonfinishedPagingState,
@@ -84,6 +85,7 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     ValuesTooLongForKey,
     WriteFailure,
     WriteTimeout,
+    WrongNumberOfValues,
 )
 
 __all__ = [
@@ -115,6 +117,7 @@ __all__ = [
     "LoadBalancingPolicyError",
     "MetadataError",
     "MetadataRefreshError",
+    "MissingValue",
     "NoHostAvailable",
     "NodeDisabledByHostFilter",
     "NonfinishedPagingState",
@@ -172,4 +175,5 @@ __all__ = [
     "ValuesTooLongForKey",
     "WriteFailure",
     "WriteTimeout",
+    "WrongNumberOfValues",
 ]
