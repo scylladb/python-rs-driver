@@ -1,4 +1,6 @@
-use crate::serialize::error::DriverSerializationError;
+use crate::serialize::error::{
+    BindMarker, DriverRowSerializationError, DriverValueSerializationError,
+};
 
 use std::any::Any;
 
@@ -131,19 +133,21 @@ fn serialize_sequence<'py>(
 ) -> Result<(), SerializationError> {
     let len = value_list
         .len()
-        .map_err(DriverSerializationError::python_interop_failed)?;
+        .map_err(DriverRowSerializationError::python_interop_failed)?;
 
     length_equality_check::<PySequence>(len, ctx.columns().len())?;
 
     let iter = value_list
         .try_iter()
-        .map_err(DriverSerializationError::python_interop_failed)?;
+        .map_err(DriverRowSerializationError::python_interop_failed)?;
 
     for (index, (col, val)) in ctx.columns().iter().zip(iter).enumerate() {
-        let val = val.map_err(DriverSerializationError::python_interop_failed)?;
-        serialize_element(col, &val, row_writer).map_err(|err| {
-            DriverSerializationError::scylla_serialize_failed(err).at_bind_marker_index(index)
+        let value_failed =
+            |err| DriverRowSerializationError::value_failed(BindMarker::Index(index), err);
+        let val = val.map_err(|e| {
+            value_failed(DriverValueSerializationError::python_interop_failed(e).into())
         })?;
+        serialize_element(col, &val, row_writer).map_err(value_failed)?;
     }
 
     Ok(())
@@ -157,10 +161,13 @@ fn serialize_mapping<'py>(
     let py = value_list.py();
     let dict_len = value_list
         .len()
-        .map_err(DriverSerializationError::python_interop_failed)?;
+        .map_err(DriverRowSerializationError::python_interop_failed)?;
     length_equality_check::<PyMapping>(dict_len, ctx.columns().len())?;
 
     for col in ctx.columns().iter() {
+        let value_failed = |err| {
+            DriverRowSerializationError::value_failed(BindMarker::Name(col.name().into()), err)
+        };
         let item: Bound<PyAny> = value_list.get_item(col.name()).map_err(|e| {
             if e.is_instance_of::<PyKeyError>(py) {
                 mk_typck_err_val_list::<PyMapping>(
@@ -169,12 +176,10 @@ fn serialize_mapping<'py>(
                     },
                 )
             } else {
-                SerializationError::new(DriverSerializationError::python_interop_failed(e))
+                value_failed(DriverValueSerializationError::python_interop_failed(e).into()).into()
             }
         })?;
-        serialize_element(col, &item, row_writer).map_err(|err| {
-            DriverSerializationError::scylla_serialize_failed(err).at_bind_marker_name(col.name())
-        })?;
+        serialize_element(col, &item, row_writer).map_err(value_failed)?;
     }
 
     Ok(())
