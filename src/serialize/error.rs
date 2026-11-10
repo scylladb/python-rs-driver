@@ -224,11 +224,9 @@ fn builtin_value_error_to_pyerr(
     bind_marker: Option<&BindMarker>,
 ) -> PyErr {
     match kind {
-        BuiltinSerializationErrorKind::ValueOverflow => {
+        BuiltinSerializationErrorKind::ValueOverflow
+        | BuiltinSerializationErrorKind::SizeOverflow => {
             py_err!(py, ValueOverflowSerializationError, message; bind_marker)
-        }
-        BuiltinSerializationErrorKind::SizeOverflow => {
-            py_err!(py, SerializeFailedError, message; bind_marker)
         }
         BuiltinSerializationErrorKind::SetOrListError(e) => {
             set_or_list_error_to_pyerr(e, py, message, bind_marker)
@@ -258,7 +256,7 @@ fn set_or_list_error_to_pyerr(
 ) -> PyErr {
     match kind {
         SetOrListSerializationErrorKind::TooManyElements => {
-            py_err!(py, SerializeFailedError, message; bind_marker)
+            py_err!(py, ValueOverflowSerializationError, message; bind_marker)
         }
         SetOrListSerializationErrorKind::ElementSerializationFailed(inner) => {
             value_error_to_pyerr(inner, py, message, bind_marker)
@@ -294,7 +292,7 @@ fn map_error_to_pyerr(
 ) -> PyErr {
     match kind {
         MapSerializationErrorKind::TooManyElements => {
-            py_err!(py, SerializeFailedError, message; bind_marker)
+            py_err!(py, ValueOverflowSerializationError, message; bind_marker)
         }
         MapSerializationErrorKind::KeySerializationFailed(inner)
         | MapSerializationErrorKind::ValueSerializationFailed(inner) => {
