@@ -1,11 +1,11 @@
 use std::fmt;
 
-use pyo3::intern;
 use pyo3::prelude::*;
 
 use crate::errors::{
-    PySerializationFailedError, TypeMismatchSerializationError, UnsupportedTypeSerializationError,
-    ValueOverflowSerializationError, ValueSerializationError,
+    InvalidValueSerializationError, PySerializationFailedError, RowSerializationError,
+    SerializeFailedError, ToPyAttr, TypeMismatchSerializationError,
+    UnsupportedTypeSerializationError, ValueOverflowSerializationError, py_err, with_cause,
 };
 
 /// Errors that can occur while serializing the values of one statement as a row.
@@ -19,7 +19,7 @@ pub(crate) enum DriverRowSerializationError {
     #[error("Missing value (bind_marker={bind_marker})")]
     MissingValue { bind_marker: Box<str> },
     /// Python code failed while it read the values container.
-    #[error("Python interop failed: {source}")]
+    #[error("Python serialization failed")]
     PythonInteropFailed { source: Box<PyErr> },
     /// The value for one bind marker failed to serialize.
     #[error("{source} ({bind_marker})")]
@@ -46,7 +46,7 @@ pub(crate) enum DriverValueSerializationError {
     #[error("All duration fields must have the same sign")]
     MixedSignDuration,
     /// An error occurred while interacting with Python objects during serialization.
-    #[error("Python interop failed: {source}")]
+    #[error("Python serialization failed")]
     PythonInteropFailed { source: Box<PyErr> },
 }
 
@@ -116,6 +116,23 @@ impl DriverRowSerializationError {
             source: source.into(),
         }
     }
+
+    /// Builds the Python exception by reference, since the error may be reachable only through a shared Rust driver error.
+    fn to_pyerr(&self, py: Python<'_>, message: String) -> PyErr {
+        match self {
+            Self::WrongNumberOfValues { .. } | Self::MissingValue { .. } => {
+                py_err!(RowSerializationError, message)
+            }
+            Self::PythonInteropFailed { source } => with_cause(
+                py_err!(RowSerializationError, message),
+                source.clone_ref(py),
+            ),
+            Self::ValueFailed {
+                bind_marker,
+                source,
+            } => value_error_to_pyerr(source, py, message, Some(bind_marker)),
+        }
+    }
 }
 
 impl DriverValueSerializationError {
@@ -142,39 +159,68 @@ impl DriverValueSerializationError {
             source: Box::new(source),
         }
     }
+
+    fn to_pyerr(&self, py: Python<'_>, message: String, bind_marker: Option<&BindMarker>) -> PyErr {
+        match self {
+            Self::UnsupportedType { .. } => {
+                py_err!(py, UnsupportedTypeSerializationError, message; bind_marker)
+            }
+            Self::TypeMismatch { .. } => {
+                py_err!(py, TypeMismatchSerializationError, message; bind_marker)
+            }
+            Self::ValueOverflow => {
+                py_err!(py, ValueOverflowSerializationError, message; bind_marker)
+            }
+            Self::MixedSignDuration => {
+                py_err!(py, InvalidValueSerializationError, message; bind_marker)
+            }
+            Self::PythonInteropFailed { source } => with_cause(
+                py_err!(py, PySerializationFailedError, message; bind_marker),
+                source.clone_ref(py),
+            ),
+        }
+    }
+}
+
+/// Maps a failure of one value.
+fn value_error_to_pyerr(
+    err: &scylla::serialize::SerializationError,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    if let Some(e) = err.downcast_ref::<DriverValueSerializationError>() {
+        return e.to_pyerr(py, message, bind_marker);
+    }
+    py_err!(py, SerializeFailedError, message; bind_marker)
+}
+
+impl ToPyAttr for BindMarker {
+    fn to_py_attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match self {
+            BindMarker::Index(index) => index.to_py_attr(py),
+            BindMarker::Name(name) => name.to_py_attr(py),
+        }
+    }
 }
 
 impl From<DriverValueSerializationError> for PyErr {
     fn from(e: DriverValueSerializationError) -> PyErr {
-        let message = e.to_string();
-        let (err, cause) = match e {
-            DriverValueSerializationError::UnsupportedType { .. } => {
-                (UnsupportedTypeSerializationError::new_err(message), None)
-            }
-            DriverValueSerializationError::TypeMismatch { .. } => {
-                (TypeMismatchSerializationError::new_err(message), None)
-            }
-            DriverValueSerializationError::ValueOverflow => {
-                (ValueOverflowSerializationError::new_err(message), None)
-            }
-            DriverValueSerializationError::MixedSignDuration => {
-                (ValueSerializationError::new_err(message), None)
-            }
-            DriverValueSerializationError::PythonInteropFailed { source } => {
-                (PySerializationFailedError::new_err(message), Some(*source))
-            }
-        };
-
-        Python::attach(|py| {
-            if let Some(cause) = cause {
-                err.set_cause(py, Some(cause));
-            }
-
-            let _ = err.value(py).setattr(intern!(py, "bind_marker"), py.None());
-        });
-
-        err
+        Python::attach(|py| e.to_pyerr(py, e.to_string(), None))
     }
+}
+
+/// Maps a Rust driver serialization error, recovering our own row or value error from
+/// inside it; `message` is the full description including the failed operation.
+pub(crate) fn serialization_error_to_pyerr(
+    py: Python<'_>,
+    err: &scylla::serialize::SerializationError,
+    message: String,
+) -> PyErr {
+    if let Some(e) = err.downcast_ref::<DriverRowSerializationError>() {
+        return e.to_pyerr(py, message);
+    }
+    value_error_to_pyerr(err, py, message, None)
 }
 
 impl From<DriverRowSerializationError> for scylla::serialize::SerializationError {

@@ -12,6 +12,7 @@ pub(crate) mod execution;
 pub(crate) mod request;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
+pub(crate) use macros::py_err;
 
 /* Python exception classes */
 
@@ -63,6 +64,11 @@ create_exception_multi!(
     scylla.errors,
     ValueOverflowSerializationError,
     (ValueSerializationError, PyOverflowError)
+);
+create_exception_multi!(
+    scylla.errors,
+    InvalidValueSerializationError,
+    (ValueSerializationError, PyValueError)
 );
 create_exception!(scylla.errors, SerializeFailedError, ValueSerializationError);
 create_exception!(
@@ -324,6 +330,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add(
         "ValueOverflowSerializationError",
         py.get_type::<ValueOverflowSerializationError>(),
+    )?;
+    module.add(
+        "InvalidValueSerializationError",
+        py.get_type::<InvalidValueSerializationError>(),
     )?;
     module.add(
         "SerializeFailedError",

@@ -36,7 +36,11 @@ class SerializationError(BadQuery):
     """Raised when the driver cannot serialize the bound values of a statement."""
 
 class RowSerializationError(SerializationError):
-    """Raised when the bound values do not match the bind markers of the statement."""
+    """Raised when the bound values do not match the bind markers of the statement.
+
+    Raised as this class itself when the driver cannot read the values
+    container. The Python error is the `__cause__`.
+    """
 
 class ValueSerializationError(SerializationError):
     """Raised when the driver cannot serialize one bound value."""
@@ -52,6 +56,7 @@ class ValueSerializationError(SerializationError):
 class UnsupportedTypeSerializationError(ValueSerializationError): ...
 class TypeMismatchSerializationError(ValueSerializationError, TypeError): ...
 class ValueOverflowSerializationError(ValueSerializationError, OverflowError): ...
+class InvalidValueSerializationError(ValueSerializationError, ValueError): ...
 class SerializeFailedError(ValueSerializationError): ...
 class PySerializationFailedError(ValueSerializationError): ...
 
