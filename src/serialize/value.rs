@@ -27,7 +27,8 @@ use scylla::serialize::SerializationError;
 use scylla::serialize::value::{
     BuiltinSerializationError, BuiltinSerializationErrorKind, BuiltinTypeCheckError,
     BuiltinTypeCheckErrorKind, MapSerializationErrorKind, SerializeValue,
-    SetOrListSerializationErrorKind, UdtTypeCheckErrorKind,
+    SetOrListSerializationErrorKind, TupleSerializationErrorKind, UdtSerializationErrorKind,
+    UdtTypeCheckErrorKind,
 };
 use scylla::serialize::writers::{CellWriter, WrittenCellProof};
 use scylla::value::{Counter, CqlDate, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
@@ -712,7 +713,16 @@ impl<'py> SerializeValue for PyUdtWrapper<'py, '_> {
                 })?;
 
             PyAnyWrapper::new(&item)
-                .serialize_arbitrary_value(field_type, builder.make_sub_writer())?;
+                .serialize_arbitrary_value(field_type, builder.make_sub_writer())
+                .map_err(|err| {
+                    mk_ser_err::<PyDict>(
+                        typ,
+                        UdtSerializationErrorKind::FieldSerializationFailed {
+                            field_name: field_name.to_string(),
+                            err,
+                        },
+                    )
+                })?;
         }
 
         builder
@@ -768,9 +778,15 @@ impl<'py, 'a> SerializeValue for PyTupleWrapper<'py, 'a> {
 
         let mut builder = cell_writer.into_value_builder();
 
-        for (val, element_type) in self.inner.iter().zip(self.elements_types) {
+        for (index, (val, element_type)) in self.inner.iter().zip(self.elements_types).enumerate() {
             PyAnyWrapper::new(&val)
-                .serialize_arbitrary_value(element_type, builder.make_sub_writer())?;
+                .serialize_arbitrary_value(element_type, builder.make_sub_writer())
+                .map_err(|err| {
+                    mk_ser_err::<PyTuple>(
+                        typ,
+                        TupleSerializationErrorKind::ElementSerializationFailed { index, err },
+                    )
+                })?;
         }
 
         builder
