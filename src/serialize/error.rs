@@ -4,8 +4,8 @@ use pyo3::intern;
 use pyo3::prelude::*;
 
 use crate::errors::{
-    PySerializationFailedError, SerializationError, TypeMismatchSerializationError,
-    UnsupportedTypeSerializationError, ValueOverflowSerializationError,
+    PySerializationFailedError, TypeMismatchSerializationError, UnsupportedTypeSerializationError,
+    ValueOverflowSerializationError, ValueSerializationError,
 };
 
 /// Errors that can occur while serializing the values of one statement as a row.
@@ -158,7 +158,7 @@ impl From<DriverValueSerializationError> for PyErr {
                 (ValueOverflowSerializationError::new_err(message), None)
             }
             DriverValueSerializationError::MixedSignDuration => {
-                (SerializationError::new_err(message), None)
+                (ValueSerializationError::new_err(message), None)
             }
             DriverValueSerializationError::PythonInteropFailed { source } => {
                 (PySerializationFailedError::new_err(message), Some(*source))
