@@ -227,32 +227,108 @@ fn builtin_value_error_to_pyerr(
         BuiltinSerializationErrorKind::ValueOverflow => {
             py_err!(py, ValueOverflowSerializationError, message; bind_marker)
         }
-        BuiltinSerializationErrorKind::VectorError(
-            VectorSerializationErrorKind::InvalidNumberOfElements(..),
-        ) => py_err!(py, InvalidValueSerializationError, message; bind_marker),
-        BuiltinSerializationErrorKind::SetOrListError(
-            SetOrListSerializationErrorKind::ElementSerializationFailed(inner),
-        )
-        | BuiltinSerializationErrorKind::VectorError(
-            VectorSerializationErrorKind::ElementSerializationFailed(inner),
-        )
-        | BuiltinSerializationErrorKind::MapError(
-            MapSerializationErrorKind::KeySerializationFailed(inner)
-            | MapSerializationErrorKind::ValueSerializationFailed(inner),
-        )
-        | BuiltinSerializationErrorKind::TupleError(
-            TupleSerializationErrorKind::ElementSerializationFailed { err: inner, .. },
-        )
-        | BuiltinSerializationErrorKind::UdtError(
-            UdtSerializationErrorKind::FieldSerializationFailed { err: inner, .. },
-        ) => value_error_to_pyerr(inner, py, message, bind_marker),
-        BuiltinSerializationErrorKind::SizeOverflow
-        | BuiltinSerializationErrorKind::SetOrListError(_)
-        | BuiltinSerializationErrorKind::VectorError(_)
-        | BuiltinSerializationErrorKind::MapError(_)
-        | BuiltinSerializationErrorKind::TupleError(_)
-        | BuiltinSerializationErrorKind::UdtError(_) => {
+        BuiltinSerializationErrorKind::SizeOverflow => {
             py_err!(py, SerializeFailedError, message; bind_marker)
+        }
+        BuiltinSerializationErrorKind::SetOrListError(e) => {
+            set_or_list_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::VectorError(e) => {
+            vector_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::MapError(e) => {
+            map_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::TupleError(e) => {
+            tuple_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::UdtError(e) => {
+            udt_error_to_pyerr(e, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn set_or_list_error_to_pyerr(
+    kind: &SetOrListSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        SetOrListSerializationErrorKind::TooManyElements => {
+            py_err!(py, SerializeFailedError, message; bind_marker)
+        }
+        SetOrListSerializationErrorKind::ElementSerializationFailed(inner) => {
+            value_error_to_pyerr(inner, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn vector_error_to_pyerr(
+    kind: &VectorSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        VectorSerializationErrorKind::InvalidNumberOfElements(..) => {
+            py_err!(py, InvalidValueSerializationError, message; bind_marker)
+        }
+        VectorSerializationErrorKind::ElementSerializationFailed(inner) => {
+            value_error_to_pyerr(inner, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn map_error_to_pyerr(
+    kind: &MapSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        MapSerializationErrorKind::TooManyElements => {
+            py_err!(py, SerializeFailedError, message; bind_marker)
+        }
+        MapSerializationErrorKind::KeySerializationFailed(inner)
+        | MapSerializationErrorKind::ValueSerializationFailed(inner) => {
+            value_error_to_pyerr(inner, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn tuple_error_to_pyerr(
+    kind: &TupleSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        TupleSerializationErrorKind::ElementSerializationFailed { err, .. } => {
+            value_error_to_pyerr(err, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn udt_error_to_pyerr(
+    kind: &UdtSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        UdtSerializationErrorKind::FieldSerializationFailed { err, .. } => {
+            value_error_to_pyerr(err, py, message, bind_marker)
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
