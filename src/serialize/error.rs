@@ -12,6 +12,12 @@ use crate::errors::{
 #[derive(Debug, thiserror::Error)]
 #[must_use]
 pub(crate) enum DriverRowSerializationError {
+    /// The number of values is not the number of bind markers.
+    #[error("Wrong number of values: expected {expected}, got {received}")]
+    WrongNumberOfValues { expected: usize, received: usize },
+    /// The mapping has no value for a named bind marker.
+    #[error("Missing value (bind_marker={bind_marker})")]
+    MissingValue { bind_marker: Box<str> },
     /// Python code failed while it read the values container.
     #[error("Python interop failed: {source}")]
     PythonInteropFailed { source: Box<PyErr> },
@@ -84,6 +90,16 @@ impl fmt::Display for BindMarker {
 
 impl DriverRowSerializationError {
     /* Constructors */
+
+    pub(crate) fn wrong_number_of_values(expected: usize, received: usize) -> Self {
+        Self::WrongNumberOfValues { expected, received }
+    }
+
+    pub(crate) fn missing_value(bind_marker: impl Into<Box<str>>) -> Self {
+        Self::MissingValue {
+            bind_marker: bind_marker.into(),
+        }
+    }
 
     pub(crate) fn python_interop_failed(source: PyErr) -> Self {
         Self::PythonInteropFailed {
