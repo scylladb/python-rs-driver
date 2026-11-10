@@ -1,6 +1,13 @@
 use std::fmt;
 
 use pyo3::prelude::*;
+use scylla::serialize::value::{
+    BuiltinSerializationError, BuiltinSerializationErrorKind,
+    BuiltinTypeCheckError as ValueTypeCheckError, MapSerializationErrorKind,
+    SetOrListSerializationErrorKind, TupleSerializationErrorKind, UdtSerializationErrorKind,
+    VectorSerializationErrorKind,
+};
+use scylla::value::ValueOverflow;
 
 use crate::errors::{
     InvalidValueSerializationError, MissingValue, PySerializationFailedError,
@@ -187,7 +194,7 @@ impl DriverValueSerializationError {
     }
 }
 
-/// Maps a failure of one value.
+/// Maps a failure of one value, following collection element errors down to the innermost cause.
 fn value_error_to_pyerr(
     err: &scylla::serialize::SerializationError,
     py: Python<'_>,
@@ -197,7 +204,58 @@ fn value_error_to_pyerr(
     if let Some(e) = err.downcast_ref::<DriverValueSerializationError>() {
         return e.to_pyerr(py, message, bind_marker);
     }
+    if err.downcast_ref::<ValueTypeCheckError>().is_some() {
+        return py_err!(py, TypeMismatchSerializationError, message; bind_marker);
+    }
+    if err.downcast_ref::<ValueOverflow>().is_some() {
+        return py_err!(py, ValueOverflowSerializationError, message; bind_marker);
+    }
+    if let Some(e) = err.downcast_ref::<BuiltinSerializationError>() {
+        return builtin_value_error_to_pyerr(&e.kind, py, message, bind_marker);
+    }
     py_err!(py, SerializeFailedError, message; bind_marker)
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn builtin_value_error_to_pyerr(
+    kind: &BuiltinSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        BuiltinSerializationErrorKind::ValueOverflow => {
+            py_err!(py, ValueOverflowSerializationError, message; bind_marker)
+        }
+        BuiltinSerializationErrorKind::VectorError(
+            VectorSerializationErrorKind::InvalidNumberOfElements(..),
+        ) => py_err!(py, InvalidValueSerializationError, message; bind_marker),
+        BuiltinSerializationErrorKind::SetOrListError(
+            SetOrListSerializationErrorKind::ElementSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::VectorError(
+            VectorSerializationErrorKind::ElementSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::MapError(
+            MapSerializationErrorKind::KeySerializationFailed(inner)
+            | MapSerializationErrorKind::ValueSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::TupleError(
+            TupleSerializationErrorKind::ElementSerializationFailed { err: inner, .. },
+        )
+        | BuiltinSerializationErrorKind::UdtError(
+            UdtSerializationErrorKind::FieldSerializationFailed { err: inner, .. },
+        ) => value_error_to_pyerr(inner, py, message, bind_marker),
+        BuiltinSerializationErrorKind::SizeOverflow
+        | BuiltinSerializationErrorKind::SetOrListError(_)
+        | BuiltinSerializationErrorKind::VectorError(_)
+        | BuiltinSerializationErrorKind::MapError(_)
+        | BuiltinSerializationErrorKind::TupleError(_)
+        | BuiltinSerializationErrorKind::UdtError(_) => {
+            py_err!(py, SerializeFailedError, message; bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
 }
 
 impl ToPyAttr for BindMarker {

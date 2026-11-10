@@ -867,6 +867,17 @@ async def test_serialization_rejects_wrong_value_type(session: Session, table_fa
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+async def test_serialization_rejects_wrong_element_type(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, col list<int>", "wrong_element_type")
+
+    with pytest.raises(TypeMismatchSerializationError) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, col) VALUES (?, ?)", (1, [1, "x"]))
+
+    assert exc_info.value.bind_marker == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_vector_list_serialization(session: Session, table_factory: TableFactory):
     table = await table_factory(
         "id int PRIMARY KEY, embedding vector<int, 4>",
@@ -891,6 +902,20 @@ async def test_vector_serialization_tuple(session: Session, table_factory: Table
 
     await session.execute(f"INSERT INTO {table} (id, embedding) VALUES (?, ?)", (1, vector))
     await session.execute(f"SELECT * from {table}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_vector_serialization_rejects_wrong_dimension(session: Session, table_factory: TableFactory):
+    table = await table_factory(
+        "id int PRIMARY KEY, embedding vector<int, 4>",
+        "vector_wrong_dimension_table",
+    )
+
+    with pytest.raises(InvalidValueSerializationError) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, embedding) VALUES (?, ?)", (1, [1, 2, 3]))
+
+    assert exc_info.value.bind_marker == 1
 
 
 @pytest.mark.asyncio
