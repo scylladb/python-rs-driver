@@ -1,25 +1,46 @@
-use std::error::Error;
 use std::fmt;
 
-use pyo3::intern;
 use pyo3::prelude::*;
+use scylla::serialize::value::{
+    BuiltinSerializationError, BuiltinSerializationErrorKind,
+    BuiltinTypeCheckError as ValueTypeCheckError, MapSerializationErrorKind,
+    SetOrListSerializationErrorKind, TupleSerializationErrorKind, UdtSerializationErrorKind,
+    VectorSerializationErrorKind,
+};
+use scylla::value::ValueOverflow;
 
 use crate::errors::{
-    PySerializationFailedError, SerializationError, SerializeFailedError,
-    TypeMismatchSerializationError, UnsupportedTypeSerializationError,
-    ValueOverflowSerializationError,
+    InvalidValueSerializationError, MissingValue, PySerializationFailedError,
+    RowSerializationError, SerializeFailedError, ToPyAttr, TypeMismatchSerializationError,
+    UnsupportedTypeSerializationError, ValueOverflowSerializationError, WrongNumberOfValues,
+    py_err, with_cause,
 };
 
-/// Errors that can occur during serialization of Python values into CQL values.
-#[derive(Debug)]
+/// Errors that can occur while serializing the values of one statement as a row.
+#[derive(Debug, thiserror::Error)]
 #[must_use]
-pub(crate) struct DriverSerializationError {
-    pub kind: SerializationErrorKind,
-    pub location: Option<ParameterReference>,
+pub(crate) enum DriverRowSerializationError {
+    /// The number of values is not the number of bind markers.
+    #[error("Wrong number of values: expected {expected}, got {received}")]
+    WrongNumberOfValues { expected: usize, received: usize },
+    /// The mapping has no value for a named bind marker.
+    #[error("Missing value (bind_marker={bind_marker})")]
+    MissingValue { bind_marker: Box<str> },
+    /// Python code failed while it read the values container.
+    #[error("Python serialization failed")]
+    PythonInteropFailed { source: Box<PyErr> },
+    /// The value for one bind marker failed to serialize.
+    #[error("{source} ({bind_marker})")]
+    ValueFailed {
+        bind_marker: BindMarker,
+        source: scylla::serialize::SerializationError,
+    },
 }
 
+/// Errors that can occur during serialization of one Python value into a CQL value.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum SerializationErrorKind {
+#[must_use]
+pub(crate) enum DriverValueSerializationError {
     /// Represents a segment in the path to the value that failed to serialize.
     #[error("Unsupported CQL type: {cql}")]
     UnsupportedType { cql: Box<str> },
@@ -33,21 +54,14 @@ pub(crate) enum SerializationErrorKind {
     #[error("All duration fields must have the same sign")]
     MixedSignDuration,
     /// An error occurred while interacting with Python objects during serialization.
-    #[error("Python interop failed: {source}")]
+    #[error("Python serialization failed")]
     PythonInteropFailed { source: Box<PyErr> },
-    /// An error occurred in the Rust driver's serialization layer.
-    #[error("{source}")]
-    ScyllaSerializeFailed {
-        source: scylla::serialize::SerializationError,
-    },
 }
 
-/// References a parameter that failed to serialize, either by index or by name.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum ParameterReference {
-    #[error("parameter_index={0}")]
+/// Identifies the bind marker of a value, by position or by name.
+#[derive(Debug)]
+pub(crate) enum BindMarker {
     Index(usize),
-    #[error("parameter={0}")]
     Name(Box<str>),
 }
 
@@ -73,127 +87,213 @@ pub(crate) enum TypeExpected {
     Udt,
 }
 
-impl fmt::Display for DriverSerializationError {
+impl fmt::Display for BindMarker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind)?;
-        if let Some(location) = &self.location {
-            write!(f, " ({location})")?;
+        match self {
+            BindMarker::Index(index) => write!(f, "bind_marker={index}"),
+            BindMarker::Name(name) => write!(f, "bind_marker={name}"),
         }
-        Ok(())
     }
 }
 
-impl Error for DriverSerializationError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.kind.source()
-    }
-}
-
-impl DriverSerializationError {
+impl DriverRowSerializationError {
     /* Constructors */
 
-    pub(crate) fn unsupported_type(cql: impl Into<Box<str>>) -> Self {
-        Self {
-            kind: SerializationErrorKind::UnsupportedType { cql: cql.into() },
-            location: None,
-        }
+    pub(crate) fn wrong_number_of_values(expected: usize, received: usize) -> Self {
+        Self::WrongNumberOfValues { expected, received }
     }
 
-    pub(crate) fn type_mismatch(expected: TypeExpected) -> Self {
-        Self {
-            kind: SerializationErrorKind::TypeMismatch { expected },
-            location: None,
-        }
-    }
-
-    pub(crate) fn value_overflow() -> Self {
-        Self {
-            kind: SerializationErrorKind::ValueOverflow,
-            location: None,
-        }
-    }
-
-    pub(crate) fn mixed_sign_duration() -> Self {
-        Self {
-            kind: SerializationErrorKind::MixedSignDuration,
-            location: None,
-        }
-    }
-
-    pub(crate) fn scylla_serialize_failed(source: scylla::serialize::SerializationError) -> Self {
-        Self {
-            kind: SerializationErrorKind::ScyllaSerializeFailed { source },
-            location: None,
+    pub(crate) fn missing_value(bind_marker: impl Into<Box<str>>) -> Self {
+        Self::MissingValue {
+            bind_marker: bind_marker.into(),
         }
     }
 
     pub(crate) fn python_interop_failed(source: PyErr) -> Self {
-        Self {
-            kind: SerializationErrorKind::PythonInteropFailed {
-                source: Box::new(source),
-            },
-            location: None,
+        Self::PythonInteropFailed {
+            source: Box::new(source),
         }
     }
 
-    /* Top-level location setters */
-
-    pub(crate) fn at_parameter_index(mut self, index: usize) -> Self {
-        self.location = Some(ParameterReference::Index(index));
-        self
+    pub(crate) fn value_failed(
+        bind_marker: BindMarker,
+        source: impl Into<scylla::serialize::SerializationError>,
+    ) -> Self {
+        Self::ValueFailed {
+            bind_marker,
+            source: source.into(),
+        }
     }
 
-    pub(crate) fn at_parameter_name(mut self, name: impl Into<Box<str>>) -> Self {
-        self.location = Some(ParameterReference::Name(name.into()));
-        self
-    }
-}
-
-impl From<DriverSerializationError> for PyErr {
-    fn from(e: DriverSerializationError) -> PyErr {
-        let message = e.to_string();
-        let (err, cause) = match e.kind {
-            SerializationErrorKind::UnsupportedType { .. } => {
-                (UnsupportedTypeSerializationError::new_err(message), None)
+    /// Builds the Python exception by reference, since the error may be reachable only through a shared Rust driver error.
+    fn to_pyerr(&self, py: Python<'_>, message: String) -> PyErr {
+        match self {
+            Self::WrongNumberOfValues { expected, received } => {
+                py_err!(py, WrongNumberOfValues, message; expected, received)
             }
-            SerializationErrorKind::TypeMismatch { .. } => {
-                (TypeMismatchSerializationError::new_err(message), None)
+            Self::MissingValue { bind_marker } => {
+                let bind_marker: &str = bind_marker;
+                py_err!(py, MissingValue, message; bind_marker)
             }
-            SerializationErrorKind::ValueOverflow => {
-                (ValueOverflowSerializationError::new_err(message), None)
-            }
-            SerializationErrorKind::MixedSignDuration => {
-                (SerializationError::new_err(message), None)
-            }
-            SerializationErrorKind::PythonInteropFailed { source } => {
-                (PySerializationFailedError::new_err(message), Some(*source))
-            }
-            SerializationErrorKind::ScyllaSerializeFailed { .. } => {
-                (SerializeFailedError::new_err(message), None)
-            }
-        };
-
-        Python::attach(|py| {
-            if let Some(cause) = cause {
-                err.set_cause(py, Some(cause));
-            }
-
-            let value = err.value(py);
-            let _ = match &e.location {
-                Some(ParameterReference::Index(i)) => value.setattr(intern!(py, "parameter"), *i),
-                Some(ParameterReference::Name(name)) => {
-                    value.setattr(intern!(py, "parameter"), &**name)
-                }
-                None => value.setattr(intern!(py, "parameter"), py.None()),
-            };
-        });
-
-        err
+            Self::PythonInteropFailed { source } => with_cause(
+                py_err!(RowSerializationError, message),
+                source.clone_ref(py),
+            ),
+            Self::ValueFailed {
+                bind_marker,
+                source,
+            } => value_error_to_pyerr(source, py, message, Some(bind_marker)),
+        }
     }
 }
 
-impl From<DriverSerializationError> for scylla::serialize::SerializationError {
-    fn from(err: DriverSerializationError) -> Self {
+impl DriverValueSerializationError {
+    /* Constructors */
+
+    pub(crate) fn unsupported_type(cql: impl Into<Box<str>>) -> Self {
+        Self::UnsupportedType { cql: cql.into() }
+    }
+
+    pub(crate) fn type_mismatch(expected: TypeExpected) -> Self {
+        Self::TypeMismatch { expected }
+    }
+
+    pub(crate) fn value_overflow() -> Self {
+        Self::ValueOverflow
+    }
+
+    pub(crate) fn mixed_sign_duration() -> Self {
+        Self::MixedSignDuration
+    }
+
+    pub(crate) fn python_interop_failed(source: PyErr) -> Self {
+        Self::PythonInteropFailed {
+            source: Box::new(source),
+        }
+    }
+
+    fn to_pyerr(&self, py: Python<'_>, message: String, bind_marker: Option<&BindMarker>) -> PyErr {
+        match self {
+            Self::UnsupportedType { .. } => {
+                py_err!(py, UnsupportedTypeSerializationError, message; bind_marker)
+            }
+            Self::TypeMismatch { .. } => {
+                py_err!(py, TypeMismatchSerializationError, message; bind_marker)
+            }
+            Self::ValueOverflow => {
+                py_err!(py, ValueOverflowSerializationError, message; bind_marker)
+            }
+            Self::MixedSignDuration => {
+                py_err!(py, InvalidValueSerializationError, message; bind_marker)
+            }
+            Self::PythonInteropFailed { source } => with_cause(
+                py_err!(py, PySerializationFailedError, message; bind_marker),
+                source.clone_ref(py),
+            ),
+        }
+    }
+}
+
+/// Maps a failure of one value, following collection element errors down to the innermost cause.
+fn value_error_to_pyerr(
+    err: &scylla::serialize::SerializationError,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    if let Some(e) = err.downcast_ref::<DriverValueSerializationError>() {
+        return e.to_pyerr(py, message, bind_marker);
+    }
+    if err.downcast_ref::<ValueTypeCheckError>().is_some() {
+        return py_err!(py, TypeMismatchSerializationError, message; bind_marker);
+    }
+    if err.downcast_ref::<ValueOverflow>().is_some() {
+        return py_err!(py, ValueOverflowSerializationError, message; bind_marker);
+    }
+    if let Some(e) = err.downcast_ref::<BuiltinSerializationError>() {
+        return builtin_value_error_to_pyerr(&e.kind, py, message, bind_marker);
+    }
+    py_err!(py, SerializeFailedError, message; bind_marker)
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn builtin_value_error_to_pyerr(
+    kind: &BuiltinSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        BuiltinSerializationErrorKind::ValueOverflow => {
+            py_err!(py, ValueOverflowSerializationError, message; bind_marker)
+        }
+        BuiltinSerializationErrorKind::VectorError(
+            VectorSerializationErrorKind::InvalidNumberOfElements(..),
+        ) => py_err!(py, InvalidValueSerializationError, message; bind_marker),
+        BuiltinSerializationErrorKind::SetOrListError(
+            SetOrListSerializationErrorKind::ElementSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::VectorError(
+            VectorSerializationErrorKind::ElementSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::MapError(
+            MapSerializationErrorKind::KeySerializationFailed(inner)
+            | MapSerializationErrorKind::ValueSerializationFailed(inner),
+        )
+        | BuiltinSerializationErrorKind::TupleError(
+            TupleSerializationErrorKind::ElementSerializationFailed { err: inner, .. },
+        )
+        | BuiltinSerializationErrorKind::UdtError(
+            UdtSerializationErrorKind::FieldSerializationFailed { err: inner, .. },
+        ) => value_error_to_pyerr(inner, py, message, bind_marker),
+        BuiltinSerializationErrorKind::SizeOverflow
+        | BuiltinSerializationErrorKind::SetOrListError(_)
+        | BuiltinSerializationErrorKind::VectorError(_)
+        | BuiltinSerializationErrorKind::MapError(_)
+        | BuiltinSerializationErrorKind::TupleError(_)
+        | BuiltinSerializationErrorKind::UdtError(_) => {
+            py_err!(py, SerializeFailedError, message; bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+impl ToPyAttr for BindMarker {
+    fn to_py_attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match self {
+            BindMarker::Index(index) => index.to_py_attr(py),
+            BindMarker::Name(name) => name.to_py_attr(py),
+        }
+    }
+}
+
+impl From<DriverValueSerializationError> for PyErr {
+    fn from(e: DriverValueSerializationError) -> PyErr {
+        Python::attach(|py| e.to_pyerr(py, e.to_string(), None))
+    }
+}
+
+/// Maps a Rust driver serialization error, recovering our own row or value error from
+/// inside it; `message` is the full description including the failed operation.
+pub(crate) fn serialization_error_to_pyerr(
+    py: Python<'_>,
+    err: &scylla::serialize::SerializationError,
+    message: String,
+) -> PyErr {
+    if let Some(e) = err.downcast_ref::<DriverRowSerializationError>() {
+        return e.to_pyerr(py, message);
+    }
+    value_error_to_pyerr(err, py, message, None)
+}
+
+impl From<DriverRowSerializationError> for scylla::serialize::SerializationError {
+    fn from(err: DriverRowSerializationError) -> Self {
+        scylla::serialize::SerializationError::new(err)
+    }
+}
+
+impl From<DriverValueSerializationError> for scylla::serialize::SerializationError {
+    fn from(err: DriverValueSerializationError) -> Self {
         scylla::serialize::SerializationError::new(err)
     }
 }

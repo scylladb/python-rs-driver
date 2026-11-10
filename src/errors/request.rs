@@ -16,11 +16,11 @@ use crate::errors::{
     MetadataError, NoHostAvailable, NodeDisabledByHostFilter, NonfinishedPagingState,
     OperationTimedOut, Overloaded, PartitionKeyExtractionFailed, RateLimitReached, ReadFailure,
     ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestSerializationError,
-    ResponseParseError, SchemaAgreementError, SerializationError, ServerConfigError, ServerError,
-    ServerProtocolError, TooManyStatementsInBatch, TruncateError, Unauthorized, Unavailable,
-    UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey, WriteFailure,
-    WriteTimeout, with_attrs,
+    ResponseParseError, SchemaAgreementError, ServerConfigError, ServerError, ServerProtocolError,
+    TooManyStatementsInBatch, TruncateError, Unauthorized, Unavailable, UnexpectedResponse,
+    UnknownDatabaseError, Unprepared, ValuesTooLongForKey, WriteFailure, WriteTimeout, with_attrs,
 };
+use crate::serialize::error::serialization_error_to_pyerr;
 
 /// Maps an `ExecutionError`; `message` is the full description including the failed operation.
 #[deny(clippy::wildcard_enum_match_arm)]
@@ -51,7 +51,7 @@ pub(crate) fn execution_error_to_pyerr(
 fn bad_query_to_pyerr(py: Python<'_>, err: &RustBadQuery, message: String) -> PyErr {
     match err {
         RustBadQuery::PartitionKeyExtraction => py_err!(PartitionKeyExtractionFailed, message),
-        RustBadQuery::SerializationError(_) => py_err!(SerializationError, message),
+        RustBadQuery::SerializationError(e) => serialization_error_to_pyerr(py, e, message),
         RustBadQuery::ValuesTooLongForKey(length, max_length) => {
             py_err!(py, ValuesTooLongForKey, message; length, max_length)
         }
@@ -81,7 +81,7 @@ pub(crate) fn request_attempt_error_to_pyerr(
     message: String,
 ) -> PyErr {
     match err {
-        RequestAttemptError::SerializationError(_) => py_err!(SerializationError, message),
+        RequestAttemptError::SerializationError(e) => serialization_error_to_pyerr(py, e, message),
         RequestAttemptError::CqlRequestSerialization(_) => {
             py_err!(RequestSerializationError, message)
         }

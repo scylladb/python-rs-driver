@@ -2,7 +2,7 @@ use crate::cql_types::{
     PyCqlDate, PyCqlDuration, PyCqlTime, PyCqlTimestamp, aware_datetime_to_utc,
 };
 use crate::relativedelta::{Relativedelta, RelativedeltaError};
-use crate::serialize::error::{DriverSerializationError, TypeExpected};
+use crate::serialize::error::{DriverValueSerializationError, TypeExpected};
 
 use std::any::Any;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -94,7 +94,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                 _ => {
                     let name = format!("{:?}", collection_typ);
 
-                    Err(DriverSerializationError::unsupported_type(name).into())
+                    Err(DriverValueSerializationError::unsupported_type(name).into())
                 }
             },
 
@@ -112,7 +112,9 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             // For Python dataclass instances, convert to dict first (e.g., using dataclasses.asdict()).
             ColumnType::UserDefinedType { definition, .. } => {
                 let Ok(dict) = PyUdtWrapper::new(self, definition) else {
-                    return Err(DriverSerializationError::type_mismatch(TypeExpected::Udt).into());
+                    return Err(
+                        DriverValueSerializationError::type_mismatch(TypeExpected::Udt).into(),
+                    );
                 };
 
                 dict.serialize(typ, cell_writer)
@@ -120,12 +122,14 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
 
             ColumnType::Tuple(elements_types) => {
                 let Ok(tuple) = PyTupleWrapper::new(self, elements_types) else {
-                    return Err(DriverSerializationError::type_mismatch(TypeExpected::Tuple).into());
+                    return Err(
+                        DriverValueSerializationError::type_mismatch(TypeExpected::Tuple).into(),
+                    );
                 };
 
                 tuple.serialize(typ, cell_writer)
             }
-            _ => Err(DriverSerializationError::unsupported_type(format!("{typ:?}")).into()),
+            _ => Err(DriverValueSerializationError::unsupported_type(format!("{typ:?}")).into()),
         }
     }
 
@@ -147,7 +151,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
                     .cast::<PyInt>()
                     .map_err(|_| self.mismatched_type_error::<Counter>(typ))?
                     .extract::<i64>()
-                    .map_err(|_| DriverSerializationError::value_overflow())?;
+                    .map_err(|_| DriverValueSerializationError::value_overflow())?;
 
                 let counter = Counter(value);
                 counter.serialize(typ, cell_writer)
@@ -223,7 +227,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             NativeType::Inet => {
                 let ip = self
                     .ip_address()
-                    .map_err(DriverSerializationError::python_interop_failed)?
+                    .map_err(DriverValueSerializationError::python_interop_failed)?
                     .ok_or_else(|| self.mismatched_type_error::<IpAddr>(typ))?;
 
                 ip.serialize(typ, cell_writer)
@@ -241,7 +245,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             _ => {
                 let name = format!("{:?}", native_type);
 
-                Err(DriverSerializationError::unsupported_type(name).into())
+                Err(DriverValueSerializationError::unsupported_type(name).into())
             }
         }
     }
@@ -272,7 +276,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
         self.cast::<PyInt>()
             .map_err(|_| self.mismatched_type_error::<T>(typ))?
             .extract::<T>()
-            .map_err(|_| DriverSerializationError::value_overflow())?
+            .map_err(|_| DriverValueSerializationError::value_overflow())?
             .serialize(typ, cell_writer)
     }
 
@@ -297,7 +301,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
     fn python_type_name(&self) -> Result<Bound<'py, PyString>, SerializationError> {
         self.get_type()
             .name()
-            .map_err(|err| DriverSerializationError::python_interop_failed(err).into())
+            .map_err(|err| DriverValueSerializationError::python_interop_failed(err).into())
     }
 
     /// Maps Python type to the list of CQL types that this type can serialize as.
@@ -309,7 +313,7 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
 
         let name = name
             .extract::<&str>()
-            .map_err(DriverSerializationError::python_interop_failed)?;
+            .map_err(DriverValueSerializationError::python_interop_failed)?;
 
         let columns = match name {
             "int" => INT_COLUMNS,
@@ -327,7 +331,9 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
             "UUID" => UUID_COLUMNS,
 
             _ => {
-                return Err(DriverSerializationError::unsupported_type(name.to_string()).into());
+                return Err(
+                    DriverValueSerializationError::unsupported_type(name.to_string()).into(),
+                );
             }
         };
 
@@ -337,8 +343,10 @@ impl<'a, 'py> PyAnyWrapper<'a, 'py> {
     fn relativedelta_error(&self, err: RelativedeltaError, typ: &ColumnType) -> SerializationError {
         match err {
             RelativedeltaError::NotRelativedelta => self.mismatched_type_error::<CqlDuration>(typ),
-            RelativedeltaError::Overflow => DriverSerializationError::value_overflow().into(),
-            RelativedeltaError::MixedSign => DriverSerializationError::mixed_sign_duration().into(),
+            RelativedeltaError::Overflow => DriverValueSerializationError::value_overflow().into(),
+            RelativedeltaError::MixedSign => {
+                DriverValueSerializationError::mixed_sign_duration().into()
+            }
         }
     }
 
@@ -461,10 +469,10 @@ impl<'a, 'py> Deref for PyListWrapper<'a, 'py> {
 }
 
 impl<'a, 'py> PyListWrapper<'a, 'py> {
-    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverSerializationError> {
+    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverValueSerializationError> {
         let list: &Bound<PyList> = value
             .cast::<PyList>()
-            .map_err(|_| DriverSerializationError::type_mismatch(TypeExpected::List))?;
+            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::List))?;
         Ok(PyListWrapper { inner: list })
     }
 }
@@ -492,10 +500,10 @@ impl<'a, 'py> Deref for PySetWrapper<'a, 'py> {
 }
 
 impl<'a, 'py> PySetWrapper<'a, 'py> {
-    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverSerializationError> {
+    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverValueSerializationError> {
         let set: &Bound<PySet> = value
             .cast::<PySet>()
-            .map_err(|_| DriverSerializationError::type_mismatch(TypeExpected::Set))?;
+            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Set))?;
         Ok(PySetWrapper(set))
     }
 }
@@ -523,10 +531,10 @@ impl<'a, 'py> Deref for PyMapWrapper<'a, 'py> {
 }
 
 impl<'a, 'py> PyMapWrapper<'a, 'py> {
-    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverSerializationError> {
+    fn new(value: &PyAnyWrapper<'a, 'py>) -> Result<Self, DriverValueSerializationError> {
         let map: &Bound<PyMapping> = value
             .cast::<PyMapping>()
-            .map_err(|_| DriverSerializationError::type_mismatch(TypeExpected::Map))?;
+            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Map))?;
         Ok(PyMapWrapper(map))
     }
 }
@@ -549,7 +557,7 @@ impl<'a, 'py> SerializeValue for PyMapWrapper<'a, 'py> {
 
         let items = self
             .items()
-            .map_err(DriverSerializationError::python_interop_failed)?;
+            .map_err(DriverValueSerializationError::python_interop_failed)?;
 
         let element_count: i32 = items.len().try_into().map_err(|_| {
             mk_ser_err::<PyMapping>(typ, MapSerializationErrorKind::TooManyElements)
@@ -559,7 +567,7 @@ impl<'a, 'py> SerializeValue for PyMapWrapper<'a, 'py> {
         for pair in items {
             let (key, value) = pair
                 .extract::<(Bound<'py, PyAny>, Bound<'py, PyAny>)>()
-                .map_err(DriverSerializationError::python_interop_failed)?;
+                .map_err(DriverValueSerializationError::python_interop_failed)?;
             PyAnyWrapper::serialize(&PyAnyWrapper::new(&key), ktyp, builder.make_sub_writer())
                 .map_err(|err| {
                     mk_ser_err::<PyMapping>(
@@ -602,13 +610,13 @@ impl<'py, 'a> PyVectorWrapper<'py, 'a> {
         value: &PyAnyWrapper<'a, 'py>,
         dimension: u16,
         element_type: &'a ColumnType<'a>,
-    ) -> Result<Self, DriverSerializationError> {
+    ) -> Result<Self, DriverValueSerializationError> {
         let items = if let Ok(list) = value.cast::<PyList>() {
             VectorItems::List(list)
         } else {
             let tuple = value
                 .cast::<PyTuple>()
-                .map_err(|_| DriverSerializationError::type_mismatch(TypeExpected::Vector))?;
+                .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Vector))?;
             VectorItems::Tuple(tuple)
         };
         Ok(PyVectorWrapper {
@@ -668,10 +676,10 @@ impl<'py, 'a> PyUdtWrapper<'py, 'a> {
     fn new(
         value: &PyAnyWrapper<'a, 'py>,
         definition: &'a Arc<UserDefinedType<'a>>,
-    ) -> Result<Self, DriverSerializationError> {
+    ) -> Result<Self, DriverValueSerializationError> {
         let dict: &Bound<PyDict> = value
             .cast::<PyDict>()
-            .map_err(|_| DriverSerializationError::type_mismatch(TypeExpected::Udt))?;
+            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Udt))?;
         Ok(PyUdtWrapper {
             inner: dict,
             definition,
@@ -691,7 +699,7 @@ impl<'py> SerializeValue for PyUdtWrapper<'py, '_> {
             let item: Bound<PyAny> = self
                 .inner
                 .get_item(field_name)
-                .map_err(DriverSerializationError::python_interop_failed)?
+                .map_err(DriverValueSerializationError::python_interop_failed)?
                 .ok_or_else(|| {
                     mk_typck_err::<PyDict>(
                         typ,
@@ -729,10 +737,10 @@ impl<'py, 'a> PyTupleWrapper<'py, 'a> {
     fn new(
         value: &PyAnyWrapper<'a, 'py>,
         elements_types: &'a Vec<ColumnType<'_>>,
-    ) -> Result<Self, DriverSerializationError> {
+    ) -> Result<Self, DriverValueSerializationError> {
         let tuple: &Bound<PyTuple> = value
             .cast::<PyTuple>()
-            .map_err(|_| DriverSerializationError::type_mismatch(TypeExpected::Tuple))?;
+            .map_err(|_| DriverValueSerializationError::type_mismatch(TypeExpected::Tuple))?;
         Ok(PyTupleWrapper {
             inner: tuple,
             elements_types,
