@@ -19,7 +19,13 @@ from helpers.ccm import (  # pyright: ignore[reportMissingTypeStubs]
 from helpers.ddl import ddl
 from helpers.session import session_builder
 from scylla.auth import Authenticator, AuthenticatorProvider
-from scylla.errors import AddressTranslationError, HostFilterError, SessionConfigError
+from scylla.errors import (
+    AddressTranslationError,
+    HostFilterError,
+    HostnameResolutionFailed,
+    NoKnownNodes,
+    SessionConfigError,
+)
 from scylla.policies.address_translator import AddressTranslator, DictAddressTranslator, UntranslatedPeer
 from scylla.policies.host_filter import AcceptAllHostFilter, AllowListHostFilter, DcHostFilter, HostFilter, Peer
 from scylla.policies.timestamp_generator import (
@@ -749,3 +755,17 @@ async def test_host_filter_list_with_garbage_string_fails() -> None:
         _ = AllowListHostFilter(garbage_list)
 
     assert "invalid socket address" in str(excinfo.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_connect_without_contact_points_fails():
+    with pytest.raises(NoKnownNodes):
+        await SessionBuilder().contact_points([]).connect()
+
+
+@pytest.mark.asyncio
+async def test_connect_to_unresolvable_hostname_fails():
+    with pytest.raises(HostnameResolutionFailed) as excinfo:
+        await SessionBuilder().contact_points([("nonexistent.invalid", 9042)]).connect()
+
+    assert excinfo.value.hostnames == ["nonexistent.invalid:9042"]

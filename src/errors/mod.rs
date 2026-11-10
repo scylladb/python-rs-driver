@@ -30,11 +30,11 @@ create_exception!(
 create_exception!(scylla.errors, DecodeFailedError, DeserializationError);
 create_exception!(scylla.errors, PyConversionFailedError, DeserializationError);
 
-create_exception!(scylla.errors, SessionConnectionError, ScyllaError);
+create_exception!(scylla.errors, ContactPointError, ScyllaError);
+create_exception!(scylla.errors, HostnameResolutionFailed, ContactPointError);
+create_exception!(scylla.errors, NoKnownNodes, ContactPointError);
 
 create_exception!(scylla.errors, SessionConfigError, ScyllaError);
-
-create_exception!(scylla.errors, StatementConversionError, ScyllaError);
 
 create_exception!(scylla.errors, InternalDriverError, ScyllaError);
 
@@ -45,6 +45,18 @@ create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
 create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
 create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
 create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
+
+create_exception!(scylla.errors, StatementConversionError, BadQuery);
+create_exception_multi!(
+    scylla.errors,
+    InvalidStatementType,
+    (StatementConversionError, PyTypeError)
+);
+create_exception_multi!(
+    scylla.errors,
+    AlreadyPrepared,
+    (StatementConversionError, PyTypeError)
+);
 
 create_exception!(scylla.errors, SerializationError, BadQuery);
 
@@ -89,8 +101,25 @@ create_exception_multi!(
     (ExecutionError, PyTimeoutError)
 );
 create_exception!(scylla.errors, NoHostAvailable, ExecutionError);
+create_exception!(scylla.errors, TraceUnavailable, ExecutionError);
 create_exception!(scylla.errors, MetadataError, ExecutionError);
+create_exception!(scylla.errors, MetadataFetchFailed, MetadataError);
+create_exception!(scylla.errors, InvalidClusterMetadata, MetadataError);
 create_exception!(scylla.errors, SchemaAgreementError, ExecutionError);
+create_exception_multi!(
+    scylla.errors,
+    SchemaAgreementTimeout,
+    (SchemaAgreementError, OperationTimedOut)
+);
+create_exception!(scylla.errors, RequiredHostAbsent, SchemaAgreementError);
+
+create_exception!(scylla.errors, UseKeyspaceError, ExecutionError);
+create_exception_multi!(
+    scylla.errors,
+    BadKeyspaceName,
+    (UseKeyspaceError, PyValueError)
+);
+create_exception!(scylla.errors, KeyspaceNameMismatch, UseKeyspaceError);
 
 create_exception!(scylla.errors, ConnectionPoolError, ExecutionError);
 create_exception!(scylla.errors, ConnectionPoolBroken, ConnectionPoolError);
@@ -104,6 +133,7 @@ create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
 create_exception!(scylla.errors, RequestFailedError, ExecutionError);
 
 create_exception!(scylla.errors, PrepareError, ExecutionError);
+create_exception!(scylla.errors, PreparedStatementIdsMismatch, PrepareError);
 create_exception_multi!(
     scylla.errors,
     RepreparedIdChanged,
@@ -150,18 +180,11 @@ create_exception!(scylla.errors, UnknownDatabaseError, DatabaseError);
 
 /* Other errors */
 
-create_exception!(scylla.errors, MetadataRefreshError, ScyllaError);
 create_exception!(scylla.errors, StatementConfigError, ScyllaError);
 
 create_exception!(scylla.errors, BatchError, ScyllaError);
 
 create_exception!(scylla.errors, ClusterStateTokenError, ScyllaError);
-create_exception!(scylla.errors, UseKeyspaceError, ScyllaError);
-create_exception!(scylla.errors, BadKeyspaceNameError, UseKeyspaceError);
-create_exception!(scylla.errors, RequestError, UseKeyspaceError);
-create_exception!(scylla.errors, KeyspaceNameMismatchError, UseKeyspaceError);
-create_exception!(scylla.errors, RequestTimeoutError, UseKeyspaceError);
-create_exception!(scylla.errors, RuntimeTaskJoinFailedError, UseKeyspaceError);
 create_exception!(scylla.errors, AddressTranslationError, ScyllaError);
 create_exception!(scylla.errors, HostFilterError, ScyllaError);
 create_exception!(scylla.errors, TlsError, ScyllaError);
@@ -173,8 +196,6 @@ create_exception!(scylla.errors, FutureCancelledError, PyException);
 create_exception!(scylla.errors, SpeculativeExecutionPolicyError, ScyllaError);
 
 create_exception!(scylla.errors, QueryMetadataError, ScyllaError);
-
-create_exception!(scylla.errors, TraceUnavailable, ScyllaError);
 
 // Policy: DriverError types are pure Rust and contain PyErr only as source
 // in cases where the error originated from Python code (e.g. during extraction or user callbacks).
@@ -221,14 +242,20 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "PyConversionFailedError",
         py.get_type::<PyConversionFailedError>(),
     )?;
+    module.add("ContactPointError", py.get_type::<ContactPointError>())?;
     module.add(
-        "SessionConnectionError",
-        py.get_type::<SessionConnectionError>(),
+        "HostnameResolutionFailed",
+        py.get_type::<HostnameResolutionFailed>(),
     )?;
+    module.add("NoKnownNodes", py.get_type::<NoKnownNodes>())?;
     module.add("SessionConfigError", py.get_type::<SessionConfigError>())?;
     module.add(
         "StatementConversionError",
         py.get_type::<StatementConversionError>(),
+    )?;
+    module.add(
+        "InvalidStatementType",
+        py.get_type::<InvalidStatementType>(),
     )?;
     module.add("InternalDriverError", py.get_type::<InternalDriverError>())?;
     module.add("BadQuery", py.get_type::<BadQuery>())?;
@@ -249,10 +276,20 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add("OperationTimedOut", py.get_type::<OperationTimedOut>())?;
     module.add("NoHostAvailable", py.get_type::<NoHostAvailable>())?;
     module.add("MetadataError", py.get_type::<MetadataError>())?;
+    module.add("MetadataFetchFailed", py.get_type::<MetadataFetchFailed>())?;
+    module.add(
+        "InvalidClusterMetadata",
+        py.get_type::<InvalidClusterMetadata>(),
+    )?;
     module.add(
         "SchemaAgreementError",
         py.get_type::<SchemaAgreementError>(),
     )?;
+    module.add(
+        "SchemaAgreementTimeout",
+        py.get_type::<SchemaAgreementTimeout>(),
+    )?;
+    module.add("RequiredHostAbsent", py.get_type::<RequiredHostAbsent>())?;
     module.add("ConnectionPoolError", py.get_type::<ConnectionPoolError>())?;
     module.add(
         "ConnectionPoolBroken",
@@ -267,6 +304,11 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<NodeDisabledByHostFilter>(),
     )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
+    module.add("AlreadyPrepared", py.get_type::<AlreadyPrepared>())?;
+    module.add(
+        "PreparedStatementIdsMismatch",
+        py.get_type::<PreparedStatementIdsMismatch>(),
+    )?;
     module.add("RepreparedIdChanged", py.get_type::<RepreparedIdChanged>())?;
     module.add(
         "RepreparedIdMissingInBatch",
@@ -314,10 +356,6 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<UnknownDatabaseError>(),
     )?;
     module.add(
-        "MetadataRefreshError",
-        py.get_type::<MetadataRefreshError>(),
-    )?;
-    module.add(
         "StatementConfigError",
         py.get_type::<StatementConfigError>(),
     )?;
@@ -362,19 +400,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<ClusterStateTokenError>(),
     )?;
     module.add("UseKeyspaceError", py.get_type::<UseKeyspaceError>())?;
+    module.add("BadKeyspaceName", py.get_type::<BadKeyspaceName>())?;
     module.add(
-        "BadKeyspaceNameError",
-        py.get_type::<BadKeyspaceNameError>(),
-    )?;
-    module.add("RequestError", py.get_type::<RequestError>())?;
-    module.add(
-        "KeyspaceNameMismatchError",
-        py.get_type::<KeyspaceNameMismatchError>(),
-    )?;
-    module.add("RequestTimeoutError", py.get_type::<RequestTimeoutError>())?;
-    module.add(
-        "RuntimeTaskJoinFailedError",
-        py.get_type::<RuntimeTaskJoinFailedError>(),
+        "KeyspaceNameMismatch",
+        py.get_type::<KeyspaceNameMismatch>(),
     )?;
     module.add(
         "AddressTranslationError",

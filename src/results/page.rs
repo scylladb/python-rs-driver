@@ -124,7 +124,8 @@ impl Page {
     ///
     /// # Errors
     ///
-    /// Raises `TraceUnavailable` if the driver cannot fetch the trace.
+    /// Raises `TraceUnavailable` if the trace is not available yet, the same class as `execute`
+    /// if a query to the trace tables fails, and `ResponseParseError` if the rows cannot be read.
     pub(crate) fn fetch_query_trace(
         &self,
         py: Python<'_>,
