@@ -1021,10 +1021,13 @@ async def test_tuple_serialization_rejects_list(
 async def test_tuple_serialization_rejects_too_many_elements(session: Session, table_factory: TableFactory):
     table = await table_factory("id int PRIMARY KEY, v frozen<tuple<int, int>>", "tuple_too_long_table")
 
-    with pytest.raises(SerializationError) as exc_info:
+    with pytest.raises(WrongNumberOfElements) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, v) VALUES (?, ?)", (1, (1, 2, 3)))
 
-    assert "wrong tuple element count" in str(exc_info.value).lower()
+    assert exc_info.value.bind_marker == 1
+    assert exc_info.value.container == "tuple"
+    assert exc_info.value.expected == 2
+    assert exc_info.value.received == 3
 
 
 @pytest.mark.asyncio

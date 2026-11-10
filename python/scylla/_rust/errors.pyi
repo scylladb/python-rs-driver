@@ -240,7 +240,7 @@ class WrongNumberOfElements(InvalidValueSerializationError):
     """Raised when the number of elements is not the number that the CQL type needs."""
 
     container: str
-    """The CQL type that has the wrong number of elements: `"vector"`."""
+    """The CQL type that has the wrong number of elements: `"vector"` or `"tuple"`."""
 
     expected: int
     received: int
