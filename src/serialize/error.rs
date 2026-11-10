@@ -15,7 +15,7 @@ use crate::errors::{
 #[must_use]
 pub(crate) struct DriverSerializationError {
     pub kind: SerializationErrorKind,
-    pub location: Option<ParameterReference>,
+    pub location: Option<BindMarker>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -42,12 +42,10 @@ pub(crate) enum SerializationErrorKind {
     },
 }
 
-/// References a parameter that failed to serialize, either by index or by name.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum ParameterReference {
-    #[error("parameter_index={0}")]
+/// Identifies the bind marker of a value, by position or by name.
+#[derive(Debug)]
+pub(crate) enum BindMarker {
     Index(usize),
-    #[error("parameter={0}")]
     Name(Box<str>),
 }
 
@@ -71,6 +69,15 @@ pub(crate) enum TypeExpected {
     /// Expected a user-defined type (Udt) for a CQL Udt.
     #[error("Udt")]
     Udt,
+}
+
+impl fmt::Display for BindMarker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BindMarker::Index(index) => write!(f, "bind_marker={index}"),
+            BindMarker::Name(name) => write!(f, "bind_marker={name}"),
+        }
+    }
 }
 
 impl fmt::Display for DriverSerializationError {
@@ -138,13 +145,13 @@ impl DriverSerializationError {
 
     /* Top-level location setters */
 
-    pub(crate) fn at_parameter_index(mut self, index: usize) -> Self {
-        self.location = Some(ParameterReference::Index(index));
+    pub(crate) fn at_bind_marker_index(mut self, index: usize) -> Self {
+        self.location = Some(BindMarker::Index(index));
         self
     }
 
-    pub(crate) fn at_parameter_name(mut self, name: impl Into<Box<str>>) -> Self {
-        self.location = Some(ParameterReference::Name(name.into()));
+    pub(crate) fn at_bind_marker_name(mut self, name: impl Into<Box<str>>) -> Self {
+        self.location = Some(BindMarker::Name(name.into()));
         self
     }
 }
@@ -180,11 +187,9 @@ impl From<DriverSerializationError> for PyErr {
 
             let value = err.value(py);
             let _ = match &e.location {
-                Some(ParameterReference::Index(i)) => value.setattr(intern!(py, "parameter"), *i),
-                Some(ParameterReference::Name(name)) => {
-                    value.setattr(intern!(py, "parameter"), &**name)
-                }
-                None => value.setattr(intern!(py, "parameter"), py.None()),
+                Some(BindMarker::Index(i)) => value.setattr(intern!(py, "bind_marker"), *i),
+                Some(BindMarker::Name(name)) => value.setattr(intern!(py, "bind_marker"), &**name),
+                None => value.setattr(intern!(py, "bind_marker"), py.None()),
             };
         });
 

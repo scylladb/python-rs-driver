@@ -142,7 +142,7 @@ fn serialize_sequence<'py>(
     for (index, (col, val)) in ctx.columns().iter().zip(iter).enumerate() {
         let val = val.map_err(DriverSerializationError::python_interop_failed)?;
         serialize_element(col, &val, row_writer).map_err(|err| {
-            DriverSerializationError::scylla_serialize_failed(err).at_parameter_index(index)
+            DriverSerializationError::scylla_serialize_failed(err).at_bind_marker_index(index)
         })?;
     }
 
@@ -173,7 +173,7 @@ fn serialize_mapping<'py>(
             }
         })?;
         serialize_element(col, &item, row_writer).map_err(|err| {
-            DriverSerializationError::scylla_serialize_failed(err).at_parameter_name(col.name())
+            DriverSerializationError::scylla_serialize_failed(err).at_bind_marker_name(col.name())
         })?;
     }
 

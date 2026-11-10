@@ -137,7 +137,13 @@ class StatementConfigError(ScyllaError): ...
 class BatchError(ScyllaError): ...
 
 class SerializationError(ScyllaError):
-    parameter: str | int | None
+    bind_marker: str | int | None
+    """The bind marker of the value that failed.
+
+    The 0-based position of the value when the values are a sequence, or the
+    bind marker name when the values are a mapping. `None` when the error does
+    not concern one value.
+    """
 
 class UnsupportedTypeSerializationError(SerializationError): ...
 class TypeMismatchSerializationError(SerializationError): ...
