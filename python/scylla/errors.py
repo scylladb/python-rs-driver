@@ -102,6 +102,7 @@ from ._rust.errors import (  # pyright: ignore[reportMissingModuleSource]
     WriteFailure,
     WriteTimeout,
     WriteType,
+    WrongNumberOfElements,
     WrongNumberOfValues,
 )
 
@@ -209,5 +210,6 @@ __all__ = [
     "WriteFailure",
     "WriteTimeout",
     "WriteType",
+    "WrongNumberOfElements",
     "WrongNumberOfValues",
 ]

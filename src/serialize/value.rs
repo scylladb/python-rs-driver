@@ -32,7 +32,6 @@ use scylla::serialize::value::{
 use scylla::serialize::writers::{CellWriter, WrittenCellProof};
 use scylla::value::{Counter, CqlDate, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
 
-use scylla::serialize::value::VectorSerializationErrorKind;
 use scylla_cql_core::serialize::value::{
     serialize_next_constant_length_elem_unstable, serialize_next_variable_length_elem_unstable,
 };
@@ -419,10 +418,13 @@ pub fn serialize_vector<'t, 'b, 'py, T: Any>(
     writer: CellWriter<'b>,
 ) -> Result<WrittenCellProof<'b>, SerializationError> {
     if len != dimensions as usize {
-        return Err(mk_ser_err::<T>(
-            typ,
-            VectorSerializationErrorKind::InvalidNumberOfElements(len, dimensions),
-        ));
+        let expected = usize::from(dimensions);
+        return Err(DriverValueSerializationError::wrong_number_of_elements(
+            TypeExpected::Vector,
+            expected,
+            len,
+        )
+        .into());
     }
     let mut builder = writer.into_value_builder();
     match element_type.type_size_for_vector() {

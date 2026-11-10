@@ -21,6 +21,7 @@ from scylla.errors import (
     TypeMismatchSerializationError,
     ValueOverflowSerializationError,
     ValueSerializationError,
+    WrongNumberOfElements,
     WrongNumberOfValues,
 )
 from scylla.session import Session
@@ -912,10 +913,13 @@ async def test_vector_serialization_rejects_wrong_dimension(session: Session, ta
         "vector_wrong_dimension_table",
     )
 
-    with pytest.raises(InvalidValueSerializationError) as exc_info:
+    with pytest.raises(WrongNumberOfElements) as exc_info:
         await session.execute(f"INSERT INTO {table} (id, embedding) VALUES (?, ?)", (1, [1, 2, 3]))
 
     assert exc_info.value.bind_marker == 1
+    assert exc_info.value.container == "vector"
+    assert exc_info.value.expected == 4
+    assert exc_info.value.received == 3
 
 
 @pytest.mark.asyncio

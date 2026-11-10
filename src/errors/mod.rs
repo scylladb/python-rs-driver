@@ -88,6 +88,11 @@ create_exception_multi!(
     InvalidValueSerializationError,
     (ValueSerializationError, PyValueError)
 );
+create_exception!(
+    scylla.errors,
+    WrongNumberOfElements,
+    InvalidValueSerializationError
+);
 create_exception!(scylla.errors, SerializeFailedError, ValueSerializationError);
 create_exception!(
     scylla.errors,
@@ -438,6 +443,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add(
         "InvalidValueSerializationError",
         py.get_type::<InvalidValueSerializationError>(),
+    )?;
+    module.add(
+        "WrongNumberOfElements",
+        py.get_type::<WrongNumberOfElements>(),
     )?;
     module.add(
         "SerializeFailedError",
