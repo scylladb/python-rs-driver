@@ -100,11 +100,20 @@ create_exception!(
 );
 create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
 
-create_exception!(scylla.errors, PrepareError, ExecutionError);
-create_exception!(scylla.errors, RepreparedIdChanged, PrepareError);
-create_exception!(scylla.errors, RepreparedIdMissingInBatch, PrepareError);
-
 create_exception!(scylla.errors, RequestFailedError, ExecutionError);
+
+create_exception!(scylla.errors, PrepareError, ExecutionError);
+create_exception_multi!(
+    scylla.errors,
+    RepreparedIdChanged,
+    (PrepareError, RequestFailedError)
+);
+create_exception_multi!(
+    scylla.errors,
+    RepreparedIdMissingInBatch,
+    (PrepareError, RequestFailedError)
+);
+
 create_exception!(scylla.errors, BrokenConnection, RequestFailedError);
 create_exception!(scylla.errors, ConnectionBusy, RequestFailedError);
 create_exception!(scylla.errors, NonfinishedPagingState, RequestFailedError);
