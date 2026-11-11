@@ -10,6 +10,16 @@ CCM_DIR = Path(__file__).resolve().parent.parent / "ccm"
 class _CCMNode(Protocol):
     network_interfaces: dict[str, tuple[str, int] | None]
 
+    def stop(
+        self,
+        wait: bool = True,
+        wait_other_notice: bool = False,
+        other_nodes: Any | None = None,
+        gently: bool = True,
+        wait_seconds: Any | None = None,
+        marks: Any | None = None,
+    ) -> Any: ...
+
 
 class _CCMCluster(Protocol):
     def set_configuration_options(
@@ -98,8 +108,9 @@ def _get_binary_interface(node: _CCMNode) -> tuple[str, int]:
     return interface
 
 
-def start_cluster(cluster: _CCMCluster, timeout: float = 120.0) -> None:
-    cluster.start(wait_for_binary_proto=True, wait_other_notice=True)
+def start_cluster(cluster: _CCMCluster, timeout: float = 120.0, jvm_args: list[str] | None = None) -> None:
+    """Starts every node; `jvm_args` are extra Scylla options, e.g. `["--smp", "1"]`."""
+    cluster.start(wait_for_binary_proto=True, wait_other_notice=True, jvm_args=jvm_args)
 
     for node in cluster.nodelist():
         host, port = _get_binary_interface(node)
