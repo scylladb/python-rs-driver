@@ -51,6 +51,10 @@ dev = [
 ]
 
 
+coverage = [
+    "coverage==7.16.2",
+]
+
 tls-integration = [
     "cryptography>=49.0.0",
     "cffi>=2.0.0",
@@ -91,3 +95,14 @@ markers = [
     "requires_db: tests that require database",
     "requires_ccm: tests that require CCM cluster",
 ]
+
+# Used by scripts/coverage.sh, see docs/source/topics/testing.md.
+[tool.coverage.run]
+source_pkgs = ["scylla"]
+parallel = true
+patch = ["subprocess"]
+relative_files = true
+
+[tool.coverage.paths]
+# The tests run against the installed wheel; report the files in the repository.
+scylla = ["python/scylla", "*/site-packages/scylla"]
