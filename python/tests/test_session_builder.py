@@ -1,5 +1,6 @@
 import ipaddress
 import time
+import uuid
 from collections.abc import Generator, Sequence
 from datetime import timedelta
 from typing import Any
@@ -16,7 +17,7 @@ from helpers.ccm import (  # pyright: ignore[reportMissingTypeStubs]
     start_cluster,
     stop_and_remove_cluster,
 )
-from helpers.ddl import ddl
+from helpers.ddl import SchemaQueriesLBP, ddl
 from helpers.session import session_builder
 from scylla.auth import Authenticator, AuthenticatorProvider
 from scylla.errors import (
@@ -33,8 +34,16 @@ from scylla.policies.timestamp_generator import (
     SimpleTimestampGenerator,
     TimestampGenerator,
 )
-from scylla.session import Compression, ExecutionProfile, PoolSize, SelfIdentity, SessionBuilder, WriteCoalescingDelay
-from scylla.statement import Consistency, SerialConsistency
+from scylla.session import (
+    Compression,
+    ExecutionProfile,
+    PoolSize,
+    SelfIdentity,
+    Session,
+    SessionBuilder,
+    WriteCoalescingDelay,
+)
+from scylla.statement import Consistency, SerialConsistency, Statement
 
 
 @pytest.mark.asyncio
@@ -260,6 +269,120 @@ async def test_address_translator_dict_discovery():
     session = await builder.connect()
 
     assert session is not None
+
+
+class RecordingAddressTranslator:
+    """Keeps every peer the driver asks to translate, and what it exposes at that moment."""
+
+    peers: list[UntranslatedPeer]
+    seen: list[dict[str, Any]]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.peers = []
+        self.seen = []
+
+    def translate(self, info: UntranslatedPeer) -> tuple[Address, int]:
+        self.peers.append(info)
+        self.seen.append(
+            {
+                "host_id": info.host_id,
+                "untranslated_address": info.untranslated_address,
+                "datacenter": info.datacenter,
+                "rack": info.rack,
+                "repr": repr(info),
+            }
+        )
+        return info.untranslated_address
+
+
+async def _nodes_by_host_id(session: Session) -> dict[uuid.UUID, dict[str, Any]]:
+    """Every node of the cluster as the cluster itself reports it.
+
+    Both tables are read from the same node, so together they list each node once.
+    """
+    nodes: dict[uuid.UUID, dict[str, Any]] = {}
+    for table in ("system.local", "system.peers"):
+        statement = Statement(f"SELECT host_id, data_center, rack, rpc_address FROM {table}")
+        statement.load_balancing_policy = SchemaQueriesLBP()
+        result = await session.execute(statement)
+        async for row in result:
+            nodes[row["host_id"]] = row
+    return nodes
+
+
+async def _connect_recording() -> tuple[RecordingAddressTranslator, dict[uuid.UUID, dict[str, Any]]]:
+    translator = RecordingAddressTranslator()
+    session = await session_builder().address_translator(translator).connect()
+    return translator, await _nodes_by_host_id(session)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_address_translator_receives_peer_metadata():
+    translator, nodes = await _connect_recording()
+
+    # The driver translates the peers the control connection learns about; with
+    # a single contact point those are all the nodes but the one it connected to.
+    assert len(nodes) > 1, "this test needs a cluster with peers to translate"
+    assert len({seen["host_id"] for seen in translator.seen}) >= len(nodes) - 1
+    for seen in translator.seen:
+        node = nodes[seen["host_id"]]
+        assert isinstance(seen["host_id"], uuid.UUID)
+        assert seen["untranslated_address"] == (node["rpc_address"], 9042)
+        assert seen["datacenter"] == node["data_center"]
+        assert seen["rack"] == node["rack"]
+        assert seen["repr"].startswith(
+            f"UntranslatedPeer(host_id='{seen['host_id']}', "
+            + f"untranslated_address=('{node['rpc_address']}', 9042), datacenter="
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+@pytest.mark.xfail(
+    reason="UntranslatedPeer.__repr__ formats datacenter and rack with Rust's Debug: "
+    + "datacenter=Some(\"datacenter1\") instead of datacenter='datacenter1'",
+    strict=True,
+    # Only the repr mismatch is the expected failure: a failed connection or a
+    # translator that was never called must fail the test.
+    raises=AssertionError,
+)
+async def test_untranslated_peer_repr_is_python_style():
+    translator, nodes = await _connect_recording()
+
+    seen = translator.seen[0]
+    node = nodes[seen["host_id"]]
+    assert seen["repr"] == (
+        f"UntranslatedPeer(host_id='{seen['host_id']}', untranslated_address=('{node['rpc_address']}', 9042), "
+        + f"datacenter={node['data_center']!r}, rack={node['rack']!r})"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_dict_address_translator_translates_a_driver_peer():
+    translator, _ = await _connect_recording()
+    peer = translator.peers[0]
+    ip, port = peer.untranslated_address
+
+    mapped = DictAddressTranslator({(ip, port): ("10.1.2.3", 19042)})
+    assert mapped.translate(peer) == (ipaddress.IPv4Address("10.1.2.3"), 19042)
+
+    unmapped = DictAddressTranslator({(ip, port + 1): ("10.1.2.3", 19042)})
+    with pytest.raises(AddressTranslationError) as excinfo:
+        unmapped.translate(peer)
+    assert str(excinfo.value) == f"Address translation failed: No rule for address {ip}:{port}"
+
+
+@pytest.mark.parametrize("translator", [object(), 42])
+def test_object_without_translate_is_rejected(translator: Any):
+    with pytest.raises(SessionConfigError) as excinfo:
+        SessionBuilder().address_translator(translator)
+
+    assert str(excinfo.value) == (
+        f"Expected a class implementing AddressTranslator protocol, got {type(translator).__name__}"
+    )
 
 
 @pytest.mark.asyncio
