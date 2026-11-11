@@ -74,6 +74,14 @@ requires_db:
 test:
 	uv run pytest -v
 
+.PHONY: test-rust
+test-rust:
+	cargo test --no-default-features --features rust-tests
+
+.PHONY: coverage
+coverage:
+	scripts/coverage.sh
+
 .PHONY: build
 build: build-rust build-python
 

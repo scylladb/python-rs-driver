@@ -1,0 +1,100 @@
+name: Coverage
+
+# Measures test coverage of the Python package and the Rust extension with
+# scripts/coverage.sh. See docs/source/topics/testing.md.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request cancels its run; every main commit gets its own.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  SCYLLA_URI: "127.0.0.2:9042"
+  SCYLLA_URI2: "127.0.0.3:9042"
+  SCYLLA_URI3: "127.0.0.4:9042"
+  CARGO_LLVM_COV_VERSION: "0.9.1"
+
+jobs:
+  coverage:
+    name: Coverage
+    # The same image as CI: the uv cache key does not name the image.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The pull request's head commit, not the merge commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Test the coverage script
+        run: python3 scripts/coverage_tests.py
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          components: llvm-tools-preview
+          # By default the action sets RUSTFLAGS, which overrides the
+          # `--cfg scylla_unstable` in .cargo/config.toml. Build as locally.
+          rustflags: ""
+
+      - name: Install cargo-llvm-cov
+        run: cargo install --locked "cargo-llvm-cov@${CARGO_LLVM_COV_VERSION}"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Start ScyllaDB cluster
+        run: make up
+
+      - name: Wait for cluster to be ready
+        run: |
+          for i in {1..30};
+          do docker ps | grep -q "unhealthy\|starting" &&
+          echo "Waiting for nodes... (attempt $i/30)" && sleep 1 ||
+          { echo "All nodes ready"; break; }; done
+
+      - name: Measure coverage
+        run: make coverage
+
+      - name: Write the job summary
+        if: always()
+        run: |
+          if [[ -f target/coverage/summary.md ]]; then
+            cat target/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No coverage summary was written." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: |
+            target/coverage/reports
+            target/coverage/summary.md
+            target/coverage/pytest.xml
+            target/coverage/rust-tests.log
+          if-no-files-found: warn
+
+      - name: Stop and cleanup ScyllaDB cluster
+        if: always()
+        run: |
+          make down
+          docker system prune -af --volumes
