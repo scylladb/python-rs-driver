@@ -21,6 +21,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 dynamic = ["version"]
+dependencies = [
+    "scylla-driver>=3.29.10",
+]
 
 [project.urls]
 Homepage = "https://github.com/scylladb/python-rs-driver"
