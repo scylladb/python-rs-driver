@@ -427,6 +427,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "SpeculativeExecutionPolicyError",
         py.get_type::<SpeculativeExecutionPolicyError>(),
     )?;
+    module.add_class::<types::PyCqlRequestKind>()?;
     module.add_class::<types::PyCqlResponseKind>()?;
     module.add_class::<types::PyOperationType>()?;
     module.add_class::<types::PyWriteType>()?;
