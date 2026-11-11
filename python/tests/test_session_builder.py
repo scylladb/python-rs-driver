@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import time
 from collections.abc import Generator, Sequence
 from datetime import timedelta
@@ -18,6 +19,7 @@ from helpers.ccm import (  # pyright: ignore[reportMissingTypeStubs]
 )
 from helpers.ddl import ddl
 from helpers.session import session_builder
+from helpers.system_clients import own_client_options
 from scylla.auth import Authenticator, AuthenticatorProvider
 from scylla.errors import (
     AddressTranslationError,
@@ -699,6 +701,35 @@ async def test_session_builder_complex_types_and_identity():
     assert config.identity.application_name == "Scylla-Validation-Suite"
 
     assert config.authenticator is auth_provider
+
+
+def test_driver_config_reporting_config():
+    assert SessionBuilder().get_config().driver_config_reporting is True
+
+    builder = SessionBuilder().driver_config_reporting(False)
+    assert builder.get_config().driver_config_reporting is False
+
+    builder = builder.driver_config_reporting(True)
+    assert builder.get_config().driver_config_reporting is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+@pytest.mark.parametrize("report", [True, False])
+async def test_driver_config_reporting_in_system_clients(report: bool):
+    session = await session_builder().driver_config_reporting(report).connect()
+
+    own_options = await own_client_options(session)
+    # The option switches off only DRIVER_CONFIG. Each connection still sends SESSION_ID.
+    assert own_options, "system.clients has no row with the session id of this session"
+
+    reports = [options["DRIVER_CONFIG"] for options in own_options if "DRIVER_CONFIG" in options]
+    if report:
+        # Only the control connection sends DRIVER_CONFIG.
+        assert len(reports) == 1
+        assert json.loads(reports[0])["version"] == 1
+    else:
+        assert reports == []
 
 
 @pytest.mark.asyncio
