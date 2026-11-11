@@ -8,11 +8,13 @@ mod macros;
 
 mod attrs;
 pub(crate) mod config;
+mod connection;
 pub(crate) mod execution;
 pub(crate) mod request;
 pub(crate) mod types;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
+pub(crate) use connection::{PyBrokenConnectionKind, PyConnectionSetupErrorKind};
 pub(crate) use macros::py_err;
 
 /* Python exception classes */
@@ -129,6 +131,23 @@ create_exception!(
     ConnectionPoolError
 );
 create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
+create_exception_multi!(
+    scylla.errors,
+    ConnectTimeout,
+    (ConnectionPoolBroken, PyTimeoutError)
+);
+create_exception_multi!(
+    scylla.errors,
+    AddressTranslationFailed,
+    (ConnectionPoolBroken, AddressTranslationError)
+);
+create_exception!(scylla.errors, ConnectionLost, ConnectionPoolBroken);
+create_exception!(scylla.errors, ConnectionSetupFailed, ConnectionPoolBroken);
+create_exception!(
+    scylla.errors,
+    ConnectionAuthenticationFailed,
+    ConnectionPoolBroken
+);
 
 create_exception!(scylla.errors, RequestFailedError, ExecutionError);
 
@@ -303,6 +322,21 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "NodeDisabledByHostFilter",
         py.get_type::<NodeDisabledByHostFilter>(),
     )?;
+    module.add("ConnectTimeout", py.get_type::<ConnectTimeout>())?;
+    module.add(
+        "AddressTranslationFailed",
+        py.get_type::<AddressTranslationFailed>(),
+    )?;
+    module.add("ConnectionLost", py.get_type::<ConnectionLost>())?;
+    module.add(
+        "ConnectionSetupFailed",
+        py.get_type::<ConnectionSetupFailed>(),
+    )?;
+    module.add_class::<PyConnectionSetupErrorKind>()?;
+    module.add(
+        "ConnectionAuthenticationFailed",
+        py.get_type::<ConnectionAuthenticationFailed>(),
+    )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
     module.add("AlreadyPrepared", py.get_type::<AlreadyPrepared>())?;
     module.add(
@@ -316,6 +350,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     )?;
     module.add("RequestFailedError", py.get_type::<RequestFailedError>())?;
     module.add("BrokenConnection", py.get_type::<BrokenConnection>())?;
+    module.add_class::<PyBrokenConnectionKind>()?;
     module.add("ConnectionBusy", py.get_type::<ConnectionBusy>())?;
     module.add(
         "NonfinishedPagingState",
@@ -427,6 +462,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "SpeculativeExecutionPolicyError",
         py.get_type::<SpeculativeExecutionPolicyError>(),
     )?;
+    module.add_class::<types::PyCqlRequestKind>()?;
     module.add_class::<types::PyCqlResponseKind>()?;
     module.add_class::<types::PyOperationType>()?;
     module.add_class::<types::PyWriteType>()?;
