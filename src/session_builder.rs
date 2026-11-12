@@ -465,6 +465,18 @@ impl SessionBuilder {
         slf
     }
 
+    fn driver_config_reporting<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        report: bool,
+    ) -> PyRef<'py, Self> {
+        {
+            let mut inner = slf.inner.lock_py_attached(py).unwrap();
+            inner.config.driver_config_reporting = report;
+        }
+        slf
+    }
+
     fn tls_context<'py>(
         slf: PyRef<'py, Self>,
         py: Python<'py>,
@@ -746,6 +758,11 @@ impl PySessionBuilderConfig {
         PySelfIdentity {
             inner: self.config.identity.clone(),
         }
+    }
+
+    #[getter]
+    fn driver_config_reporting(&self) -> bool {
+        self.config.driver_config_reporting
     }
 }
 

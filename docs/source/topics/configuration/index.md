@@ -11,5 +11,6 @@ TBD.
    consistency
    serial-consistency
    execution-profiles
+   driver-config-reporting
 
 ```

@@ -1,5 +1,7 @@
 import ipaddress
+import json
 import time
+import uuid
 from collections.abc import Generator, Sequence
 from datetime import timedelta
 from typing import Any
@@ -28,13 +30,15 @@ from scylla.errors import (
 )
 from scylla.policies.address_translator import AddressTranslator, DictAddressTranslator, UntranslatedPeer
 from scylla.policies.host_filter import AcceptAllHostFilter, AllowListHostFilter, DcHostFilter, HostFilter, Peer
+from scylla.policies.load_balancing import SingleTargetPolicy
 from scylla.policies.timestamp_generator import (
     MonotonicTimestampGenerator,
     SimpleTimestampGenerator,
     TimestampGenerator,
 )
+from scylla.results import DictRowFactory
 from scylla.session import Compression, ExecutionProfile, PoolSize, SelfIdentity, SessionBuilder, WriteCoalescingDelay
-from scylla.statement import Consistency, SerialConsistency
+from scylla.statement import Consistency, SerialConsistency, Statement
 
 
 @pytest.mark.asyncio
@@ -699,6 +703,65 @@ async def test_session_builder_complex_types_and_identity():
     assert config.identity.application_name == "Scylla-Validation-Suite"
 
     assert config.authenticator is auth_provider
+
+
+def test_driver_config_reporting_config():
+    assert SessionBuilder().get_config().driver_config_reporting is True
+
+    builder = SessionBuilder().driver_config_reporting(False)
+    assert builder.get_config().driver_config_reporting is False
+
+    builder = builder.driver_config_reporting(True)
+    assert builder.get_config().driver_config_reporting is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+@pytest.mark.parametrize("report", [True, False])
+async def test_driver_config_reporting_in_system_clients(report: bool):
+    # A unique application name identifies the rows of this session in system.clients.
+    application_name = f"driver-config-reporting-{uuid.uuid4()}"
+    session = await (
+        session_builder()
+        .custom_identity(SelfIdentity(application_name=application_name))
+        .driver_config_reporting(report)
+        .connect()
+    )
+
+    result = await session.execute(
+        "SELECT column_name FROM system_schema.columns "
+        "WHERE keyspace_name = 'system' AND table_name = 'clients' AND column_name = 'client_options'"
+    )
+    if await result.first_row() is None:
+        pytest.skip("system.clients has no client_options column")
+
+    # Each node shows only its own clients in system.clients. Thus, read it from each node.
+    own_options: list[dict[str, str]] = []
+    for node in session.cluster_state.nodes_info.values():
+        statement = Statement("SELECT client_options FROM system.clients")
+        statement.execution_profile = ExecutionProfile(
+            row_factory=DictRowFactory(),
+            load_balancing_policy=SingleTargetPolicy(node),
+        )
+        result = await session.execute(statement)
+        for row in await result.all():
+            options: dict[str, str] | None = row["client_options"]
+            if options is not None and options.get("APPLICATION_NAME") == application_name:
+                own_options.append(options)
+
+    assert own_options, "system.clients has no row with the application name of this session"
+    # The option switches off only DRIVER_CONFIG. Each connection still sends SESSION_ID.
+    session_ids = {options.get("SESSION_ID") for options in own_options}
+    assert len(session_ids) == 1
+    assert None not in session_ids
+
+    reports = [options["DRIVER_CONFIG"] for options in own_options if "DRIVER_CONFIG" in options]
+    if report:
+        # Only the control connection sends DRIVER_CONFIG.
+        assert len(reports) == 1
+        assert json.loads(reports[0])["version"] == 1
+    else:
+        assert reports == []
 
 
 @pytest.mark.asyncio
