@@ -52,7 +52,7 @@ dev = [
 
 
 coverage = [
-    "coverage==7.16.2",
+    "coverage==7.17.3",
 ]
 
 tls-integration = [
