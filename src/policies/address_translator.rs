@@ -242,19 +242,6 @@ impl From<&UntranslatedPeer<'_>> for PyUntranslatedPeer {
     }
 }
 
-impl<'a> From<&'a PyUntranslatedPeer> for UntranslatedPeer<'a> {
-    fn from(peer: &'a PyUntranslatedPeer) -> UntranslatedPeer<'a> {
-        let (ip, port) = peer.untranslated_address;
-
-        UntranslatedPeer::from_fields(
-            peer.host_id,
-            SocketAddr::new(ip, port),
-            peer.datacenter.as_deref(),
-            peer.rack.as_deref(),
-        )
-    }
-}
-
 #[pymodule]
 pub(crate) fn address_translator(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyDictAddressTranslator>()?;
