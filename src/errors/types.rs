@@ -40,22 +40,6 @@ impl From<WriteType> for PyWriteType {
     }
 }
 
-impl From<PyWriteType> for WriteType {
-    fn from(value: PyWriteType) -> Self {
-        match value {
-            PyWriteType::Simple() => WriteType::Simple,
-            PyWriteType::Batch() => WriteType::Batch,
-            PyWriteType::UnloggedBatch() => WriteType::UnloggedBatch,
-            PyWriteType::Counter() => WriteType::Counter,
-            PyWriteType::BatchLog() => WriteType::BatchLog,
-            PyWriteType::Cas() => WriteType::Cas,
-            PyWriteType::View() => WriteType::View,
-            PyWriteType::Cdc() => WriteType::Cdc,
-            PyWriteType::Other { value } => WriteType::Other(value),
-        }
-    }
-}
-
 #[pyclass(
     module = "scylla.errors",
     name = "OperationType",
@@ -76,16 +60,6 @@ impl From<OperationType> for PyOperationType {
             OperationType::Read => PyOperationType::Read(),
             OperationType::Write => PyOperationType::Write(),
             OperationType::Other(i) => PyOperationType::Other { code: i },
-        }
-    }
-}
-
-impl From<PyOperationType> for OperationType {
-    fn from(value: PyOperationType) -> Self {
-        match value {
-            PyOperationType::Read() => OperationType::Read,
-            PyOperationType::Write() => OperationType::Write,
-            PyOperationType::Other { code } => OperationType::Other(code),
         }
     }
 }
@@ -124,21 +98,6 @@ impl From<CqlResponseKind> for PyCqlResponseKind {
             CqlResponseKind::AuthChallenge => PyCqlResponseKind::AuthChallenge,
             CqlResponseKind::AuthSuccess => PyCqlResponseKind::AuthSuccess,
             _ => unreachable!("Unhandled `CqlResponseKind` variant"),
-        }
-    }
-}
-
-impl From<PyCqlResponseKind> for CqlResponseKind {
-    fn from(value: PyCqlResponseKind) -> Self {
-        match value {
-            PyCqlResponseKind::Error => CqlResponseKind::Error,
-            PyCqlResponseKind::Ready => CqlResponseKind::Ready,
-            PyCqlResponseKind::Authenticate => CqlResponseKind::Authenticate,
-            PyCqlResponseKind::Supported => CqlResponseKind::Supported,
-            PyCqlResponseKind::Result => CqlResponseKind::Result,
-            PyCqlResponseKind::Event => CqlResponseKind::Event,
-            PyCqlResponseKind::AuthChallenge => CqlResponseKind::AuthChallenge,
-            PyCqlResponseKind::AuthSuccess => CqlResponseKind::AuthSuccess,
         }
     }
 }
