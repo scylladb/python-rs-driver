@@ -19,6 +19,19 @@ class Session:
         Access information about the cluster topology or schema through ClusterState object.
         """
 
+    @property
+    def session_id(self) -> uuid.UUID:
+        """
+        The identifier of this session.
+
+        Each connection of the session sends this UUID in the `SESSION_ID` option of the
+        STARTUP message. The server shows it in `system.clients.client_options`. Log this
+        value to find the rows of the session in `system.clients`.
+
+        The driver makes the identifier when it creates the session. The identifier does
+        not change.
+        """
+
     def use_keyspace(self, keyspace: str, case_sensitive: bool = False) -> DriverFuture[None]:
         """
         Sends `USE <keyspace>` request on all connections.
