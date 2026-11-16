@@ -2,7 +2,8 @@
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": [
         "config:recommended",
-        "helpers:pinGitHubActionDigestsToSemver"
+        "helpers:pinGitHubActionDigestsToSemver",
+        "group:allNonMajor"
     ],
     "commitBodyTable": true,
     // Keep the PR body short: drop the config description, rebase checkbox, footer
@@ -24,17 +25,26 @@
     "schedule": [
         "* * * * 6"
     ],
-    // Refresh docs/uv.lock to the newest versions that docs/pyproject.toml allows.
-    // The root uv.lock is not committed, so this touches only the docs lockfile.
-    "pep621": {
-        "lockFileMaintenance": {
-            "enabled": true,
-            "schedule": [
-                "* * * * 6"
-            ]
-        }
+    "lockFileMaintenance": {
+        "enabled": true,
+        "schedule": [
+            "* * * * 6"
+        ]
     },
     "packageRules": [
+        {
+            "description": "Keep breaking updates out of the weekly group. A 0.x minor update, such as 0.29 to 0.30, is breaking but has the type minor.",
+            "matchIsBreaking": true,
+            "groupName": null,
+            "groupSlug": null
+        },
+        {
+            "description": "Change Cargo.toml only when a new version is out of range. Lock file maintenance does the in-range updates.",
+            "matchManagers": [
+                "cargo"
+            ],
+            "rangeStrategy": "replace"
+        },
         {
             "description": "The root .python-version is the oldest supported Python, and docs/.python-version matches the docs CI. Do not bump them to the newest release.",
             "matchManagers": [
@@ -54,14 +64,16 @@
             "enabled": false
         },
         {
-            "description": "Both crates are pinned to the same exact version. Update them together.",
+            "description": "pyo3 and pyo3-build-config are pinned to the same exact version, and pyo3-log limits the pyo3 versions it accepts. Update them together. A new pyo3 often needs an in-range pyo3-log update, so keep the in-range updates for this group.",
             "groupName": "PyO3",
+            "rangeStrategy": "update-lockfile",
             "matchManagers": [
                 "cargo"
             ],
             "matchPackageNames": [
                 "pyo3",
-                "pyo3-build-config"
+                "pyo3-build-config",
+                "pyo3-log"
             ]
         },
         {
