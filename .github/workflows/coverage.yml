@@ -24,6 +24,7 @@ env:
   SCYLLA_URI2: "127.0.0.3:9042"
   SCYLLA_URI3: "127.0.0.4:9042"
   CARGO_LLVM_COV_VERSION: "0.9.1"
+  UV_LOCKED: "1"
 
 jobs:
   coverage:

@@ -15,6 +15,7 @@ env:
   SCYLLA_URI2: "127.0.0.3:9042"
   SCYLLA_URI3: "127.0.0.4:9042"
   RUSTFLAGS: "-Dwarnings --cfg scylla_unstable"
+  UV_LOCKED: "1"
 
 jobs:
   static-checks:

@@ -47,8 +47,3 @@ docs/source/api/reference/
 
 # Zed
 .zed
-
-# No need for that in a library
-uv.lock
-
-!docs/uv.lock
