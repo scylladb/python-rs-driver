@@ -22,8 +22,9 @@ query shows the configuration of a client, for each ScyllaDB driver.
 
 Each connection also sends a `SESSION_ID` option. Its value is a UUID that the
 driver makes once for each session. All connections of one session send the same
-`SESSION_ID`. `Session.session_id` returns it. Log it to find the rows of the
-session in `system.clients`:
+`SESSION_ID`. `Session.session_id` returns it. For a legacy session,
+`LegacySession.session_id` returns it. Log it to find the rows of the session in
+`system.clients`:
 
 ```python
 print(f"session id: {session.session_id}")

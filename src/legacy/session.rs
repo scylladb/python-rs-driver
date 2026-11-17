@@ -381,6 +381,12 @@ impl PyLegacySession {
         self.core.cluster_state(py)
     }
 
+    /// The identifier of the session. Each connection sends it as `SESSION_ID` in STARTUP.
+    #[getter]
+    fn session_id(&self, py: Python<'_>) -> Py<PyAny> {
+        self.core.session_id(py)
+    }
+
     /// Row factory of requests that do not set one; `None` for the driver default.
     #[getter]
     fn get_row_factory(&self, py: Python<'_>) -> Option<Py<PyAny>> {
