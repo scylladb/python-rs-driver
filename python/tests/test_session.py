@@ -66,7 +66,8 @@ async def test_session_id_identifies_the_connections_of_the_session(session: Ses
     session_id = session.session_id
 
     assert isinstance(session_id, uuid.UUID)
-    assert session.session_id == session_id
+    # The session makes the object once. Each read returns the same object.
+    assert session.session_id is session_id
 
     other_session = await connect()
     assert other_session.session_id != session_id

@@ -164,8 +164,8 @@ impl PySession {
     }
 
     #[getter]
-    fn get_session_id(&self) -> Uuid {
-        self.core.inner.session_id()
+    fn get_session_id(&self, py: Python<'_>) -> Py<PyAny> {
+        self.core.session_id(py)
     }
 }
 

@@ -38,6 +38,9 @@ pub(crate) struct SessionCore {
     /// Cached Python snapshot of the cluster state. Shared by every facade
     /// wrapping this core, so one underlying session has exactly one cache.
     cluster_state: Arc<Mutex<Py<PyClusterState>>>,
+    /// The session id as a Python `uuid.UUID`. The session id does not change.
+    /// Thus, the core makes the object once, and each read returns the same object.
+    session_id: Arc<Py<PyAny>>,
     /// Row factory of the default execution profile, taken at connect time.
     default_row_factory: Option<PyRowFactory>,
 }
@@ -47,13 +50,22 @@ impl SessionCore {
         inner: Arc<Session>,
         default_row_factory: Option<PyRowFactory>,
     ) -> Result<Self, PyErr> {
-        let cluster_state =
-            Python::attach(|py| Py::new(py, PyClusterState::try_from(inner.get_cluster_state())?))?;
+        let (cluster_state, session_id) = Python::attach(|py| -> PyResult<_> {
+            let cluster_state = Py::new(py, PyClusterState::try_from(inner.get_cluster_state())?)?;
+            let session_id = inner.session_id().into_pyobject(py)?.unbind();
+            Ok((cluster_state, session_id))
+        })?;
         Ok(Self {
             cluster_state: Arc::new(Mutex::new(cluster_state)),
+            session_id: Arc::new(session_id),
             inner,
             default_row_factory,
         })
+    }
+
+    /// Returns the session id as a Python `uuid.UUID`. Each call returns the same object.
+    pub(crate) fn session_id(&self, py: Python<'_>) -> Py<PyAny> {
+        self.session_id.clone_ref(py)
     }
 }
 
