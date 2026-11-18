@@ -97,6 +97,8 @@ class SessionBuilderConfig:
     def write_coalescing(self) -> WriteCoalescingDelay | None: ...
     @property
     def identity(self) -> SelfIdentity: ...
+    @property
+    def driver_config_reporting(self) -> bool: ...
 
 class SessionBuilder:
     """
@@ -670,6 +672,46 @@ class SessionBuilder:
         Returns
         -------
         SessionBuilder
+        """
+
+    def driver_config_reporting(self, report: bool) -> SessionBuilder:
+        """
+        Sets whether the driver reports its effective configuration to the server.
+
+        The default is ``True``.
+
+        The control connection sends a JSON description of the session
+        configuration in the ``DRIVER_CONFIG`` option of the STARTUP message.
+        The description includes:
+
+        - the timeouts,
+        - the connection pool settings,
+        - the load balancing, retry and speculative execution policies.
+
+        The server shows this option in ``system.clients.client_options``.
+        All ScyllaDB drivers use the same schema for the description. Thus, the
+        same query shows the configuration of a client, for each ScyllaDB driver.
+
+        Set ``report`` to ``False`` if the cluster must not get the configuration
+        of the client. This has no effect on the ``SESSION_ID`` option.
+        ``SESSION_ID`` is a UUID that gives no information about the client.
+
+        Parameters
+        ----------
+        report : bool
+
+        Returns
+        -------
+        SessionBuilder
+
+        Examples
+        --------
+        >>> session = await (
+        ...     SessionBuilder()
+        ...     .contact_points(["127.0.0.1:9042"])
+        ...     .driver_config_reporting(False)
+        ...     .connect()
+        ... )
         """
 
     def tls_context(self, tls_context: TlsContext | None) -> SessionBuilder:

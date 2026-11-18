@@ -162,6 +162,11 @@ impl PySession {
     fn get_cluster_state(&self, py: Python<'_>) -> PyResult<Py<PyClusterState>> {
         self.core.cluster_state(py)
     }
+
+    #[getter]
+    fn get_session_id(&self, py: Python<'_>) -> Py<PyAny> {
+        self.core.session_id(py)
+    }
 }
 
 #[pymodule]

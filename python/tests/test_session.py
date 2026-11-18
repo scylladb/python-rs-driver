@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
 from helpers.session import connect
+from helpers.system_clients import own_client_options
 from scylla.session import Session
 
 
@@ -57,6 +58,22 @@ async def test_refresh_metadata_replaces_cluster_state(session: Session):
     after = session.cluster_state
     assert after is not before
     assert after.nodes_info.keys() == before.nodes_info.keys()
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_session_id_identifies_the_connections_of_the_session(session: Session):
+    session_id = session.session_id
+
+    assert isinstance(session_id, uuid.UUID)
+    # The session makes the object once. Each read returns the same object.
+    assert session.session_id is session_id
+
+    other_session = await connect()
+    assert other_session.session_id != session_id
+
+    # The server shows the session id as SESSION_ID in system.clients.
+    assert await own_client_options(session), "system.clients has no row with the session id"
 
 
 # Scylla warns about a replication factor below

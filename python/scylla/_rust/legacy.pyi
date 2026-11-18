@@ -115,6 +115,17 @@ class LegacySession:
         """
 
     @property
+    def session_id(self) -> UUID:
+        """
+        The identifier of this session, as in :attr:`scylla.session.Session.session_id`.
+
+        Each connection of the session sends this UUID in the ``SESSION_ID`` option of the
+        STARTUP message. The server shows it in ``system.clients.client_options``.
+
+        Unlike the legacy driver, you cannot set this property.
+        """
+
+    @property
     def row_factory(self) -> RowFactoryLike | None:
         """Row factory of requests that do not set one; ``None`` for the driver default."""
 

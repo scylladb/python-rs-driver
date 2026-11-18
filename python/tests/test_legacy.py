@@ -166,6 +166,33 @@ def test_connect_legacy_returns_legacy_session(session: LegacySession) -> None:
 
 
 @pytest.mark.requires_db
+def test_session_id_identifies_the_connections_of_the_session(session: LegacySession) -> None:
+    session_id = session.session_id
+
+    assert isinstance(session_id, uuid.UUID)
+    assert session.session_id is session_id
+
+    with session_builder().connect_legacy() as other_session:
+        assert other_session.session_id != session_id
+
+    # The server shows the session id as SESSION_ID in system.clients.
+    # Each node shows only the connections to that node.
+    column = session.execute(
+        "SELECT column_name FROM system_schema.columns "
+        "WHERE keyspace_name = 'system' AND table_name = 'clients' AND column_name = 'client_options'"
+    ).one()
+    if column is None:
+        pytest.skip("system.clients has no client_options column")
+    session_ids = {
+        row["client_options"].get("SESSION_ID")
+        for node in session.cluster.nodes_info.values()
+        for row in session.execute("SELECT client_options FROM system.clients", host=node)
+        if row["client_options"] is not None
+    }
+    assert str(session_id) in session_ids, "system.clients has no row with the session id"
+
+
+@pytest.mark.requires_db
 def test_execute_returns_result_set_of_dict_rows(session: LegacySession) -> None:
     rows = session.execute("SELECT release_version FROM system.local")
     assert isinstance(rows, ResultSet)
