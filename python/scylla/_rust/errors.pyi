@@ -265,7 +265,41 @@ class MetadataError(ExecutionError):
 class MetadataFetchFailed(MetadataError):
     table: str
 
-class InvalidClusterMetadata(MetadataError): ...
+class InvalidClusterMetadataKind(IntEnum):
+    """Why the cluster metadata is not valid."""
+
+    EmptyPeers = ...
+    """The list of peers is empty."""
+
+    EmptyTokenLists = ...
+    """All peers have an empty list of tokens."""
+
+    InvalidKeyspaceStrategy = ...
+    """The replication strategy of a keyspace is not valid."""
+
+    InvalidUdtFieldType = ...
+    """The driver could not parse the type of a user defined type field."""
+
+    CircularUdtDependency = ...
+    """User defined types refer to each other in a circle."""
+
+    InvalidColumnType = ...
+    """The driver could not parse the type of a column."""
+
+    UnknownColumnKind = ...
+    """A column has an unknown kind."""
+
+    InvalidClientRoutesPort = ...
+    """A client route has a port that is not valid."""
+
+class InvalidClusterMetadata(MetadataError):
+    """The cluster sent metadata that is not valid, for example a column type that the driver cannot parse.
+
+    The data in the cluster is wrong, so a retry does not help.
+    """
+
+    kind: InvalidClusterMetadataKind
+    """Why the metadata is not valid."""
 
 class SchemaAgreementError(ExecutionError):
     """Failures specific to schema agreement. Request failures raise their own class."""

@@ -15,18 +15,18 @@ use scylla::errors::{
 };
 
 use crate::errors::connection::{broken_connection_in_flight_to_pyerr, pool_broken_to_pyerr};
+use crate::errors::metadata;
 use crate::errors::{
     AlreadyExists, AuthenticationFailed, BadKeyspaceName, ConnectionBusy,
     ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure, HostnameResolutionFailed,
-    InvalidClusterMetadata, InvalidRequest, IsBootstrapping, KeyspaceNameMismatch,
-    MetadataFetchFailed, NoHostAvailable, NoKnownNodes, NodeDisabledByHostFilter,
-    NonfinishedPagingState, OperationTimedOut, Overloaded, PartitionKeyExtractionFailed,
-    PreparedStatementIdsMismatch, RateLimitReached, ReadFailure, ReadTimeout, RepreparedIdChanged,
-    RepreparedIdMissingInBatch, RequestEncodingFailed, RequiredHostAbsent, ResponseParseError,
-    SchemaAgreementTimeout, ServerConfigError, ServerError, ServerProtocolError,
-    SessionConfigError, TooManyStatementsInBatch, TraceUnavailable, TruncateError, Unauthorized,
-    Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey,
-    WriteFailure, WriteTimeout, with_attrs,
+    InvalidRequest, IsBootstrapping, KeyspaceNameMismatch, MetadataFetchFailed, NoHostAvailable,
+    NoKnownNodes, NodeDisabledByHostFilter, NonfinishedPagingState, OperationTimedOut, Overloaded,
+    PartitionKeyExtractionFailed, PreparedStatementIdsMismatch, RateLimitReached, ReadFailure,
+    ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestEncodingFailed,
+    RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout, ServerConfigError, ServerError,
+    ServerProtocolError, SessionConfigError, TooManyStatementsInBatch, TraceUnavailable,
+    TruncateError, Unauthorized, Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared,
+    ValuesTooLongForKey, WriteFailure, WriteTimeout, with_attrs,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -109,11 +109,13 @@ pub(crate) fn metadata_error_to_pyerr(
     match err {
         RustMetadataError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(py, e, message),
         RustMetadataError::FetchError(e) => metadata_fetch_error_to_pyerr(py, e, message),
-        RustMetadataError::Peers(_)
-        | RustMetadataError::Keyspaces(_)
-        | RustMetadataError::Udts(_)
-        | RustMetadataError::Tables(_)
-        | RustMetadataError::ClientRoutes(_) => py_err!(InvalidClusterMetadata, message),
+        RustMetadataError::Peers(e) => metadata::peers_error_to_pyerr(py, e, message),
+        RustMetadataError::Keyspaces(e) => metadata::keyspaces_error_to_pyerr(py, e, message),
+        RustMetadataError::Udts(e) => metadata::udt_error_to_pyerr(py, e, message),
+        RustMetadataError::Tables(e) => metadata::tables_error_to_pyerr(py, e, message),
+        RustMetadataError::ClientRoutes(e) => {
+            metadata::client_routes_error_to_pyerr(py, e, message)
+        }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }

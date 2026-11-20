@@ -10,12 +10,14 @@ mod attrs;
 pub(crate) mod config;
 pub(crate) mod connection;
 pub(crate) mod execution;
+mod metadata;
 pub(crate) mod request;
 pub(crate) mod types;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
 pub(crate) use connection::{PyBrokenConnectionKind, PyConnectionSetupErrorKind};
 pub(crate) use macros::py_err;
+pub(crate) use metadata::PyInvalidClusterMetadataKind;
 
 /* Python exception classes */
 
@@ -315,6 +317,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "InvalidClusterMetadata",
         py.get_type::<InvalidClusterMetadata>(),
     )?;
+    module.add_class::<PyInvalidClusterMetadataKind>()?;
     module.add(
         "SchemaAgreementError",
         py.get_type::<SchemaAgreementError>(),
