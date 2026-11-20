@@ -1,6 +1,3 @@
-// TODO: drop once PyO3 ships PyO3/pyo3#6309 (from_py_object clones Copy types)
-#![allow(clippy::clone_on_copy)]
-
 use openssl::ssl::{SslConnector, SslContext, SslFiletype, SslMethod, SslVerifyMode};
 use openssl::x509::X509;
 use pyo3::prelude::*;

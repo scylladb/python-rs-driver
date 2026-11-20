@@ -17,7 +17,6 @@ use std::sync::Arc;
 #[pyclass(
     module = "scylla.auth",
     subclass,
-    skip_from_py_object,
     name = "AuthenticatorProvider",
     frozen
 )]

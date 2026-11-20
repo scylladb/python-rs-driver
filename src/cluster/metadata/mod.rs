@@ -16,14 +16,7 @@ use crate::{
 pub(crate) mod column_type;
 pub(crate) mod query_metadata;
 
-#[pyclass(
-    module = "scylla.cluster",
-    name = "StrategyKind",
-    eq,
-    eq_int,
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cluster", name = "StrategyKind", eq, eq_int, frozen)]
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum PyStrategyKind {
     Simple,
@@ -32,12 +25,7 @@ pub(crate) enum PyStrategyKind {
     Other,
 }
 
-#[pyclass(
-    module = "scylla.cluster",
-    name = "Strategy",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cluster", name = "Strategy", frozen)]
 #[derive(Clone)]
 pub(crate) struct PyStrategy {
     pub(crate) inner: Strategy,
@@ -111,14 +99,7 @@ impl PyStrategy {
     }
 }
 
-#[pyclass(
-    module = "scylla.cluster",
-    name = "ColumnKind",
-    frozen,
-    eq,
-    eq_int,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cluster", name = "ColumnKind", frozen, eq, eq_int)]
 #[derive(Clone, PartialEq)]
 pub(crate) enum PyColumnKind {
     Regular,
@@ -140,12 +121,7 @@ impl From<&ColumnKind> for PyColumnKind {
     }
 }
 
-#[pyclass(
-    module = "scylla.cluster",
-    name = "Column",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cluster", name = "Column", frozen)]
 #[derive(Clone)]
 pub(crate) struct PyColumn {
     inner: Column,
@@ -181,7 +157,7 @@ impl PyColumn {
     }
 }
 
-#[pyclass(module = "scylla.cluster", name = "Table", frozen, skip_from_py_object)]
+#[pyclass(module = "scylla.cluster", name = "Table", frozen)]
 pub(crate) struct PyTable {
     inner: Table,
     partitioner: OnceLock<Option<Py<PyString>>>,
@@ -271,12 +247,7 @@ impl PyTable {
     }
 }
 
-#[pyclass(
-    module = "scylla.cluster",
-    name = "MaterializedView",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cluster", name = "MaterializedView", frozen)]
 pub(crate) struct PyMaterializedView {
     inner: MaterializedView,
     base_table_name: OnceLock<Py<PyString>>,

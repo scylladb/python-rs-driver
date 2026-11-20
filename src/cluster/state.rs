@@ -16,12 +16,7 @@ use crate::{
     serialize::value_list::PyValueList,
 };
 
-#[pyclass(
-    module = "scylla.cluster",
-    name = "ClusterState",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cluster", name = "ClusterState", frozen)]
 pub(crate) struct PyClusterState {
     pub(crate) inner: Arc<ClusterState>,
     /// Invariant: Always contains all known nodes by the Rust Driver
