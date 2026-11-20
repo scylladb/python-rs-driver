@@ -294,7 +294,7 @@ impl RowBuilder {
     }
 
     fn named_tuple(py: Python<'_>, names: &[&str]) -> PyResult<Self> {
-        Ok(Self::NamedTuple(namedtuple_class(py, names)?))
+        Ok(Self::NamedTuple(namedtuple_class(py, "Row", names)?))
     }
 
     /// Builds one Python row out of the values of its columns, in column order.
@@ -375,16 +375,20 @@ fn tuple_new(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
         .map(|new| new.bind(py).clone())
 }
 
-/// Namedtuple classes keyed by the raw column names they were built from.
-/// Building one is slow, so it is done once per result shape.
+/// Namedtuple classes keyed by their class name and the raw names they were built from.
+/// Building one is slow, so it is done once per shape.
 static NAMEDTUPLE_CLASSES: LazyLock<RwLock<HashMap<String, Py<PyAny>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 const NAMEDTUPLE_CACHE_LIMIT: usize = 512;
 
-fn namedtuple_class(py: Python<'_>, columns: &[&str]) -> PyResult<Py<PyAny>> {
-    let mut key = String::with_capacity(columns.iter().map(|name| name.len() + 1).sum());
-    for name in columns {
+/// `class_name` must be a valid class name.
+fn namedtuple_class(py: Python<'_>, class_name: &str, columns: &[&str]) -> PyResult<Py<PyAny>> {
+    // A class name never holds `\0`, so the key cannot mix it up with a column name.
+    let mut key = String::with_capacity(
+        class_name.len() + 1 + columns.iter().map(|name| name.len() + 1).sum::<usize>(),
+    );
+    for name in std::iter::once(class_name).chain(columns.iter().copied()) {
         key.push_str(name);
         key.push('\0');
     }
@@ -398,7 +402,7 @@ fn namedtuple_class(py: Python<'_>, columns: &[&str]) -> PyResult<Py<PyAny>> {
     let class = py
         .import(intern!(py, "collections"))?
         .getattr(intern!(py, "namedtuple"))?
-        .call1((intern!(py, "Row"), field_names(py, columns)?))?
+        .call1((class_name, field_names(py, columns)?))?
         .unbind();
 
     let Ok(mut classes) = NAMEDTUPLE_CLASSES.write_py_attached(py) else {
