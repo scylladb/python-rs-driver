@@ -35,7 +35,15 @@ from scylla.policies.timestamp_generator import (
     SimpleTimestampGenerator,
     TimestampGenerator,
 )
-from scylla.session import Compression, ExecutionProfile, PoolSize, SelfIdentity, SessionBuilder, WriteCoalescingDelay
+from scylla.session import (
+    Compression,
+    ExecutionProfile,
+    PoolSize,
+    SelfIdentity,
+    Session,
+    SessionBuilder,
+    WriteCoalescingDelay,
+)
 from scylla.statement import Consistency, SerialConsistency
 
 
@@ -262,6 +270,57 @@ async def test_address_translator_dict_discovery():
     session = await builder.connect()
 
     assert session is not None
+
+
+class RecordingAddressTranslator:
+    """Keeps every peer the driver asks to translate."""
+
+    peers: list[UntranslatedPeer]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.peers = []
+
+    def translate(self, info: UntranslatedPeer) -> tuple[Address, int]:
+        self.peers.append(info)
+        return info.untranslated_address
+
+
+async def connect_recording() -> tuple[RecordingAddressTranslator, Session]:
+    translator = RecordingAddressTranslator()
+    session = await session_builder().address_translator(translator).connect()
+    return translator, session
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_address_translator_receives_peer_metadata():
+    translator, session = await connect_recording()
+    nodes = session.cluster_state.nodes_info
+
+    # A translator is handed this driver's conversion of the Rust driver's
+    # peer, so every field must be the one of the node with the same host id.
+    assert translator.peers, "this test needs a cluster with peers to translate"
+    for peer in translator.peers:
+        node = nodes[peer.host_id]
+        assert peer.untranslated_address == node.address
+        assert peer.datacenter == node.datacenter
+        assert peer.rack == node.rack
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_dict_address_translator_translates_a_driver_peer():
+    translator, _ = await connect_recording()
+    peer = translator.peers[0]
+    ip, port = peer.untranslated_address
+
+    mapped = DictAddressTranslator({(ip, port): ("10.1.2.3", 19042)})
+    assert mapped.translate(peer) == (ipaddress.IPv4Address("10.1.2.3"), 19042)
+
+    unmapped = DictAddressTranslator({(ip, port + 1): ("10.1.2.3", 19042)})
+    with pytest.raises(AddressTranslationError):
+        unmapped.translate(peer)
 
 
 @pytest.mark.asyncio
