@@ -8,11 +8,13 @@ mod macros;
 
 mod attrs;
 pub(crate) mod config;
+pub(crate) mod connection;
 pub(crate) mod execution;
 pub(crate) mod request;
 pub(crate) mod types;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
+pub(crate) use connection::{PyBrokenConnectionKind, PyConnectionSetupErrorKind};
 pub(crate) use macros::py_err;
 
 /* Python exception classes */
@@ -45,6 +47,7 @@ create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
 create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
 create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
 create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
+create_exception!(scylla.errors, RequestEncodingFailed, BadQuery);
 
 create_exception!(scylla.errors, StatementConversionError, BadQuery);
 create_exception_multi!(
@@ -121,6 +124,8 @@ create_exception_multi!(
 );
 create_exception!(scylla.errors, KeyspaceNameMismatch, UseKeyspaceError);
 
+create_exception!(scylla.errors, BrokenConnection, ExecutionError);
+
 create_exception!(scylla.errors, ConnectionPoolError, ExecutionError);
 create_exception!(scylla.errors, ConnectionPoolBroken, ConnectionPoolError);
 create_exception!(
@@ -129,6 +134,27 @@ create_exception!(
     ConnectionPoolError
 );
 create_exception!(scylla.errors, NodeDisabledByHostFilter, ConnectionPoolError);
+create_exception_multi!(
+    scylla.errors,
+    ConnectTimeout,
+    (ConnectionPoolBroken, PyTimeoutError)
+);
+create_exception_multi!(
+    scylla.errors,
+    AddressTranslationFailed,
+    (ConnectionPoolBroken, AddressTranslationError)
+);
+create_exception_multi!(
+    scylla.errors,
+    BrokenConnectionInPool,
+    (ConnectionPoolBroken, BrokenConnection)
+);
+create_exception!(scylla.errors, ConnectionSetupFailed, ConnectionPoolBroken);
+create_exception!(
+    scylla.errors,
+    ConnectionAuthenticationFailed,
+    ConnectionPoolBroken
+);
 
 create_exception!(scylla.errors, RequestFailedError, ExecutionError);
 
@@ -145,12 +171,15 @@ create_exception_multi!(
     (PrepareError, RequestFailedError)
 );
 
-create_exception!(scylla.errors, BrokenConnection, RequestFailedError);
+create_exception_multi!(
+    scylla.errors,
+    BrokenConnectionInFlight,
+    (RequestFailedError, BrokenConnection)
+);
 create_exception!(scylla.errors, ConnectionBusy, RequestFailedError);
 create_exception!(scylla.errors, NonfinishedPagingState, RequestFailedError);
 create_exception!(scylla.errors, ProtocolError, RequestFailedError);
 create_exception!(scylla.errors, ResponseParseError, ProtocolError);
-create_exception!(scylla.errors, RequestSerializationError, ProtocolError);
 create_exception!(scylla.errors, UnexpectedResponse, ProtocolError);
 
 /* Errors returned by the database */
@@ -303,6 +332,24 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "NodeDisabledByHostFilter",
         py.get_type::<NodeDisabledByHostFilter>(),
     )?;
+    module.add("ConnectTimeout", py.get_type::<ConnectTimeout>())?;
+    module.add(
+        "AddressTranslationFailed",
+        py.get_type::<AddressTranslationFailed>(),
+    )?;
+    module.add(
+        "BrokenConnectionInPool",
+        py.get_type::<BrokenConnectionInPool>(),
+    )?;
+    module.add(
+        "ConnectionSetupFailed",
+        py.get_type::<ConnectionSetupFailed>(),
+    )?;
+    module.add_class::<PyConnectionSetupErrorKind>()?;
+    module.add(
+        "ConnectionAuthenticationFailed",
+        py.get_type::<ConnectionAuthenticationFailed>(),
+    )?;
     module.add("PrepareError", py.get_type::<PrepareError>())?;
     module.add("AlreadyPrepared", py.get_type::<AlreadyPrepared>())?;
     module.add(
@@ -316,6 +363,11 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     )?;
     module.add("RequestFailedError", py.get_type::<RequestFailedError>())?;
     module.add("BrokenConnection", py.get_type::<BrokenConnection>())?;
+    module.add(
+        "BrokenConnectionInFlight",
+        py.get_type::<BrokenConnectionInFlight>(),
+    )?;
+    module.add_class::<PyBrokenConnectionKind>()?;
     module.add("ConnectionBusy", py.get_type::<ConnectionBusy>())?;
     module.add(
         "NonfinishedPagingState",
@@ -324,8 +376,8 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add("ProtocolError", py.get_type::<ProtocolError>())?;
     module.add("ResponseParseError", py.get_type::<ResponseParseError>())?;
     module.add(
-        "RequestSerializationError",
-        py.get_type::<RequestSerializationError>(),
+        "RequestEncodingFailed",
+        py.get_type::<RequestEncodingFailed>(),
     )?;
     module.add("UnexpectedResponse", py.get_type::<UnexpectedResponse>())?;
     module.add("DatabaseError", py.get_type::<DatabaseError>())?;
@@ -427,6 +479,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "SpeculativeExecutionPolicyError",
         py.get_type::<SpeculativeExecutionPolicyError>(),
     )?;
+    module.add_class::<types::PyCqlRequestKind>()?;
     module.add_class::<types::PyCqlResponseKind>()?;
     module.add_class::<types::PyOperationType>()?;
     module.add_class::<types::PyWriteType>()?;
