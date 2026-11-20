@@ -47,6 +47,7 @@ create_exception!(scylla.errors, ValuesTooLongForKey, BadQuery);
 create_exception!(scylla.errors, TooManyStatementsInBatch, BadQuery);
 create_exception!(scylla.errors, PartitionKeyExtractionFailed, BadQuery);
 create_exception!(scylla.errors, PagingStateNotAllowed, BadQuery);
+create_exception!(scylla.errors, RequestEncodingFailed, BadQuery);
 
 create_exception!(scylla.errors, StatementConversionError, BadQuery);
 create_exception_multi!(
@@ -179,7 +180,6 @@ create_exception!(scylla.errors, ConnectionBusy, RequestFailedError);
 create_exception!(scylla.errors, NonfinishedPagingState, RequestFailedError);
 create_exception!(scylla.errors, ProtocolError, RequestFailedError);
 create_exception!(scylla.errors, ResponseParseError, ProtocolError);
-create_exception!(scylla.errors, RequestSerializationError, ProtocolError);
 create_exception!(scylla.errors, UnexpectedResponse, ProtocolError);
 
 /* Errors returned by the database */
@@ -376,8 +376,8 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     module.add("ProtocolError", py.get_type::<ProtocolError>())?;
     module.add("ResponseParseError", py.get_type::<ResponseParseError>())?;
     module.add(
-        "RequestSerializationError",
-        py.get_type::<RequestSerializationError>(),
+        "RequestEncodingFailed",
+        py.get_type::<RequestEncodingFailed>(),
     )?;
     module.add("UnexpectedResponse", py.get_type::<UnexpectedResponse>())?;
     module.add("DatabaseError", py.get_type::<DatabaseError>())?;

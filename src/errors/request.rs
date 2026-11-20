@@ -22,7 +22,7 @@ use crate::errors::{
     MetadataFetchFailed, NoHostAvailable, NoKnownNodes, NodeDisabledByHostFilter,
     NonfinishedPagingState, OperationTimedOut, Overloaded, PartitionKeyExtractionFailed,
     PreparedStatementIdsMismatch, RateLimitReached, ReadFailure, ReadTimeout, RepreparedIdChanged,
-    RepreparedIdMissingInBatch, RequestSerializationError, RequiredHostAbsent, ResponseParseError,
+    RepreparedIdMissingInBatch, RequestEncodingFailed, RequiredHostAbsent, ResponseParseError,
     SchemaAgreementTimeout, ServerConfigError, ServerError, ServerProtocolError,
     SessionConfigError, TooManyStatementsInBatch, TraceUnavailable, TruncateError, Unauthorized,
     Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared, ValuesTooLongForKey,
@@ -257,9 +257,7 @@ pub(crate) fn request_attempt_error_to_pyerr(
 ) -> PyErr {
     match err {
         RequestAttemptError::SerializationError(e) => serialization_error_to_pyerr(py, e, message),
-        RequestAttemptError::CqlRequestSerialization(_) => {
-            py_err!(RequestSerializationError, message)
-        }
+        RequestAttemptError::CqlRequestSerialization(_) => py_err!(RequestEncodingFailed, message),
         RequestAttemptError::UnableToAllocStreamId => py_err!(ConnectionBusy, message),
         RequestAttemptError::BrokenConnectionError(e) => {
             broken_connection_in_flight_to_pyerr(py, e, message)
