@@ -1,6 +1,8 @@
 from collections.abc import Mapping
 from enum import IntEnum
 
+from scylla.cql_types import CqlType
+
 class StrategyKind(IntEnum):
     Simple = ...
     NetworkTopology = ...
@@ -107,28 +109,28 @@ class CqlCollectionType(CqlColumnType):
 class CqlListType(CqlCollectionType):
     """list<T> — ordered sequence of elements."""
 
-    column_type: CqlColumnType
+    column_type: CqlType
 
 class CqlMapType(CqlCollectionType):
     """map<K, V> — key-value pairs."""
 
-    key_type: CqlColumnType
-    value_type: CqlColumnType
+    key_type: CqlType
+    value_type: CqlType
 
 class CqlSetType(CqlCollectionType):
     """set<T> — unordered set of elements."""
 
-    column_type: CqlColumnType
+    column_type: CqlType
 
 class CqlTupleType(CqlColumnType):
     """tuple<T1, T2, ...> — positional tuple of column types."""
 
-    element_types: list[CqlColumnType]
+    element_types: list[CqlType]
 
 class CqlVectorType(CqlColumnType):
     """vector<T, N> — fixed-length vector of elements."""
 
-    typ: CqlColumnType
+    typ: CqlType
     dimensions: int
 
 class CqlUserDefinedType(CqlColumnType):
@@ -137,7 +139,7 @@ class CqlUserDefinedType(CqlColumnType):
     name: str
     frozen: bool
     keyspace: str
-    field_types: list[tuple[str, CqlColumnType]]
+    field_types: list[tuple[str, CqlType]]
 
 class ColumnKind(IntEnum):
     Regular = ...
@@ -147,7 +149,7 @@ class ColumnKind(IntEnum):
 
 class Column:
     @property
-    def typ(self) -> CqlColumnType:
+    def typ(self) -> CqlType:
         """
         Access the type of this column.
         """
@@ -230,4 +232,4 @@ class ColumnSpec:
     @property
     def keyspace_name(self) -> str: ...
     @property
-    def cql_type(self) -> CqlColumnType: ...
+    def cql_type(self) -> CqlType: ...

@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import TypeVar
 
-from scylla.cql_types import CqlColumnType
+from scylla.cql_types import CqlType
 
 _T = TypeVar("_T")
 
@@ -40,7 +40,7 @@ class Adapters:
     """
 
     def __init__(self) -> None: ...
-    def register_writer(self, cls: type[_T], adapter: Callable[[_T, CqlColumnType], object]) -> None:
+    def register_writer(self, cls: type[_T], adapter: Callable[[_T, CqlType], object]) -> None:
         """
         Register the adapter for a type.
 
@@ -51,7 +51,7 @@ class Adapters:
         cls : type
             The type of the values to convert. The adapter also applies to
             subclasses that do not have their own adapter.
-        adapter : Callable[[Any, CqlColumnType], object]
+        adapter : Callable[[Any, CqlType], object]
             Called with the value and the CQL type of the column. It must
             return a value that the driver can write to that column. The driver
             checks the result when it writes it.
