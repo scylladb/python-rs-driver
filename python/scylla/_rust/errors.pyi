@@ -275,7 +275,7 @@ class InvalidClusterMetadataKind(IntEnum):
     """All peers have an empty list of tokens."""
 
     InvalidKeyspaceStrategy = ...
-    """The replication strategy of a keyspace is not valid."""
+    """The replication strategy of a keyspace is not valid. `keyspace` is the keyspace."""
 
     InvalidUdtFieldType = ...
     """The driver could not parse the type of a user defined type field."""
@@ -287,7 +287,7 @@ class InvalidClusterMetadataKind(IntEnum):
     """The driver could not parse the type of a column."""
 
     UnknownColumnKind = ...
-    """A column has an unknown kind."""
+    """A column has an unknown kind. `keyspace` and `table` are the table of the column."""
 
     InvalidClientRoutesPort = ...
     """A client route has a port that is not valid."""
@@ -300,6 +300,12 @@ class InvalidClusterMetadata(MetadataError):
 
     kind: InvalidClusterMetadataKind
     """Why the metadata is not valid."""
+
+    keyspace: str | None
+    """The keyspace that has the data that is not valid, or `None` if the driver does not know it."""
+
+    table: str | None
+    """The table that has the data that is not valid, or `None` if the driver does not know it."""
 
 class SchemaAgreementError(ExecutionError):
     """Failures specific to schema agreement. Request failures raise their own class."""

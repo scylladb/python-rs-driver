@@ -39,8 +39,14 @@ impl ToPyAttr for PyInvalidClusterMetadataKind {
     }
 }
 
-fn invalid_metadata(py: Python<'_>, message: String, kind: PyInvalidClusterMetadataKind) -> PyErr {
-    py_err!(py, InvalidClusterMetadata, message; kind)
+fn invalid_metadata(
+    py: Python<'_>,
+    message: String,
+    kind: PyInvalidClusterMetadataKind,
+    keyspace: Option<&str>,
+    table: Option<&str>,
+) -> PyErr {
+    py_err!(py, InvalidClusterMetadata, message; kind, keyspace, table)
 }
 
 #[deny(clippy::wildcard_enum_match_arm)]
@@ -54,7 +60,7 @@ pub(crate) fn peers_error_to_pyerr(
         PeersMetadataError::EmptyTokenLists => PyInvalidClusterMetadataKind::EmptyTokenLists,
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     };
-    invalid_metadata(py, message, kind)
+    invalid_metadata(py, message, kind, None, None)
 }
 
 #[deny(clippy::wildcard_enum_match_arm)]
@@ -63,13 +69,13 @@ pub(crate) fn keyspaces_error_to_pyerr(
     err: &KeyspacesMetadataError,
     message: String,
 ) -> PyErr {
-    let kind = match err {
-        KeyspacesMetadataError::Strategy { .. } => {
-            PyInvalidClusterMetadataKind::InvalidKeyspaceStrategy
+    match err {
+        KeyspacesMetadataError::Strategy { keyspace, .. } => {
+            let kind = PyInvalidClusterMetadataKind::InvalidKeyspaceStrategy;
+            invalid_metadata(py, message, kind, Some(keyspace), None)
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
-    };
-    invalid_metadata(py, message, kind)
+    }
 }
 
 #[deny(clippy::wildcard_enum_match_arm)]
@@ -83,7 +89,7 @@ pub(crate) fn udt_error_to_pyerr(py: Python<'_>, err: &UdtMetadataError, message
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     };
-    invalid_metadata(py, message, kind)
+    invalid_metadata(py, message, kind, None, None)
 }
 
 #[deny(clippy::wildcard_enum_match_arm)]
@@ -92,16 +98,21 @@ pub(crate) fn tables_error_to_pyerr(
     err: &TablesMetadataError,
     message: String,
 ) -> PyErr {
-    let kind = match err {
+    match err {
         TablesMetadataError::InvalidCqlType { .. } => {
-            PyInvalidClusterMetadataKind::InvalidColumnType
+            let kind = PyInvalidClusterMetadataKind::InvalidColumnType;
+            invalid_metadata(py, message, kind, None, None)
         }
-        TablesMetadataError::UnknownColumnKind { .. } => {
-            PyInvalidClusterMetadataKind::UnknownColumnKind
+        TablesMetadataError::UnknownColumnKind {
+            keyspace_name,
+            table_name,
+            ..
+        } => {
+            let kind = PyInvalidClusterMetadataKind::UnknownColumnKind;
+            invalid_metadata(py, message, kind, Some(keyspace_name), Some(table_name))
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
-    };
-    invalid_metadata(py, message, kind)
+    }
 }
 
 #[deny(clippy::wildcard_enum_match_arm)]
@@ -116,5 +127,5 @@ pub(crate) fn client_routes_error_to_pyerr(
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     };
-    invalid_metadata(py, message, kind)
+    invalid_metadata(py, message, kind, None, None)
 }
