@@ -17,14 +17,7 @@ impl CqlEmpty {
     }
 }
 
-#[pyclass(
-    module = "scylla.cql_types",
-    name = "CqlDuration",
-    frozen,
-    eq,
-    hash,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cql_types", name = "CqlDuration", frozen, eq, hash)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PyCqlDuration {
     #[pyo3(get)]
@@ -150,15 +143,7 @@ impl From<PyCqlDuration> for CqlDuration {
 /// CQL stores a date as an unsigned day count with 1970-01-01 at 2^31.
 const CQL_DATE_EPOCH: u32 = 1 << 31;
 
-#[pyclass(
-    module = "scylla.cql_types",
-    name = "CqlDate",
-    frozen,
-    eq,
-    ord,
-    hash,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cql_types", name = "CqlDate", frozen, eq, ord, hash)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PyCqlDate {
     #[pyo3(get)]
@@ -225,15 +210,7 @@ impl From<PyCqlDate> for CqlDate {
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
 const NANOS_PER_DAY: i64 = 24 * 60 * 60 * NANOS_PER_SECOND;
 
-#[pyclass(
-    module = "scylla.cql_types",
-    name = "CqlTime",
-    frozen,
-    eq,
-    ord,
-    hash,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.cql_types", name = "CqlTime", frozen, eq, ord, hash)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PyCqlTime {
     #[pyo3(get)]
@@ -341,8 +318,7 @@ pub(crate) fn aware_datetime_to_utc(datetime: &Bound<'_, PyDateTime>) -> PyResul
     frozen,
     eq,
     ord,
-    hash,
-    skip_from_py_object
+    hash
 )]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PyCqlTimestamp {

@@ -1,6 +1,6 @@
 /// Defines a new exception type with several base classes, e.g. a driver error that is also a `ValueError`.
 ///
-/// Copied from pyo3 0.29.0 `create_exception!` / `create_exception_type_object!`,
+/// Copied from pyo3 0.30.1`create_exception!` / `create_exception_type_object!`,
 /// changed to take a tuple of bases: pyo3 builds the type with `PyErr::new_type`, which accepts
 /// a single base, so this calls `PyErr_NewExceptionWithDoc` directly with a tuple instead.
 ///
@@ -35,9 +35,6 @@ macro_rules! create_exception_multi {
 
         // SAFETY: macro caller has upheld the safety contracts
         unsafe impl ::pyo3::type_object::PyTypeInfo for $name {
-            const NAME: &'static str = stringify!($name);
-            const MODULE: ::core::option::Option<&'static str> =
-                ::core::option::Option::Some(stringify!($module));
             ::pyo3::create_exception_type_hint!($module, $name);
 
             #[inline]

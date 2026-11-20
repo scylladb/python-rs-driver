@@ -560,12 +560,7 @@ impl SessionBuilder {
 }
 
 #[derive(Clone)]
-#[pyclass(
-    module = "scylla.session",
-    name = "SessionBuilderConfig",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.session", name = "SessionBuilderConfig", frozen)]
 struct PySessionBuilderConfig {
     config: SessionConfig,
     #[pyo3(get)]

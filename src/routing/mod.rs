@@ -48,12 +48,7 @@ impl PyToken {
     }
 }
 
-#[pyclass(
-    module = "scylla.routing",
-    name = "ReplicaLocator",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(module = "scylla.routing", name = "ReplicaLocator", frozen)]
 pub(crate) struct PyReplicaLocator {
     inner: Py<PyClusterState>,
 }
