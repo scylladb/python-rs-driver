@@ -14,6 +14,7 @@ pub(crate) mod request;
 pub(crate) mod types;
 
 pub(crate) use attrs::{ToPyAttr, with_attrs};
+pub(crate) use connection::PyBrokenConnectionKind;
 pub(crate) use macros::py_err;
 
 /* Python exception classes */
@@ -365,6 +366,7 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         "BrokenConnectionInFlight",
         py.get_type::<BrokenConnectionInFlight>(),
     )?;
+    module.add_class::<PyBrokenConnectionKind>()?;
     module.add("ConnectionBusy", py.get_type::<ConnectionBusy>())?;
     module.add(
         "NonfinishedPagingState",
