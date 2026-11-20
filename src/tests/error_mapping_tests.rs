@@ -6,26 +6,30 @@ use pyo3::exceptions::{PyConnectionRefusedError, PyKeyError, PyTimeoutError};
 use pyo3::prelude::*;
 use scylla::deserialize::TypeCheckError;
 use scylla::errors::{
-    BrokenConnectionErrorKind, ConnectionError, ConnectionPoolError,
+    BrokenConnectionErrorKind, ClientRoutesMetadataError, ConnectionError, ConnectionPoolError,
     ConnectionSetupRequestErrorKind, CqlEventHandlingError, CqlRequestKind,
     CqlRequestSerializationError, CqlResponseKind, CustomTranslationError, DbError, ExecutionError,
-    FrameHeaderParseError, RequestAttemptError, TracingError, TranslationError, UseKeyspaceError,
+    FrameHeaderParseError, KeyspaceStrategyError, KeyspacesMetadataError, MetadataError,
+    PeersMetadataError, RequestAttemptError, TablesMetadataError, TracingError, TranslationError,
+    UdtMetadataError, UseKeyspaceError,
 };
 use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
 use scylla_cql_core::frame::frame_errors::PrepareSerializationError;
 
 use crate::errors::connection::setup_request_error_to_pyerr;
-use crate::errors::request::{execution_error_to_pyerr, tracing_error_to_pyerr};
+use crate::errors::request::{
+    execution_error_to_pyerr, metadata_error_to_pyerr, tracing_error_to_pyerr,
+};
 use crate::errors::types::PyCqlRequestKind;
 use crate::errors::{
     AddressTranslationFailed, AlreadyExists, AuthenticationFailed, BadQuery, BrokenConnection,
     BrokenConnectionInFlight, BrokenConnectionInPool, ConnectTimeout,
     ConnectionAuthenticationFailed, ConnectionBusy, ConnectionPoolBroken,
     ConnectionPoolError as PyConnectionPoolError, ConnectionSetupFailed, DatabaseError,
-    OperationTimedOut, PyBrokenConnectionKind, PyConnectionSetupErrorKind, ReadTimeout,
-    RequestEncodingFailed, RequestFailedError, ResponseParseError, SerializeFailedError,
-    TraceUnavailable, Unavailable,
+    InvalidClusterMetadata, OperationTimedOut, PyBrokenConnectionKind, PyConnectionSetupErrorKind,
+    PyInvalidClusterMetadataKind, ReadTimeout, RequestEncodingFailed, RequestFailedError,
+    ResponseParseError, SerializeFailedError, TraceUnavailable, Unavailable,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -116,6 +120,93 @@ fn request_that_cannot_be_encoded_is_bad_query() {
         assert!(err.is_instance_of::<BadQuery>(py));
         // Nothing was sent, so it is not a `RequestFailedError`.
         assert!(!err.is_instance_of::<RequestFailedError>(py));
+    });
+}
+
+#[test]
+fn invalid_metadata_without_location_keeps_its_kind() {
+    Python::initialize();
+    let bad_type = || "not a type".to_string();
+    let kinds = [
+        (
+            MetadataError::Peers(PeersMetadataError::EmptyPeers),
+            PyInvalidClusterMetadataKind::EmptyPeers,
+        ),
+        (
+            MetadataError::Peers(PeersMetadataError::EmptyTokenLists),
+            PyInvalidClusterMetadataKind::EmptyTokenLists,
+        ),
+        (
+            MetadataError::Udts(UdtMetadataError::InvalidCqlType {
+                typ: bad_type(),
+                position: 0,
+                reason: bad_type(),
+            }),
+            PyInvalidClusterMetadataKind::InvalidUdtFieldType,
+        ),
+        (
+            MetadataError::Udts(UdtMetadataError::CircularTypeDependency),
+            PyInvalidClusterMetadataKind::CircularUdtDependency,
+        ),
+        (
+            MetadataError::Tables(TablesMetadataError::InvalidCqlType {
+                typ: bad_type(),
+                position: 0,
+                reason: bad_type(),
+            }),
+            PyInvalidClusterMetadataKind::InvalidColumnType,
+        ),
+        (
+            MetadataError::ClientRoutes(ClientRoutesMetadataError::InvalidPortValue {
+                port: -1,
+                is_tls: false,
+            }),
+            PyInvalidClusterMetadataKind::InvalidClientRoutesPort,
+        ),
+    ];
+    Python::attach(|py| {
+        for (err, expected) in &kinds {
+            let err = metadata_error_to_pyerr(py, err, err.to_string());
+            assert!(err.is_instance_of::<InvalidClusterMetadata>(py));
+            assert_eq!(
+                attr::<PyInvalidClusterMetadataKind>(py, &err, "kind"),
+                *expected
+            );
+            assert_eq!(attr::<Option<String>>(py, &err, "keyspace"), None);
+            assert_eq!(attr::<Option<String>>(py, &err, "table"), None);
+        }
+    });
+}
+
+#[test]
+fn invalid_metadata_keeps_keyspace_and_table() {
+    Python::initialize();
+    let strategy = MetadataError::Keyspaces(KeyspacesMetadataError::Strategy {
+        keyspace: "ks".to_string(),
+        error: KeyspaceStrategyError::MissingClassForStrategyDefinition,
+    });
+    let column = MetadataError::Tables(TablesMetadataError::UnknownColumnKind {
+        keyspace_name: "ks".to_string(),
+        table_name: "tbl".to_string(),
+        column_name: "col".to_string(),
+        column_kind: "weird".to_string(),
+    });
+    Python::attach(|py| {
+        let err = metadata_error_to_pyerr(py, &strategy, strategy.to_string());
+        assert_eq!(
+            attr::<PyInvalidClusterMetadataKind>(py, &err, "kind"),
+            PyInvalidClusterMetadataKind::InvalidKeyspaceStrategy
+        );
+        assert_eq!(attr::<String>(py, &err, "keyspace"), "ks");
+        assert_eq!(attr::<Option<String>>(py, &err, "table"), None);
+
+        let err = metadata_error_to_pyerr(py, &column, column.to_string());
+        assert_eq!(
+            attr::<PyInvalidClusterMetadataKind>(py, &err, "kind"),
+            PyInvalidClusterMetadataKind::UnknownColumnKind
+        );
+        assert_eq!(attr::<String>(py, &err, "keyspace"), "ks");
+        assert_eq!(attr::<String>(py, &err, "table"), "tbl");
     });
 }
 
