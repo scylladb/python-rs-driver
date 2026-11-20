@@ -1,7 +1,8 @@
 from collections.abc import Mapping
 from enum import IntEnum
+from typing import Generic, TypeAlias
 
-from scylla.cql_types import CqlType
+from typing_extensions import TypeVar, TypeVarTuple
 
 class StrategyKind(IntEnum):
     Simple = ...
@@ -106,31 +107,76 @@ class CqlCollectionType(CqlColumnType):
 
     frozen: bool
 
-class CqlListType(CqlCollectionType):
-    """list<T> — ordered sequence of elements."""
+# The element types, as with list[int]. A type from the schema has CqlType as its type
+# arguments, so annotate such a type with CqlType: isinstance then keeps known type arguments.
+# The defaults let a class without type arguments mean "all element types", the same as a
+# type from the schema.
+# One type variable per class, not one shared _E_co. The bound CqlType contains these classes.
+# When pyright resolves CqlListType, it resolves the bound of its type variable, and so it also
+# resolves CqlSetType. A shared type variable would then still be unresolved, and pyright would
+# report CqlSetType as invalid. Which class fails depends on the import order of the user's code.
+_ListE_co = TypeVar("_ListE_co", bound=CqlType, default=CqlType, covariant=True)
+_SetE_co = TypeVar("_SetE_co", bound=CqlType, default=CqlType, covariant=True)
+_MapK_co = TypeVar("_MapK_co", bound=CqlType, default=CqlType, covariant=True)
+_MapV_co = TypeVar("_MapV_co", bound=CqlType, default=CqlType, covariant=True)
+_VectorE_co = TypeVar("_VectorE_co", bound=CqlType, default=CqlType, covariant=True)
+_Ts = TypeVarTuple("_Ts")
 
-    column_type: CqlType
+class CqlListType(CqlCollectionType, Generic[_ListE_co]):
+    """
+    list<T> — ordered sequence of elements.
 
-class CqlMapType(CqlCollectionType):
-    """map<K, V> — key-value pairs."""
+    ``CqlListType[CqlIntType]`` names a list of ints, for example as a key of
+    ``Adapters.register_reader``.
+    """
 
-    key_type: CqlType
-    value_type: CqlType
+    @property
+    def column_type(self) -> _ListE_co: ...
 
-class CqlSetType(CqlCollectionType):
-    """set<T> — unordered set of elements."""
+class CqlMapType(CqlCollectionType, Generic[_MapK_co, _MapV_co]):
+    """
+    map<K, V> — key-value pairs.
 
-    column_type: CqlType
+    ``CqlMapType[CqlTextType, CqlIntType]`` names a map from texts to ints, for
+    example as a key of ``Adapters.register_reader``.
+    """
 
-class CqlTupleType(CqlColumnType):
-    """tuple<T1, T2, ...> — positional tuple of column types."""
+    @property
+    def key_type(self) -> _MapK_co: ...
+    @property
+    def value_type(self) -> _MapV_co: ...
+
+class CqlSetType(CqlCollectionType, Generic[_SetE_co]):
+    """
+    set<T> — unordered set of elements.
+
+    ``CqlSetType[CqlIntType]`` names a set of ints, for example as a key of
+    ``Adapters.register_reader``.
+    """
+
+    @property
+    def column_type(self) -> _SetE_co: ...
+
+class CqlTupleType(CqlColumnType, Generic[*_Ts]):
+    """
+    tuple<T1, T2, ...> — positional tuple of column types.
+
+    ``CqlTupleType[CqlIntType, CqlTextType]`` names a tuple of an int and a text,
+    for example as a key of ``Adapters.register_reader``.
+    """
 
     element_types: list[CqlType]
 
-class CqlVectorType(CqlColumnType):
-    """vector<T, N> — fixed-length vector of elements."""
+class CqlVectorType(CqlColumnType, Generic[_VectorE_co]):
+    """
+    vector<T, N> — fixed-length vector of elements.
 
-    typ: CqlType
+    ``CqlVectorType[CqlFloatType]`` names a vector of floats of any length, for
+    example as a key of ``Adapters.register_reader``.
+    """
+
+    @property
+    def typ(self) -> _VectorE_co: ...
     dimensions: int
 
 class CqlUserDefinedType(CqlColumnType):
@@ -140,6 +186,19 @@ class CqlUserDefinedType(CqlColumnType):
     frozen: bool
     keyspace: str
     field_types: list[tuple[str, CqlType]]
+
+# Only for type checkers. Users import it from scylla.cql_types. It is defined here because it
+# is the bound of the type variables above, and a bound from another module makes an import cycle.
+CqlType: TypeAlias = (
+    CqlNativeType
+    | CqlListType[CqlType]
+    | CqlSetType[CqlType]
+    | CqlMapType[CqlType, CqlType]
+    | CqlTupleType[*tuple[CqlType, ...]]
+    | CqlVectorType[CqlType]
+    | CqlUserDefinedType
+)
+"""A CQL type from the schema or from a prepared statement."""
 
 class ColumnKind(IntEnum):
     Regular = ...

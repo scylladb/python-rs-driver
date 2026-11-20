@@ -95,7 +95,7 @@ impl PyCqlCollectionType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlMapType", extends=PyCqlCollectionType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlMapType", extends=PyCqlCollectionType, frozen, get_all, generic)]
 pub(crate) struct PyCqlMapType {
     pub(crate) key_type: Py<PyCqlColumnType>,
     pub(crate) value_type: Py<PyCqlColumnType>,
@@ -114,7 +114,7 @@ impl PyCqlMapType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlSetType", extends=PyCqlCollectionType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlSetType", extends=PyCqlCollectionType, frozen, get_all, generic)]
 pub(crate) struct PyCqlSetType {
     pub(crate) column_type: Py<PyCqlColumnType>,
 }
@@ -125,7 +125,7 @@ impl PyCqlSetType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlListType", extends=PyCqlCollectionType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlListType", extends=PyCqlCollectionType, frozen, get_all, generic)]
 pub(crate) struct PyCqlListType {
     pub(crate) column_type: Py<PyCqlColumnType>,
 }
@@ -136,7 +136,7 @@ impl PyCqlListType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlTupleType", extends=PyCqlColumnType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlTupleType", extends=PyCqlColumnType, frozen, get_all, generic)]
 pub(crate) struct PyCqlTupleType {
     pub(crate) element_types: Vec<Py<PyCqlColumnType>>,
 }
@@ -147,7 +147,7 @@ impl PyCqlTupleType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlVectorType", extends=PyCqlColumnType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlVectorType", extends=PyCqlColumnType, frozen, get_all, generic)]
 pub(crate) struct PyCqlVectorType {
     pub(crate) typ: Py<PyCqlColumnType>,
     pub(crate) dimensions: u16,
