@@ -6,8 +6,8 @@ use pyo3::IntoPyObjectExt;
 use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use scylla::errors::{
-    BrokenConnectionError, BrokenConnectionErrorKind, ConnectionError, ConnectionSetupRequestError,
-    ConnectionSetupRequestErrorKind, TranslationError,
+    BrokenConnectionError, BrokenConnectionErrorKind, ConnectionError,
+    ConnectionSetupRequestErrorKind, CqlRequestKind, TranslationError,
 };
 
 use crate::errors::request::{db_error_to_pyerr, use_keyspace_error_to_pyerr};
@@ -29,7 +29,7 @@ pub(crate) fn pool_broken_to_pyerr(
         ConnectionError::TranslationError(e) => translation_error_to_pyerr(py, e, message),
         ConnectionError::BrokenConnection(e) => broken_connection_in_pool_to_pyerr(py, e, message),
         ConnectionError::ConnectionSetupRequestError(e) => {
-            setup_request_error_to_pyerr(py, e, message)
+            setup_request_error_to_pyerr(py, e.request_kind, &e.error, message)
         }
         ConnectionError::IoError(e) => {
             let exc = py_err!(ConnectionPoolBroken, message);
@@ -171,13 +171,13 @@ impl ToPyAttr for PyConnectionSetupErrorKind {
 
 /// A request the driver sends while opening a connection (STARTUP, AUTH_RESPONSE, ...) failed.
 #[deny(clippy::wildcard_enum_match_arm)]
-fn setup_request_error_to_pyerr(
+pub(crate) fn setup_request_error_to_pyerr(
     py: Python<'_>,
-    err: &ConnectionSetupRequestError,
+    request_kind: CqlRequestKind,
+    err: &ConnectionSetupRequestErrorKind,
     message: String,
 ) -> PyErr {
-    let request_kind = err.request_kind;
-    let kind = match &err.error {
+    let kind = match err {
         ConnectionSetupRequestErrorKind::MissingAuthentication
         | ConnectionSetupRequestErrorKind::StartAuthSessionError(_)
         | ConnectionSetupRequestErrorKind::AuthChallengeEvaluationError(_)
