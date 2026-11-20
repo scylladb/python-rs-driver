@@ -8,6 +8,8 @@ Every public name starts with ``Cql``; the rest of the name tells what it is:
   or by a prepared statement. ``<Name>`` is the CQL type's own name.
 - ``CqlColumnType``, ``CqlNativeType`` and ``CqlCollectionType`` are base
   classes that group those descriptors, for ``isinstance`` checks.
+- ``CqlType`` is the union of all descriptors. The schema metadata uses it
+  for each type it holds. Use it to annotate such a type.
 - ``Cql*Value`` (``CqlValue``, ``CqlScalarValue``, ``CqlCollectionValue``)
   is a type alias for the Python objects the driver produces when reading a
   column. Writing accepts the same objects, except ``CqlEmpty``, and also
@@ -65,6 +67,11 @@ from ._rust.cql_types import (  # pyright: ignore[reportMissingModuleSource]
     CqlTime,
     CqlTimestamp,
 )
+
+CqlType: TypeAlias = (
+    CqlNativeType | CqlListType | CqlSetType | CqlMapType | CqlTupleType | CqlVectorType | CqlUserDefinedType
+)
+"""A CQL type from the schema or from a prepared statement."""
 
 if TYPE_CHECKING:
     CqlScalarValue: TypeAlias = (
@@ -188,6 +195,7 @@ __all__ = [
     "CqlTimeuuidType",
     "CqlTinyIntType",
     "CqlTupleType",
+    "CqlType",
     "CqlUserDefinedType",
     "CqlUuidType",
     "CqlValue",
