@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 use scylla::deserialize::TypeCheckError;
 use scylla::errors::{
     BrokenConnectionErrorKind, ConnectionError, ConnectionPoolError, CustomTranslationError,
-    DbError, ExecutionError, RequestAttemptError, TracingError,
+    DbError, ExecutionError, RequestAttemptError, TracingError, UseKeyspaceError,
 };
 use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
@@ -226,6 +226,41 @@ fn refused_connection_is_the_cause_of_broken_pool() {
         assert!(err.is_instance_of::<ConnectionPoolBroken>(py));
         let cause = err.cause(py).expect("I/O error is the cause");
         assert!(cause.is_instance_of::<PyConnectionRefusedError>(py));
+    });
+}
+
+#[test]
+fn os_error_cause_keeps_its_errno() {
+    Python::initialize();
+    Python::attach(|py| {
+        let errno: i32 = py
+            .import("errno")
+            .and_then(|m| m.getattr("ECONNREFUSED"))
+            .and_then(|v| v.extract())
+            .unwrap();
+        let refused = std::io::Error::from_raw_os_error(errno);
+        let err = ExecutionError::ConnectionPoolError(ConnectionPoolError::Broken {
+            last_connection_error: ConnectionError::IoError(Arc::new(refused)),
+        });
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        let cause = err.cause(py).expect("I/O error is the cause");
+        assert!(cause.is_instance_of::<PyConnectionRefusedError>(py));
+        assert_eq!(attr::<i32>(py, &cause, "errno"), errno);
+    });
+}
+
+#[test]
+fn failed_use_keyspace_is_the_cause_of_broken_pool() {
+    Python::initialize();
+    let timeout = UseKeyspaceError::RequestTimeout(Duration::from_secs(5));
+    let err = ExecutionError::ConnectionPoolError(ConnectionPoolError::Broken {
+        last_connection_error: ConnectionError::UseKeyspaceError(timeout),
+    });
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<ConnectionPoolBroken>(py));
+        let cause = err.cause(py).expect("use_keyspace error is the cause");
+        assert!(cause.is_instance_of::<OperationTimedOut>(py));
     });
 }
 

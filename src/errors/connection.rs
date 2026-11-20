@@ -3,13 +3,14 @@
 #![allow(clippy::clone_on_copy)]
 
 use pyo3::IntoPyObjectExt;
+use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use scylla::errors::{
     BrokenConnectionError, BrokenConnectionErrorKind, ConnectionError, ConnectionSetupRequestError,
     ConnectionSetupRequestErrorKind, TranslationError,
 };
 
-use crate::errors::request::db_error_to_pyerr;
+use crate::errors::request::{db_error_to_pyerr, use_keyspace_error_to_pyerr};
 use crate::errors::{
     AddressTranslationFailed, BrokenConnectionInFlight, BrokenConnectionInPool, ConnectTimeout,
     ConnectionAuthenticationFailed, ConnectionPoolBroken, ConnectionSetupFailed, ToPyAttr,
@@ -35,16 +36,22 @@ pub(crate) fn pool_broken_to_pyerr(
             exc.set_cause(py, Some(io_error_to_pyerr(e)));
             exc
         }
-        ConnectionError::NoSourcePortForShard(_) | ConnectionError::UseKeyspaceError(_) => {
-            py_err!(ConnectionPoolBroken, message)
+        ConnectionError::UseKeyspaceError(e) => {
+            let cause = use_keyspace_error_to_pyerr(py, e, message.clone());
+            with_cause(py_err!(ConnectionPoolBroken, message), cause)
         }
+        ConnectionError::NoSourcePortForShard(_) => py_err!(ConnectionPoolBroken, message),
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }
 
-/// The `OSError` subclass for the error kind, e.g. `ConnectionRefusedError`; the driver shares the error, so it is rebuilt.
+/// The `OSError` subclass for the error, e.g. `ConnectionRefusedError`, with `errno` when the OS gave one.
 fn io_error_to_pyerr(err: &std::io::Error) -> PyErr {
-    PyErr::from(std::io::Error::new(err.kind(), err.to_string()))
+    match err.raw_os_error() {
+        // OSError(errno, strerror) picks the subclass from errno.
+        Some(errno) => PyOSError::new_err((errno, err.to_string())),
+        None => PyErr::from(std::io::Error::new(err.kind(), err.to_string())),
+    }
 }
 
 /// Keeps the exception raised by a Python `AddressTranslator`, or the I/O error, as the cause.
