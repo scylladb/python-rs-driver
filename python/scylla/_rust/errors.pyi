@@ -266,12 +266,41 @@ class KeyspaceNameMismatch(UseKeyspaceError):
     expected: str
     received: str
 
+class BrokenConnectionKind(IntEnum):
+    """Why an established connection died."""
+
+    KeepaliveTimeout = ...
+    """The node did not answer a keepalive request in time."""
+
+    KeepaliveFailed = ...
+    """The keepalive request failed."""
+
+    WriteFailed = ...
+    """Writing to the socket failed."""
+
+    FrameParseFailed = ...
+    """The driver could not parse a response frame header."""
+
+    UnexpectedStreamId = ...
+    """The node sent a frame with a stream id that has no request."""
+
+    EventHandlingFailed = ...
+    """The driver could not handle a server event."""
+
+    TooManyOrphanedStreams = ...
+    """Too many requests timed out on the connection, so the driver closed it."""
+
+    ChannelClosed = ...
+    """The connection was already dead for another reason."""
+
 class BrokenConnection(ExecutionError):
     """An established connection to a node died.
 
     The driver raises one of the two subclasses: `BrokenConnectionInFlight`, which is also a
     `RequestFailedError`, or `BrokenConnectionInPool`, which is also a `ConnectionPoolBroken`.
     """
+
+    kind: BrokenConnectionKind | None
 
 class ConnectionPoolError(ExecutionError): ...
 class ConnectionPoolBroken(ConnectionPoolError): ...
