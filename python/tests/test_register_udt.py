@@ -31,6 +31,24 @@ class Point(NamedTuple):
     y: int
 
 
+class Home(NamedTuple):
+    """A namedtuple with the fields of `address`, but not its registered class."""
+
+    street: str
+    zip: int
+
+
+class Renamed(NamedTuple):
+    """A namedtuple with the fields of `address` under other names."""
+
+    name: str
+    code: int
+
+
+class Short(NamedTuple):
+    street: str
+
+
 class Incomplete:
     def __init__(self, street: str):
         self.street = street
@@ -124,6 +142,37 @@ async def test_dict_is_still_written(session: Session, table_factory: TableFacto
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+async def test_namedtuple_is_written(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, home frozen<address>", "namedtuple_write")
+
+    await session.execute(f"INSERT INTO {table} (id, home) VALUES (?, ?)", (1, Home("Main St", 1)))
+
+    assert await read_back(session, table, "home") == Address("Main St", 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_namedtuple_is_written_by_position(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, home frozen<address>", "namedtuple_position")
+
+    await session.execute(f"INSERT INTO {table} (id, home) VALUES (?, ?)", (1, Renamed("Main St", 1)))
+
+    assert await read_back(session, table, "home") == Address("Main St", 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_short_namedtuple_is_an_error(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, home frozen<address>", "short_namedtuple")
+
+    with pytest.raises(TypeMismatchSerializationError) as exc_info:
+        await session.execute(f"INSERT INTO {table} (id, home) VALUES (?, ?)", (1, Short("Main St")))
+
+    assert "field zip is missing" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_object_of_a_subclass_is_written(session: Session, table_factory: TableFactory):
     table = await table_factory("id int PRIMARY KEY, home frozen<address>", "subclass_write")
 
@@ -153,7 +202,9 @@ async def test_object_of_another_class_is_rejected(session: Session, table_facto
     table = await table_factory("id int PRIMARY KEY, home frozen<address>", "other_class")
 
     with pytest.raises(TypeMismatchSerializationError) as exc_info:
-        await session.execute(f"INSERT INTO {table} (id, home) VALUES (?, ?)", (1, Point(1, 2)))
+        await session.execute(
+            f"INSERT INTO {table} (id, home) VALUES (?, ?)", (1, AcceptsAnything(street="Main St", zip=1))
+        )
 
     assert exc_info.value.bind_marker == 1
 

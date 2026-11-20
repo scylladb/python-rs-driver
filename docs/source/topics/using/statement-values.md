@@ -169,7 +169,7 @@ await session.execute("INSERT INTO shop.users (id, address) VALUES (?, ?)", (1, 
 
 The driver gets the fields from the type in the schema and matches them by name:
 
-- To write a value, the driver reads one attribute for each field. A missing attribute is an error. Other attributes are ignored. A `dict` is still written as before.
+- To write a value, the driver reads one attribute for each field. A missing attribute is an error. Other attributes are ignored. A `dict` is also written, with one item for each field. A namedtuple is also written, with one item for each field in the order of the type.
 - To read a value, the driver calls `Address(**fields)` with one keyword argument for each field. The class must accept all of them.
 - The registered class takes precedence over an adapter for the same class.
 

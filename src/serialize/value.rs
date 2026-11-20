@@ -948,6 +948,8 @@ impl<'py, 'a> PySerializeValue for PyVectorWrapper<'py, 'a> {
 /// Where the fields of a UDT value are read from.
 enum UdtFields<'a, 'py> {
     Dict(&'a Bound<'py, PyDict>),
+    /// Read by position, as the old driver does, so a renamed field still matches.
+    NamedTuple(&'a Bound<'py, PyTuple>),
     /// An object of the class registered for the UDT, read by attribute.
     Object(&'a Bound<'py, PyAny>),
 }
@@ -965,6 +967,8 @@ impl<'py, 'a> PyUdtWrapper<'py, 'a> {
     ) -> Result<Self, Mismatch> {
         let fields = if let Ok(dict) = value.cast::<PyDict>() {
             UdtFields::Dict(dict)
+        } else if let Some(tuple) = as_namedtuple(value) {
+            UdtFields::NamedTuple(tuple)
         } else if adapters
             .udt_class(&definition.keyspace, &definition.name)
             // An `isinstance` that raises counts as no match, so the value gets the mismatch error.
@@ -978,6 +982,17 @@ impl<'py, 'a> PyUdtWrapper<'py, 'a> {
     }
 }
 
+/// A tuple whose type has `_fields`, as every namedtuple has.
+fn as_namedtuple<'a, 'py>(value: &'a Bound<'py, PyAny>) -> Option<&'a Bound<'py, PyTuple>> {
+    let tuple = value.cast::<PyTuple>().ok()?;
+
+    tuple
+        .get_type()
+        .hasattr(intern!(value.py(), "_fields"))
+        .unwrap_or(false)
+        .then_some(tuple)
+}
+
 impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
     fn serialize_py<'a>(
         &self,
@@ -987,9 +1002,10 @@ impl<'py> PySerializeValue for PyUdtWrapper<'py, '_> {
     ) -> Result<WrittenCellProof<'a>, SerializationError> {
         let mut builder = cell_writer.into_value_builder();
 
-        for (field_name, field_type) in &self.definition.field_types {
+        for (index, (field_name, field_type)) in self.definition.field_types.iter().enumerate() {
             let item = match self.fields {
                 UdtFields::Dict(dict) => dict.get_item(field_name.as_ref()),
+                UdtFields::NamedTuple(tuple) => Ok(tuple.get_item(index).ok()),
                 UdtFields::Object(object) => object.getattr_opt(field_name.as_ref()),
             };
             let item: Bound<PyAny> = item
