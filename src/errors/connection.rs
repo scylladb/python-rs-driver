@@ -7,8 +7,8 @@ use scylla::errors::{
 };
 
 use crate::errors::{
-    AddressTranslationFailed, ConnectTimeout, ConnectionAuthenticationFailed, ConnectionPoolBroken,
-    ConnectionSetupFailed,
+    AddressTranslationFailed, BrokenConnectionInPool, ConnectTimeout,
+    ConnectionAuthenticationFailed, ConnectionPoolBroken, ConnectionSetupFailed,
 };
 
 /// Maps `last_connection_error` of a broken pool.
@@ -29,9 +29,10 @@ pub(crate) fn pool_broken_to_pyerr(
             exc.set_cause(py, Some(io_error_to_pyerr(e)));
             exc
         }
-        ConnectionError::BrokenConnection(_)
-        | ConnectionError::NoSourcePortForShard(_)
-        | ConnectionError::UseKeyspaceError(_) => py_err!(ConnectionPoolBroken, message),
+        ConnectionError::BrokenConnection(_) => py_err!(BrokenConnectionInPool, message),
+        ConnectionError::NoSourcePortForShard(_) | ConnectionError::UseKeyspaceError(_) => {
+            py_err!(ConnectionPoolBroken, message)
+        }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }
@@ -80,7 +81,7 @@ fn setup_request_error_to_pyerr(
             py_err!(py, ConnectionSetupFailed, message; request_kind, reason)
         }
         ConnectionSetupRequestErrorKind::BrokenConnection(_) => {
-            py_err!(ConnectionPoolBroken, message)
+            py_err!(BrokenConnectionInPool, message)
         }
         ConnectionSetupRequestErrorKind::CqlRequestSerialization(_)
         | ConnectionSetupRequestErrorKind::BodyExtensionsParseError(_)

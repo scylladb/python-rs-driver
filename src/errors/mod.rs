@@ -122,6 +122,8 @@ create_exception_multi!(
 );
 create_exception!(scylla.errors, KeyspaceNameMismatch, UseKeyspaceError);
 
+create_exception!(scylla.errors, BrokenConnection, ExecutionError);
+
 create_exception!(scylla.errors, ConnectionPoolError, ExecutionError);
 create_exception!(scylla.errors, ConnectionPoolBroken, ConnectionPoolError);
 create_exception!(
@@ -139,6 +141,11 @@ create_exception_multi!(
     scylla.errors,
     AddressTranslationFailed,
     (ConnectionPoolBroken, AddressTranslationError)
+);
+create_exception_multi!(
+    scylla.errors,
+    BrokenConnectionInPool,
+    (ConnectionPoolBroken, BrokenConnection)
 );
 create_exception!(scylla.errors, ConnectionSetupFailed, ConnectionPoolBroken);
 create_exception!(
@@ -162,7 +169,11 @@ create_exception_multi!(
     (PrepareError, RequestFailedError)
 );
 
-create_exception!(scylla.errors, BrokenConnection, RequestFailedError);
+create_exception_multi!(
+    scylla.errors,
+    BrokenConnectionInFlight,
+    (RequestFailedError, BrokenConnection)
+);
 create_exception!(scylla.errors, ConnectionBusy, RequestFailedError);
 create_exception!(scylla.errors, NonfinishedPagingState, RequestFailedError);
 create_exception!(scylla.errors, ProtocolError, RequestFailedError);
@@ -326,6 +337,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
         py.get_type::<AddressTranslationFailed>(),
     )?;
     module.add(
+        "BrokenConnectionInPool",
+        py.get_type::<BrokenConnectionInPool>(),
+    )?;
+    module.add(
         "ConnectionSetupFailed",
         py.get_type::<ConnectionSetupFailed>(),
     )?;
@@ -346,6 +361,10 @@ pub(crate) fn errors(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<(
     )?;
     module.add("RequestFailedError", py.get_type::<RequestFailedError>())?;
     module.add("BrokenConnection", py.get_type::<BrokenConnection>())?;
+    module.add(
+        "BrokenConnectionInFlight",
+        py.get_type::<BrokenConnectionInFlight>(),
+    )?;
     module.add("ConnectionBusy", py.get_type::<ConnectionBusy>())?;
     module.add(
         "NonfinishedPagingState",
