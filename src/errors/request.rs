@@ -16,7 +16,7 @@ use scylla::errors::{
 
 use crate::errors::connection::pool_broken_to_pyerr;
 use crate::errors::{
-    AlreadyExists, AuthenticationFailed, BadKeyspaceName, BrokenConnection, ConnectionBusy,
+    AlreadyExists, AuthenticationFailed, BadKeyspaceName, BrokenConnectionInFlight, ConnectionBusy,
     ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure, HostnameResolutionFailed,
     InvalidClusterMetadata, InvalidRequest, IsBootstrapping, KeyspaceNameMismatch,
     MetadataFetchFailed, NoHostAvailable, NoKnownNodes, NodeDisabledByHostFilter,
@@ -261,7 +261,9 @@ pub(crate) fn request_attempt_error_to_pyerr(
             py_err!(RequestSerializationError, message)
         }
         RequestAttemptError::UnableToAllocStreamId => py_err!(ConnectionBusy, message),
-        RequestAttemptError::BrokenConnectionError(_) => py_err!(BrokenConnection, message),
+        RequestAttemptError::BrokenConnectionError(_) => {
+            py_err!(BrokenConnectionInFlight, message)
+        }
         RequestAttemptError::BodyExtensionsParseError(_)
         | RequestAttemptError::CqlResultParseError(_)
         | RequestAttemptError::CqlErrorParseError(_) => py_err!(ResponseParseError, message),

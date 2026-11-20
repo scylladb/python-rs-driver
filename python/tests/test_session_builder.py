@@ -25,14 +25,19 @@ from scylla.errors import (
     AddressTranslationError,
     AddressTranslationFailed,
     AuthenticationFailed,
+    BrokenConnection,
+    BrokenConnectionInFlight,
+    BrokenConnectionInPool,
     ConnectionAuthenticationFailed,
     ConnectionPoolBroken,
+    ConnectionPoolError,
     ConnectionSetupFailed,
     ConnectTimeout,
     ContactPointError,
     HostFilterError,
     HostnameResolutionFailed,
     NoKnownNodes,
+    RequestFailedError,
     SessionConfigError,
 )
 from scylla.policies.address_translator import AddressTranslator, DictAddressTranslator, UntranslatedPeer
@@ -830,7 +835,7 @@ async def test_connect_to_unreachable_address_times_out():
 
 @pytest.mark.parametrize(
     "pool_class",
-    [ConnectTimeout, AddressTranslationFailed, ConnectionSetupFailed],
+    [ConnectTimeout, AddressTranslationFailed, BrokenConnectionInPool, ConnectionSetupFailed],
 )
 def test_pool_failures_are_broken_pool_errors(pool_class: type):
     assert issubclass(pool_class, ConnectionPoolBroken)
@@ -841,3 +846,8 @@ def test_connection_class_bases():
     # Covers client-side failures too, so it is not the server's AuthenticationFailed.
     assert not issubclass(ConnectionAuthenticationFailed, AuthenticationFailed)
     assert issubclass(AddressTranslationFailed, AddressTranslationError)
+    # `except BrokenConnection` catches both. The second base tells if the request was sent.
+    assert issubclass(BrokenConnectionInPool, BrokenConnection)
+    assert issubclass(BrokenConnectionInFlight, BrokenConnection)
+    assert not issubclass(BrokenConnectionInPool, RequestFailedError)
+    assert not issubclass(BrokenConnectionInFlight, ConnectionPoolError)
