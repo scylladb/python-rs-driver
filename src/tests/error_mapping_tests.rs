@@ -6,20 +6,26 @@ use pyo3::exceptions::{PyConnectionRefusedError, PyKeyError, PyTimeoutError};
 use pyo3::prelude::*;
 use scylla::deserialize::TypeCheckError;
 use scylla::errors::{
-    BrokenConnectionErrorKind, ConnectionError, ConnectionPoolError, CqlRequestSerializationError,
-    CustomTranslationError, DbError, ExecutionError, RequestAttemptError, TracingError,
-    UseKeyspaceError,
+    BrokenConnectionErrorKind, ConnectionError, ConnectionPoolError,
+    ConnectionSetupRequestErrorKind, CqlEventHandlingError, CqlRequestKind,
+    CqlRequestSerializationError, CqlResponseKind, CustomTranslationError, DbError, ExecutionError,
+    FrameHeaderParseError, RequestAttemptError, TracingError, TranslationError, UseKeyspaceError,
 };
 use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
 use scylla_cql_core::frame::frame_errors::PrepareSerializationError;
 
+use crate::errors::connection::setup_request_error_to_pyerr;
 use crate::errors::request::{execution_error_to_pyerr, tracing_error_to_pyerr};
+use crate::errors::types::PyCqlRequestKind;
 use crate::errors::{
-    AddressTranslationFailed, AlreadyExists, BadQuery, BrokenConnection, BrokenConnectionInFlight,
-    BrokenConnectionInPool, ConnectionPoolBroken, ConnectionPoolError as PyConnectionPoolError,
-    DatabaseError, OperationTimedOut, PyBrokenConnectionKind, ReadTimeout, RequestEncodingFailed,
-    RequestFailedError, ResponseParseError, SerializeFailedError, TraceUnavailable, Unavailable,
+    AddressTranslationFailed, AlreadyExists, AuthenticationFailed, BadQuery, BrokenConnection,
+    BrokenConnectionInFlight, BrokenConnectionInPool, ConnectTimeout,
+    ConnectionAuthenticationFailed, ConnectionBusy, ConnectionPoolBroken,
+    ConnectionPoolError as PyConnectionPoolError, ConnectionSetupFailed, DatabaseError,
+    OperationTimedOut, PyBrokenConnectionKind, PyConnectionSetupErrorKind, ReadTimeout,
+    RequestEncodingFailed, RequestFailedError, ResponseParseError, SerializeFailedError,
+    TraceUnavailable, Unavailable,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -301,8 +307,24 @@ fn dropped_connection_keeps_its_kind_on_both_paths() {
             PyBrokenConnectionKind::WriteFailed,
         ),
         (
+            || {
+                BrokenConnectionErrorKind::FrameHeaderParseError(
+                    FrameHeaderParseError::FrameFromClient,
+                )
+            },
+            PyBrokenConnectionKind::FrameParseFailed,
+        ),
+        (
             || BrokenConnectionErrorKind::UnexpectedStreamId(7),
             PyBrokenConnectionKind::UnexpectedStreamId,
+        ),
+        (
+            || {
+                BrokenConnectionErrorKind::CqlEventHandlingError(
+                    CqlEventHandlingError::UnexpectedResponse(CqlResponseKind::Ready),
+                )
+            },
+            PyBrokenConnectionKind::EventHandlingFailed,
         ),
         (
             || BrokenConnectionErrorKind::TooManyOrphanedStreamIds(3),
@@ -342,4 +364,153 @@ fn unlocated_serialization_failure_has_none_bind_marker() {
         assert!(err.is_instance_of::<SerializeFailedError>(py));
         assert!(err.value(py).getattr("bind_marker").unwrap().is_none());
     });
+}
+
+fn broken_pool(py: Python<'_>, last_connection_error: ConnectionError) -> PyErr {
+    let err = ExecutionError::ConnectionPoolError(ConnectionPoolError::Broken {
+        last_connection_error,
+    });
+    execution_error_to_pyerr(py, &err, err.to_string())
+}
+
+#[test]
+fn connect_timeout_is_a_timeout_error() {
+    Python::initialize();
+    Python::attach(|py| {
+        let err = broken_pool(py, ConnectionError::ConnectTimeout);
+        assert!(err.is_instance_of::<ConnectTimeout>(py));
+        assert!(err.is_instance_of::<ConnectionPoolBroken>(py));
+        assert!(err.is_instance_of::<PyTimeoutError>(py));
+    });
+}
+
+#[test]
+fn translator_io_error_is_the_cause() {
+    Python::initialize();
+    let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+    let translation = TranslationError::IoError(Arc::new(refused));
+    Python::attach(|py| {
+        let err = broken_pool(py, ConnectionError::TranslationError(translation));
+        assert!(err.is_instance_of::<AddressTranslationFailed>(py));
+        let cause = err.cause(py).expect("I/O error is the cause");
+        assert!(cause.is_instance_of::<PyConnectionRefusedError>(py));
+    });
+}
+
+#[test]
+fn no_free_stream_on_a_request_is_connection_busy() {
+    Python::initialize();
+    let err = ExecutionError::LastAttemptError(RequestAttemptError::UnableToAllocStreamId);
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<ConnectionBusy>(py));
+    });
+}
+
+fn setup_error(
+    py: Python<'_>,
+    request_kind: CqlRequestKind,
+    err: ConnectionSetupRequestErrorKind,
+) -> PyErr {
+    let message = err.to_string();
+    setup_request_error_to_pyerr(py, request_kind, &err, message)
+}
+
+#[test]
+fn rejected_credentials_are_setup_failure_with_database_cause() {
+    Python::initialize();
+    let rejected = ConnectionSetupRequestErrorKind::DbError(
+        DbError::AuthenticationError,
+        "bad credentials".to_string(),
+    );
+    Python::attach(|py| {
+        let err = setup_error(py, CqlRequestKind::AuthResponse, rejected);
+        assert!(err.is_instance_of::<ConnectionSetupFailed>(py));
+        assert!(!err.is_instance_of::<RequestFailedError>(py));
+        assert_eq!(
+            attr::<PyCqlRequestKind>(py, &err, "request_kind"),
+            PyCqlRequestKind::AuthResponse
+        );
+        assert_eq!(
+            attr::<PyConnectionSetupErrorKind>(py, &err, "kind"),
+            PyConnectionSetupErrorKind::DatabaseError
+        );
+        let cause = err.cause(py).expect("database error is the cause");
+        assert!(cause.is_instance_of::<AuthenticationFailed>(py));
+        assert_eq!(attr::<String>(py, &cause, "reason"), "bad credentials");
+    });
+}
+
+#[test]
+fn missing_authenticator_is_connection_authentication_failed() {
+    Python::initialize();
+    let missing = ConnectionSetupRequestErrorKind::MissingAuthentication;
+    Python::attach(|py| {
+        let err = setup_error(py, CqlRequestKind::Startup, missing);
+        assert!(err.is_instance_of::<ConnectionAuthenticationFailed>(py));
+        assert!(!err.is_instance_of::<ConnectionSetupFailed>(py));
+    });
+}
+
+#[test]
+fn dead_connection_during_setup_is_broken_connection_in_pool() {
+    Python::initialize();
+    let dead = ConnectionSetupRequestErrorKind::BrokenConnection(
+        BrokenConnectionErrorKind::ChannelError.into(),
+    );
+    Python::attach(|py| {
+        let err = setup_error(py, CqlRequestKind::Options, dead);
+        assert!(err.is_instance_of::<BrokenConnectionInPool>(py));
+    });
+}
+
+#[test]
+fn setup_failure_keeps_its_kind() {
+    Python::initialize();
+    let too_long = u16::try_from(usize::MAX).unwrap_err();
+    let kinds: Vec<(ConnectionSetupRequestErrorKind, PyConnectionSetupErrorKind)> = vec![
+        (
+            ConnectionSetupRequestErrorKind::CqlRequestSerialization(
+                CqlRequestSerializationError::PrepareSerialization(
+                    PrepareSerializationError::StatementStringSerialization(too_long),
+                ),
+            ),
+            PyConnectionSetupErrorKind::RequestSerializationError,
+        ),
+        (
+            ConnectionSetupRequestErrorKind::UnableToAllocStreamId,
+            PyConnectionSetupErrorKind::ConnectionBusy,
+        ),
+        (
+            ConnectionSetupRequestErrorKind::UnexpectedResponse(CqlResponseKind::Result),
+            PyConnectionSetupErrorKind::UnexpectedResponse,
+        ),
+    ];
+    for (err, expected) in kinds {
+        Python::attach(|py| {
+            let err = setup_error(py, CqlRequestKind::Startup, err);
+            assert!(err.is_instance_of::<ConnectionSetupFailed>(py));
+            assert_eq!(
+                attr::<PyConnectionSetupErrorKind>(py, &err, "kind"),
+                expected
+            );
+        });
+    }
+}
+
+#[test]
+fn every_request_kind_has_its_own_value() {
+    let kinds = [
+        (CqlRequestKind::Startup, PyCqlRequestKind::Startup),
+        (CqlRequestKind::AuthResponse, PyCqlRequestKind::AuthResponse),
+        (CqlRequestKind::Options, PyCqlRequestKind::Options),
+        (CqlRequestKind::Query, PyCqlRequestKind::Query),
+        (CqlRequestKind::Prepare, PyCqlRequestKind::Prepare),
+        (CqlRequestKind::Execute, PyCqlRequestKind::Execute),
+        (CqlRequestKind::Batch, PyCqlRequestKind::Batch),
+        (CqlRequestKind::Register, PyCqlRequestKind::Register),
+    ];
+    for (rust, python) in kinds {
+        assert_eq!(PyCqlRequestKind::from(rust), python);
+    }
 }

@@ -8,7 +8,7 @@ mod macros;
 
 mod attrs;
 pub(crate) mod config;
-mod connection;
+pub(crate) mod connection;
 pub(crate) mod execution;
 pub(crate) mod request;
 pub(crate) mod types;
