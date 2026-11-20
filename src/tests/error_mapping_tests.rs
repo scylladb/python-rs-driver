@@ -6,18 +6,20 @@ use pyo3::exceptions::{PyConnectionRefusedError, PyKeyError, PyTimeoutError};
 use pyo3::prelude::*;
 use scylla::deserialize::TypeCheckError;
 use scylla::errors::{
-    BrokenConnectionErrorKind, ConnectionError, ConnectionPoolError, CustomTranslationError,
-    DbError, ExecutionError, RequestAttemptError, TracingError, UseKeyspaceError,
+    BrokenConnectionErrorKind, ConnectionError, ConnectionPoolError, CqlRequestSerializationError,
+    CustomTranslationError, DbError, ExecutionError, RequestAttemptError, TracingError,
+    UseKeyspaceError,
 };
 use scylla::serialize::SerializationError;
 use scylla::statement::Consistency;
+use scylla_cql_core::frame::frame_errors::PrepareSerializationError;
 
 use crate::errors::request::{execution_error_to_pyerr, tracing_error_to_pyerr};
 use crate::errors::{
-    AddressTranslationFailed, AlreadyExists, BrokenConnection, BrokenConnectionInFlight,
+    AddressTranslationFailed, AlreadyExists, BadQuery, BrokenConnection, BrokenConnectionInFlight,
     BrokenConnectionInPool, ConnectionPoolBroken, ConnectionPoolError as PyConnectionPoolError,
-    DatabaseError, OperationTimedOut, PyBrokenConnectionKind, ReadTimeout, RequestFailedError,
-    ResponseParseError, SerializeFailedError, TraceUnavailable, Unavailable,
+    DatabaseError, OperationTimedOut, PyBrokenConnectionKind, ReadTimeout, RequestEncodingFailed,
+    RequestFailedError, ResponseParseError, SerializeFailedError, TraceUnavailable, Unavailable,
 };
 use crate::serialize::error::serialization_error_to_pyerr;
 
@@ -90,6 +92,24 @@ fn already_exists_keeps_keyspace_and_table() {
         assert!(err.is_instance_of::<AlreadyExists>(py));
         assert_eq!(attr::<String>(py, &err, "keyspace"), "ks");
         assert_eq!(attr::<String>(py, &err, "table"), "tbl");
+    });
+}
+
+#[test]
+fn request_that_cannot_be_encoded_is_bad_query() {
+    Python::initialize();
+    let too_long = u16::try_from(usize::MAX).unwrap_err();
+    let err = ExecutionError::LastAttemptError(RequestAttemptError::CqlRequestSerialization(
+        CqlRequestSerializationError::PrepareSerialization(
+            PrepareSerializationError::StatementStringSerialization(too_long),
+        ),
+    ));
+    Python::attach(|py| {
+        let err = execution_error_to_pyerr(py, &err, err.to_string());
+        assert!(err.is_instance_of::<RequestEncodingFailed>(py));
+        assert!(err.is_instance_of::<BadQuery>(py));
+        // Nothing was sent, so it is not a `RequestFailedError`.
+        assert!(!err.is_instance_of::<RequestFailedError>(py));
     });
 }
 
