@@ -239,6 +239,7 @@ async def test_prepare_prepared_statement_raises_session_query_error():
     assert isinstance(exc_info.value, StatementConversionError)
     assert isinstance(exc_info.value, TypeError)
     assert not isinstance(exc_info.value, PrepareError)
+    assert str(exc_info.value) == "Cannot prepare a PreparedStatement; expected a str or Statement"
 
 
 @pytest.mark.asyncio
@@ -260,6 +261,7 @@ async def test_prepare_invalid_statement_type_raises_statement_conversion_error(
 
     assert isinstance(exc_info.value, StatementConversionError)
     assert isinstance(exc_info.value, TypeError)
+    assert str(exc_info.value) == ("Invalid statement type: expected a str, Statement, or PreparedStatement, got int")
 
 
 @pytest.mark.asyncio
