@@ -51,7 +51,7 @@ checksum = "8fa3f3d8cbf4dffcfe4991de61d012bef509a409ecbe9dd41049bfe32b4d4653"
 dependencies = [
  "autocfg",
  "libm",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-integer",
  "num-traits",
 ]
@@ -478,6 +478,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -628,7 +638,7 @@ dependencies = [
  "bigdecimal",
  "chrono",
  "libc",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "once_cell",
  "portable-atomic",
@@ -783,7 +793,7 @@ dependencies = [
  "chrono",
  "futures",
  "log",
- "num-bigint",
+ "num-bigint 0.5.1",
  "openssl",
  "pin-project-lite",
  "pyo3",
@@ -859,7 +869,7 @@ dependencies = [
  "bytes",
  "chrono",
  "itertools",
- "num-bigint",
+ "num-bigint 0.4.8",
  "scylla-macros",
  "thiserror",
  "uuid",
