@@ -783,7 +783,6 @@ dependencies = [
  "chrono",
  "futures",
  "log",
- "num-bigint",
  "openssl",
  "pin-project-lite",
  "pyo3",
