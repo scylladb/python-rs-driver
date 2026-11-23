@@ -3,8 +3,10 @@ name: Build
 on:
   push:
     branches:
-      - "**"
+      - main
+      - "branch-*"
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
