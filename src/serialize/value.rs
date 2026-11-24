@@ -27,12 +27,12 @@ use scylla::serialize::SerializationError;
 use scylla::serialize::value::{
     BuiltinSerializationError, BuiltinSerializationErrorKind, BuiltinTypeCheckError,
     BuiltinTypeCheckErrorKind, MapSerializationErrorKind, SerializeValue,
-    SetOrListSerializationErrorKind, TupleTypeCheckErrorKind, UdtTypeCheckErrorKind,
+    SetOrListSerializationErrorKind, TupleSerializationErrorKind, UdtSerializationErrorKind,
+    UdtTypeCheckErrorKind,
 };
 use scylla::serialize::writers::{CellWriter, WrittenCellProof};
 use scylla::value::{Counter, CqlDate, CqlDuration, CqlTime, CqlTimestamp, CqlTimeuuid, CqlValue};
 
-use scylla::serialize::value::VectorSerializationErrorKind;
 use scylla_cql_core::serialize::value::{
     serialize_next_constant_length_elem_unstable, serialize_next_variable_length_elem_unstable,
 };
@@ -419,10 +419,13 @@ pub fn serialize_vector<'t, 'b, 'py, T: Any>(
     writer: CellWriter<'b>,
 ) -> Result<WrittenCellProof<'b>, SerializationError> {
     if len != dimensions as usize {
-        return Err(mk_ser_err::<T>(
-            typ,
-            VectorSerializationErrorKind::InvalidNumberOfElements(len, dimensions),
-        ));
+        let expected = usize::from(dimensions);
+        return Err(DriverValueSerializationError::wrong_number_of_elements(
+            TypeExpected::Vector,
+            expected,
+            len,
+        )
+        .into());
     }
     let mut builder = writer.into_value_builder();
     match element_type.type_size_for_vector() {
@@ -710,7 +713,16 @@ impl<'py> SerializeValue for PyUdtWrapper<'py, '_> {
                 })?;
 
             PyAnyWrapper::new(&item)
-                .serialize_arbitrary_value(field_type, builder.make_sub_writer())?;
+                .serialize_arbitrary_value(field_type, builder.make_sub_writer())
+                .map_err(|err| {
+                    mk_ser_err::<PyDict>(
+                        typ,
+                        UdtSerializationErrorKind::FieldSerializationFailed {
+                            field_name: field_name.to_string(),
+                            err,
+                        },
+                    )
+                })?;
         }
 
         builder
@@ -756,20 +768,25 @@ impl<'py, 'a> SerializeValue for PyTupleWrapper<'py, 'a> {
     ) -> Result<WrittenCellProof<'b>, SerializationError> {
         // A shorter tuple is allowed: the database reads the missing elements as null.
         if self.inner.len() > self.elements_types.len() {
-            return Err(mk_typck_err::<PyTuple>(
-                typ,
-                TupleTypeCheckErrorKind::WrongElementCount {
-                    rust_type_el_count: self.inner.len(),
-                    cql_type_el_count: self.elements_types.len(),
-                },
-            ));
+            return Err(DriverValueSerializationError::wrong_number_of_elements(
+                TypeExpected::Tuple,
+                self.elements_types.len(),
+                self.inner.len(),
+            )
+            .into());
         }
 
         let mut builder = cell_writer.into_value_builder();
 
-        for (val, element_type) in self.inner.iter().zip(self.elements_types) {
+        for (index, (val, element_type)) in self.inner.iter().zip(self.elements_types).enumerate() {
             PyAnyWrapper::new(&val)
-                .serialize_arbitrary_value(element_type, builder.make_sub_writer())?;
+                .serialize_arbitrary_value(element_type, builder.make_sub_writer())
+                .map_err(|err| {
+                    mk_ser_err::<PyTuple>(
+                        typ,
+                        TupleSerializationErrorKind::ElementSerializationFailed { index, err },
+                    )
+                })?;
         }
 
         builder

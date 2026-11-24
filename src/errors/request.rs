@@ -14,14 +14,15 @@ use scylla::errors::{
     UseKeyspaceError as RustUseKeyspaceError,
 };
 
+use crate::errors::connection::{broken_connection_in_flight_to_pyerr, pool_broken_to_pyerr};
+use crate::errors::metadata;
 use crate::errors::{
-    AlreadyExists, AuthenticationFailed, BadKeyspaceName, BrokenConnection, ConnectionBusy,
-    ConnectionPoolBroken, ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure,
-    HostnameResolutionFailed, InvalidClusterMetadata, InvalidRequest, IsBootstrapping,
-    KeyspaceNameMismatch, MetadataFetchFailed, NoHostAvailable, NoKnownNodes,
-    NodeDisabledByHostFilter, NonfinishedPagingState, OperationTimedOut, Overloaded,
+    AlreadyExists, AuthenticationFailed, BadKeyspaceName, ConnectionBusy,
+    ConnectionPoolInitializing, CqlSyntaxError, FunctionFailure, HostnameResolutionFailed,
+    InvalidRequest, IsBootstrapping, KeyspaceNameMismatch, MetadataFetchFailed, NoHostAvailable,
+    NoKnownNodes, NodeDisabledByHostFilter, NonfinishedPagingState, OperationTimedOut, Overloaded,
     PartitionKeyExtractionFailed, PreparedStatementIdsMismatch, RateLimitReached, ReadFailure,
-    ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestSerializationError,
+    ReadTimeout, RepreparedIdChanged, RepreparedIdMissingInBatch, RequestEncodingFailed,
     RequiredHostAbsent, ResponseParseError, SchemaAgreementTimeout, ServerConfigError, ServerError,
     ServerProtocolError, SessionConfigError, TooManyStatementsInBatch, TraceUnavailable,
     TruncateError, Unauthorized, Unavailable, UnexpectedResponse, UnknownDatabaseError, Unprepared,
@@ -40,7 +41,9 @@ pub(crate) fn execution_error_to_pyerr(
         RustExecutionError::BadQuery(e) => bad_query_to_pyerr(py, e, message),
         RustExecutionError::EmptyPlan => py_err!(NoHostAvailable, message),
         RustExecutionError::PrepareError(e) => prepare_error_to_pyerr(py, e, message),
-        RustExecutionError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustExecutionError::ConnectionPoolError(e) => {
+            connection_pool_error_to_pyerr(py, e, message)
+        }
         RustExecutionError::LastAttemptError(e) => request_attempt_error_to_pyerr(py, e, message),
         RustExecutionError::RequestTimeout(timeout) => {
             py_err!(py, OperationTimedOut, message; timeout)
@@ -104,13 +107,15 @@ pub(crate) fn metadata_error_to_pyerr(
     message: String,
 ) -> PyErr {
     match err {
-        RustMetadataError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustMetadataError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(py, e, message),
         RustMetadataError::FetchError(e) => metadata_fetch_error_to_pyerr(py, e, message),
-        RustMetadataError::Peers(_)
-        | RustMetadataError::Keyspaces(_)
-        | RustMetadataError::Udts(_)
-        | RustMetadataError::Tables(_)
-        | RustMetadataError::ClientRoutes(_) => py_err!(InvalidClusterMetadata, message),
+        RustMetadataError::Peers(e) => metadata::peers_error_to_pyerr(py, e, message),
+        RustMetadataError::Keyspaces(e) => metadata::keyspaces_error_to_pyerr(py, e, message),
+        RustMetadataError::Udts(e) => metadata::udt_error_to_pyerr(py, e, message),
+        RustMetadataError::Tables(e) => metadata::tables_error_to_pyerr(py, e, message),
+        RustMetadataError::ClientRoutes(e) => {
+            metadata::client_routes_error_to_pyerr(py, e, message)
+        }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
     }
 }
@@ -142,7 +147,7 @@ fn metadata_fetch_error_to_pyerr(
 fn request_error_to_pyerr(py: Python<'_>, err: &RustRequestError, message: String) -> PyErr {
     match err {
         RustRequestError::EmptyPlan => py_err!(NoHostAvailable, message),
-        RustRequestError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustRequestError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(py, e, message),
         RustRequestError::RequestTimeout(timeout) => {
             py_err!(py, OperationTimedOut, message; timeout)
         }
@@ -159,7 +164,7 @@ pub(crate) fn schema_agreement_error_to_pyerr(
 ) -> PyErr {
     match err {
         RustSchemaAgreementError::ConnectionPoolError(e) => {
-            connection_pool_error_to_pyerr(e, message)
+            connection_pool_error_to_pyerr(py, e, message)
         }
         RustSchemaAgreementError::PrepareError(e) => prepare_error_to_pyerr(py, e, message),
         RustSchemaAgreementError::RequestError(e) => request_attempt_error_to_pyerr(py, e, message),
@@ -182,7 +187,7 @@ pub(crate) fn prepare_error_to_pyerr(
     message: String,
 ) -> PyErr {
     match err {
-        RustPrepareError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(e, message),
+        RustPrepareError::ConnectionPoolError(e) => connection_pool_error_to_pyerr(py, e, message),
         RustPrepareError::AllAttemptsFailed { first_attempt } => {
             request_attempt_error_to_pyerr(py, first_attempt, message)
         }
@@ -229,9 +234,15 @@ fn bad_query_to_pyerr(py: Python<'_>, err: &RustBadQuery, message: String) -> Py
 }
 
 #[deny(clippy::wildcard_enum_match_arm)]
-fn connection_pool_error_to_pyerr(err: &RustConnectionPoolError, message: String) -> PyErr {
+fn connection_pool_error_to_pyerr(
+    py: Python<'_>,
+    err: &RustConnectionPoolError,
+    message: String,
+) -> PyErr {
     match err {
-        RustConnectionPoolError::Broken { .. } => py_err!(ConnectionPoolBroken, message),
+        RustConnectionPoolError::Broken {
+            last_connection_error,
+        } => pool_broken_to_pyerr(py, last_connection_error, message),
         RustConnectionPoolError::Initializing => py_err!(ConnectionPoolInitializing, message),
         RustConnectionPoolError::NodeDisabledByHostFilter => {
             py_err!(NodeDisabledByHostFilter, message)
@@ -248,11 +259,11 @@ pub(crate) fn request_attempt_error_to_pyerr(
 ) -> PyErr {
     match err {
         RequestAttemptError::SerializationError(e) => serialization_error_to_pyerr(py, e, message),
-        RequestAttemptError::CqlRequestSerialization(_) => {
-            py_err!(RequestSerializationError, message)
-        }
+        RequestAttemptError::CqlRequestSerialization(_) => py_err!(RequestEncodingFailed, message),
         RequestAttemptError::UnableToAllocStreamId => py_err!(ConnectionBusy, message),
-        RequestAttemptError::BrokenConnectionError(_) => py_err!(BrokenConnection, message),
+        RequestAttemptError::BrokenConnectionError(e) => {
+            broken_connection_in_flight_to_pyerr(py, e, message)
+        }
         RequestAttemptError::BodyExtensionsParseError(_)
         | RequestAttemptError::CqlResultParseError(_)
         | RequestAttemptError::CqlErrorParseError(_) => py_err!(ResponseParseError, message),
@@ -277,7 +288,12 @@ pub(crate) fn request_attempt_error_to_pyerr(
 
 /// Maps a `DbError`; `reason` is the error message sent by the server.
 #[deny(clippy::wildcard_enum_match_arm)]
-fn db_error_to_pyerr(py: Python<'_>, error: &DbError, reason: &str, message: String) -> PyErr {
+pub(crate) fn db_error_to_pyerr(
+    py: Python<'_>,
+    error: &DbError,
+    reason: &str,
+    message: String,
+) -> PyErr {
     let err = match error {
         DbError::SyntaxError => py_err!(CqlSyntaxError, message),
         DbError::Invalid => py_err!(InvalidRequest, message),

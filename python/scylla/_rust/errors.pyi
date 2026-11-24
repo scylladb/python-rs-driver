@@ -125,6 +125,33 @@ class CqlResponseKind(IntEnum):
     AuthSuccess = ...
     """Indicates the success of the authentication phase."""
 
+class CqlRequestKind(IntEnum):
+    """Possible CQL requests sent by the driver to the server."""
+
+    Startup = ...
+    """Initializes the connection. The driver sends it after `Options` and before all other requests."""
+
+    AuthResponse = ...
+    """Answers a server authentication challenge."""
+
+    Options = ...
+    """Asks the server which options it supports."""
+
+    Query = ...
+    """Executes an unprepared statement."""
+
+    Prepare = ...
+    """Prepares a statement."""
+
+    Execute = ...
+    """Executes a prepared statement."""
+
+    Batch = ...
+    """Executes a batch of statements."""
+
+    Register = ...
+    """Registers the connection to receive server events."""
+
 class ScyllaError(Exception): ...
 class InternalDriverError(ScyllaError): ...
 class RowIterationError(ScyllaError): ...
@@ -159,6 +186,14 @@ class TooManyStatementsInBatch(BadQuery):
 
 class PartitionKeyExtractionFailed(BadQuery): ...
 class PagingStateNotAllowed(BadQuery): ...
+
+class RequestEncodingFailed(BadQuery):
+    """The driver could not encode the request, so it did not send it.
+
+    For example, the statement or the paging state is too long, or a batch has a
+    value that does not match its column.
+    """
+
 class StatementConversionError(BadQuery): ...
 class InvalidStatementType(StatementConversionError, TypeError): ...
 class AlreadyPrepared(StatementConversionError, TypeError): ...
@@ -200,6 +235,16 @@ class UnsupportedTypeSerializationError(ValueSerializationError): ...
 class TypeMismatchSerializationError(ValueSerializationError, TypeError): ...
 class ValueOverflowSerializationError(ValueSerializationError, OverflowError): ...
 class InvalidValueSerializationError(ValueSerializationError, ValueError): ...
+
+class WrongNumberOfElements(InvalidValueSerializationError):
+    """Raised when the number of elements is not the number that the CQL type needs."""
+
+    container: str
+    """The CQL type that has the wrong number of elements: `"vector"` or `"tuple"`."""
+
+    expected: int
+    received: int
+
 class SerializeFailedError(ValueSerializationError): ...
 class PySerializationFailedError(ValueSerializationError): ...
 
@@ -220,7 +265,47 @@ class MetadataError(ExecutionError):
 class MetadataFetchFailed(MetadataError):
     table: str
 
-class InvalidClusterMetadata(MetadataError): ...
+class InvalidClusterMetadataKind(IntEnum):
+    """Why the cluster metadata is not valid."""
+
+    EmptyPeers = ...
+    """The list of peers is empty."""
+
+    EmptyTokenLists = ...
+    """All peers have an empty list of tokens."""
+
+    InvalidKeyspaceStrategy = ...
+    """The replication strategy of a keyspace is not valid. `keyspace` is the keyspace."""
+
+    InvalidUdtFieldType = ...
+    """The driver could not parse the type of a user defined type field."""
+
+    CircularUdtDependency = ...
+    """User defined types refer to each other in a circle."""
+
+    InvalidColumnType = ...
+    """The driver could not parse the type of a column."""
+
+    UnknownColumnKind = ...
+    """A column has an unknown kind. `keyspace` and `table` are the table of the column."""
+
+    InvalidClientRoutesPort = ...
+    """A client route has a port that is not valid."""
+
+class InvalidClusterMetadata(MetadataError):
+    """The cluster sent metadata that is not valid, for example a column type that the driver cannot parse.
+
+    The data in the cluster is wrong, so a retry does not help.
+    """
+
+    kind: InvalidClusterMetadataKind
+    """Why the metadata is not valid."""
+
+    keyspace: str | None
+    """The keyspace that has the data that is not valid, or `None` if the driver does not know it."""
+
+    table: str | None
+    """The table that has the data that is not valid, or `None` if the driver does not know it."""
 
 class SchemaAgreementError(ExecutionError):
     """Failures specific to schema agreement. Request failures raise their own class."""
@@ -239,10 +324,104 @@ class KeyspaceNameMismatch(UseKeyspaceError):
     expected: str
     received: str
 
+class BrokenConnectionKind(IntEnum):
+    """Why an established connection died."""
+
+    KeepaliveTimeout = ...
+    """The node did not answer a keepalive request in time."""
+
+    KeepaliveFailed = ...
+    """The keepalive request failed."""
+
+    WriteFailed = ...
+    """Writing to the socket failed."""
+
+    FrameParseFailed = ...
+    """The driver could not parse a response frame header."""
+
+    UnexpectedStreamId = ...
+    """The node sent a frame with a stream id that has no request."""
+
+    EventHandlingFailed = ...
+    """The driver could not handle a server event."""
+
+    TooManyOrphanedStreams = ...
+    """Too many requests timed out on the connection, so the driver closed it."""
+
+    ChannelClosed = ...
+    """The connection was already dead for another reason."""
+
+class BrokenConnection(ExecutionError):
+    """An established connection to a node died.
+
+    The driver raises one of the two subclasses. `BrokenConnectionInFlight` is also a
+    `RequestFailedError`: your request was on the connection. `BrokenConnectionInPool`
+    is also a `ConnectionPoolBroken`: your request was not sent.
+    """
+
+    kind: BrokenConnectionKind | None
+
 class ConnectionPoolError(ExecutionError): ...
 class ConnectionPoolBroken(ConnectionPoolError): ...
 class ConnectionPoolInitializing(ConnectionPoolError): ...
 class NodeDisabledByHostFilter(ConnectionPoolError): ...
+class ConnectTimeout(ConnectionPoolBroken, TimeoutError): ...
+class AddressTranslationFailed(ConnectionPoolBroken, AddressTranslationError): ...
+
+class BrokenConnectionInPool(ConnectionPoolBroken, BrokenConnection):
+    """The last connection to the node died, so the pool has no connection. Your request was not sent."""
+
+class ConnectionSetupErrorKind(IntEnum):
+    """Why a request failed while the driver opened a connection."""
+
+    RequestSerializationError = ...
+    """The driver could not encode its own request, for example the credentials from the authenticator."""
+
+    BodyExtensionsParseError = ...
+    """The driver could not parse the extensions of the response body."""
+
+    ConnectionBusy = ...
+    """No stream id was free on the connection."""
+
+    DatabaseError = ...
+    """The node returned an error, for example because it rejected the credentials.
+    `__cause__` is the `DatabaseError` subclass for that error, for example `AuthenticationFailed`."""
+
+    UnexpectedResponse = ...
+    """The node sent a response of the wrong type."""
+
+    SupportedResponseParseError = ...
+    """The driver could not parse the SUPPORTED response."""
+
+    AuthenticateResponseParseError = ...
+    """The driver could not parse the AUTHENTICATE response."""
+
+    AuthSuccessResponseParseError = ...
+    """The driver could not parse the AUTH_SUCCESS response."""
+
+    AuthChallengeResponseParseError = ...
+    """The driver could not parse the AUTH_CHALLENGE response."""
+
+    ErrorResponseParseError = ...
+    """The driver could not parse the ERROR response."""
+
+class ConnectionSetupFailed(ConnectionPoolBroken):
+    """A request failed while the driver opened a connection to a node.
+
+    To open a connection, the driver sends its own requests, for example `STARTUP`.
+    `request_kind` tells which one failed, and `kind` tells why.
+
+    Your request was not sent, so this is not a `RequestFailedError`.
+    """
+
+    request_kind: CqlRequestKind
+    kind: ConnectionSetupErrorKind
+
+class ConnectionAuthenticationFailed(ConnectionPoolBroken):
+    """No authenticator is set, or the authenticator raised, while the driver opened a connection."""
+
+    request_kind: CqlRequestKind
+
 class RequestFailedError(ExecutionError): ...
 class PrepareError(ExecutionError): ...
 class PreparedStatementIdsMismatch(PrepareError): ...
@@ -253,12 +432,14 @@ class RepreparedIdChanged(PrepareError, RequestFailedError):
     reprepared_id: bytes
 
 class RepreparedIdMissingInBatch(PrepareError, RequestFailedError): ...
-class BrokenConnection(RequestFailedError): ...
+
+class BrokenConnectionInFlight(RequestFailedError, BrokenConnection):
+    """A connection died while your request was on it. The node possibly executed the request."""
+
 class ConnectionBusy(RequestFailedError): ...
 class NonfinishedPagingState(RequestFailedError): ...
 class ProtocolError(RequestFailedError): ...
 class ResponseParseError(ProtocolError): ...
-class RequestSerializationError(ProtocolError): ...
 
 class UnexpectedResponse(ProtocolError):
     response_kind: CqlResponseKind
