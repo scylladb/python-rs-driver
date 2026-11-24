@@ -27,7 +27,6 @@ thiserror = "2.0.6"
 uuid = { version = "1.11.0", features = ["v4"] }
 bigdecimal = "0.4"
 chrono = "0.4"
-num-bigint = "0.4"
 async-trait = "0.1.89"
 log = "0.4.29"
 tracing = { version = "0.1", features = ["log"] }
