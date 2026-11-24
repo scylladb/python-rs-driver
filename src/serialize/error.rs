@@ -12,8 +12,8 @@ use scylla::value::ValueOverflow;
 use crate::errors::{
     InvalidValueSerializationError, MissingValue, PySerializationFailedError,
     RowSerializationError, SerializeFailedError, ToPyAttr, TypeMismatchSerializationError,
-    UnsupportedTypeSerializationError, ValueOverflowSerializationError, WrongNumberOfValues,
-    py_err, with_cause,
+    UnsupportedTypeSerializationError, ValueOverflowSerializationError, WrongNumberOfElements,
+    WrongNumberOfValues, py_err, with_cause,
 };
 
 /// Errors that can occur while serializing the values of one statement as a row.
@@ -53,6 +53,13 @@ pub(crate) enum DriverValueSerializationError {
     /// The duration fields have different signs, which CQL cannot represent.
     #[error("All duration fields must have the same sign")]
     MixedSignDuration,
+    /// The number of elements is not the number that the vector or tuple type needs.
+    #[error("Wrong number of {container} elements: expected {expected}, got {received}")]
+    WrongNumberOfElements {
+        container: TypeExpected,
+        expected: usize,
+        received: usize,
+    },
     /// An error occurred while interacting with Python objects during serialization.
     #[error("Python serialization failed")]
     PythonInteropFailed { source: Box<PyErr> },
@@ -166,6 +173,18 @@ impl DriverValueSerializationError {
         Self::MixedSignDuration
     }
 
+    pub(crate) fn wrong_number_of_elements(
+        container: TypeExpected,
+        expected: usize,
+        received: usize,
+    ) -> Self {
+        Self::WrongNumberOfElements {
+            container,
+            expected,
+            received,
+        }
+    }
+
     pub(crate) fn python_interop_failed(source: PyErr) -> Self {
         Self::PythonInteropFailed {
             source: Box::new(source),
@@ -185,6 +204,13 @@ impl DriverValueSerializationError {
             }
             Self::MixedSignDuration => {
                 py_err!(py, InvalidValueSerializationError, message; bind_marker)
+            }
+            Self::WrongNumberOfElements {
+                container,
+                expected,
+                received,
+            } => {
+                py_err!(py, WrongNumberOfElements, message; bind_marker, container, expected, received)
             }
             Self::PythonInteropFailed { source } => with_cause(
                 py_err!(py, PySerializationFailedError, message; bind_marker),
@@ -224,37 +250,119 @@ fn builtin_value_error_to_pyerr(
     bind_marker: Option<&BindMarker>,
 ) -> PyErr {
     match kind {
-        BuiltinSerializationErrorKind::ValueOverflow => {
+        BuiltinSerializationErrorKind::ValueOverflow
+        | BuiltinSerializationErrorKind::SizeOverflow => {
             py_err!(py, ValueOverflowSerializationError, message; bind_marker)
         }
-        BuiltinSerializationErrorKind::VectorError(
-            VectorSerializationErrorKind::InvalidNumberOfElements(..),
-        ) => py_err!(py, InvalidValueSerializationError, message; bind_marker),
-        BuiltinSerializationErrorKind::SetOrListError(
-            SetOrListSerializationErrorKind::ElementSerializationFailed(inner),
-        )
-        | BuiltinSerializationErrorKind::VectorError(
-            VectorSerializationErrorKind::ElementSerializationFailed(inner),
-        )
-        | BuiltinSerializationErrorKind::MapError(
-            MapSerializationErrorKind::KeySerializationFailed(inner)
-            | MapSerializationErrorKind::ValueSerializationFailed(inner),
-        )
-        | BuiltinSerializationErrorKind::TupleError(
-            TupleSerializationErrorKind::ElementSerializationFailed { err: inner, .. },
-        )
-        | BuiltinSerializationErrorKind::UdtError(
-            UdtSerializationErrorKind::FieldSerializationFailed { err: inner, .. },
-        ) => value_error_to_pyerr(inner, py, message, bind_marker),
-        BuiltinSerializationErrorKind::SizeOverflow
-        | BuiltinSerializationErrorKind::SetOrListError(_)
-        | BuiltinSerializationErrorKind::VectorError(_)
-        | BuiltinSerializationErrorKind::MapError(_)
-        | BuiltinSerializationErrorKind::TupleError(_)
-        | BuiltinSerializationErrorKind::UdtError(_) => {
-            py_err!(py, SerializeFailedError, message; bind_marker)
+        BuiltinSerializationErrorKind::SetOrListError(e) => {
+            set_or_list_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::VectorError(e) => {
+            vector_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::MapError(e) => {
+            map_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::TupleError(e) => {
+            tuple_error_to_pyerr(e, py, message, bind_marker)
+        }
+        BuiltinSerializationErrorKind::UdtError(e) => {
+            udt_error_to_pyerr(e, py, message, bind_marker)
         }
         _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn set_or_list_error_to_pyerr(
+    kind: &SetOrListSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        SetOrListSerializationErrorKind::TooManyElements => {
+            py_err!(py, ValueOverflowSerializationError, message; bind_marker)
+        }
+        SetOrListSerializationErrorKind::ElementSerializationFailed(inner) => {
+            value_error_to_pyerr(inner, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn vector_error_to_pyerr(
+    kind: &VectorSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        VectorSerializationErrorKind::InvalidNumberOfElements(received, expected) => {
+            let container = TypeExpected::Vector;
+            let expected = usize::from(*expected);
+            py_err!(py, WrongNumberOfElements, message; bind_marker, container, expected, received)
+        }
+        VectorSerializationErrorKind::ElementSerializationFailed(inner) => {
+            value_error_to_pyerr(inner, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn map_error_to_pyerr(
+    kind: &MapSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        MapSerializationErrorKind::TooManyElements => {
+            py_err!(py, ValueOverflowSerializationError, message; bind_marker)
+        }
+        MapSerializationErrorKind::KeySerializationFailed(inner)
+        | MapSerializationErrorKind::ValueSerializationFailed(inner) => {
+            value_error_to_pyerr(inner, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn tuple_error_to_pyerr(
+    kind: &TupleSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        TupleSerializationErrorKind::ElementSerializationFailed { err, .. } => {
+            value_error_to_pyerr(err, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+fn udt_error_to_pyerr(
+    kind: &UdtSerializationErrorKind,
+    py: Python<'_>,
+    message: String,
+    bind_marker: Option<&BindMarker>,
+) -> PyErr {
+    match kind {
+        UdtSerializationErrorKind::FieldSerializationFailed { err, .. } => {
+            value_error_to_pyerr(err, py, message, bind_marker)
+        }
+        _ => unreachable!("clippy testifies that the match is exhaustive"),
+    }
+}
+
+impl ToPyAttr for TypeExpected {
+    fn to_py_attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.to_string().to_py_attr(py)
     }
 }
 

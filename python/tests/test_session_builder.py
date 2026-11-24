@@ -23,9 +23,21 @@ from helpers.system_clients import own_client_options
 from scylla.auth import Authenticator, AuthenticatorProvider
 from scylla.errors import (
     AddressTranslationError,
+    AddressTranslationFailed,
+    AuthenticationFailed,
+    BrokenConnection,
+    BrokenConnectionInFlight,
+    BrokenConnectionInPool,
+    ConnectionAuthenticationFailed,
+    ConnectionPoolBroken,
+    ConnectionPoolError,
+    ConnectionSetupFailed,
+    ConnectTimeout,
+    ContactPointError,
     HostFilterError,
     HostnameResolutionFailed,
     NoKnownNodes,
+    RequestFailedError,
     SessionConfigError,
 )
 from scylla.policies.address_translator import AddressTranslator, DictAddressTranslator, UntranslatedPeer
@@ -159,10 +171,11 @@ async def test_custom_authenticator_failing_python_side(ccm_contact_points: list
 
     builder = SessionBuilder().contact_points(ccm_contact_points).authenticator_provider(simple_provider)
 
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(ConnectionAuthenticationFailed) as excinfo:
         await builder.connect()
 
     assert "Python Authentication Exploded" in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
 
 
 @pytest.mark.asyncio
@@ -800,3 +813,50 @@ async def test_connect_to_unresolvable_hostname_fails():
         await SessionBuilder().contact_points([("nonexistent.invalid", 9042)]).connect()
 
     assert excinfo.value.hostnames == ["nonexistent.invalid:9042"]
+
+
+@pytest.mark.asyncio
+async def test_connect_to_closed_port_fails():
+    with pytest.raises(ConnectionPoolBroken) as excinfo:
+        await SessionBuilder().contact_points([("127.0.0.1", 1)]).connect()
+
+    # A pool failure raises the same class at connect as later, not a ContactPointError.
+    assert not isinstance(excinfo.value, ContactPointError)
+
+
+@pytest.mark.asyncio
+async def test_connect_to_unreachable_address_times_out():
+    # 10.255.255.1 is not routable, so the TCP connect never completes.
+    with pytest.raises(ConnectTimeout) as excinfo:
+        await SessionBuilder().contact_points([("10.255.255.1", 9042)]).connection_timeout(0.5).connect()
+
+    assert isinstance(excinfo.value, TimeoutError)
+
+
+@pytest.mark.parametrize(
+    "pool_class",
+    [
+        ConnectTimeout,
+        AddressTranslationFailed,
+        BrokenConnectionInPool,
+        ConnectionSetupFailed,
+        ConnectionAuthenticationFailed,
+    ],
+)
+def test_pool_failures_are_broken_pool_errors(pool_class: type):
+    assert issubclass(pool_class, ConnectionPoolBroken)
+
+
+def test_connection_class_bases():
+    # Auth failures have no `ConnectionSetupFailed.kind`, so they are not a subclass of it.
+    assert not issubclass(ConnectionAuthenticationFailed, ConnectionSetupFailed)
+    # The request of the user was not sent, so it is not a `RequestFailedError`.
+    assert not issubclass(ConnectionSetupFailed, RequestFailedError)
+    # Covers only client-side failures, so it is not the server's AuthenticationFailed.
+    assert not issubclass(ConnectionAuthenticationFailed, AuthenticationFailed)
+    assert issubclass(AddressTranslationFailed, AddressTranslationError)
+    # `except BrokenConnection` catches both. The second base tells if the request was sent.
+    assert issubclass(BrokenConnectionInPool, BrokenConnection)
+    assert issubclass(BrokenConnectionInFlight, BrokenConnection)
+    assert not issubclass(BrokenConnectionInPool, RequestFailedError)
+    assert not issubclass(BrokenConnectionInFlight, ConnectionPoolError)
