@@ -402,7 +402,7 @@ fn namedtuple_class(py: Python<'_>, class_name: &str, columns: &[&str]) -> PyRes
     let class = py
         .import(intern!(py, "collections"))?
         .getattr(intern!(py, "namedtuple"))?
-        .call1((class_name, field_names(py, columns)?))?
+        .call1((class_name, field_names(py, class_name, columns)?))?
         .unbind();
 
     let Ok(mut classes) = NAMEDTUPLE_CLASSES.write_py_attached(py) else {
@@ -416,10 +416,10 @@ fn namedtuple_class(py: Python<'_>, class_name: &str, columns: &[&str]) -> PyRes
     Ok(classes.entry(key).or_insert(class).clone_ref(py))
 }
 
-/// Turns column names into namedtuple field names, mirroring the old Python
-/// driver: strip and replace characters that cannot appear in an identifier,
-/// rename what is still unusable to its position, then break ties.
-fn field_names(py: Python<'_>, columns: &[&str]) -> PyResult<Vec<String>> {
+/// Turns column or UDT field names into namedtuple field names, mirroring the
+/// old Python driver: strip and replace characters that cannot appear in an
+/// identifier, rename what is still unusable to its position, then break ties.
+fn field_names(py: Python<'_>, class_name: &str, columns: &[&str]) -> PyResult<Vec<String>> {
     let keywords = keywords(py)?;
     let mut names = Vec::with_capacity(columns.len());
     let mut seen = HashSet::with_capacity(columns.len());
@@ -446,9 +446,10 @@ fn field_names(py: Python<'_>, columns: &[&str]) -> PyResult<Vec<String>> {
     // `[applied]` -> `applied` does not.
     if renamed {
         log::warn!(
-            "Column names {columns:?} cannot all be used as namedtuple fields, so rows use \
-             {names:?}. Choose the names with `SELECT <column> AS <alias>`, or use a different \
-             row factory."
+            "Names {columns:?} cannot all be used as fields of the namedtuple `{class_name}`, so \
+             it uses {names:?}. For a row, choose the names with `SELECT <column> AS <alias>`, \
+             or use a different row factory. For a UDT, register a class for it with \
+             `Adapters.register_udt()`."
         );
     }
 
