@@ -144,6 +144,8 @@ class Adapters:
         field names in the schema.
 
         The class takes precedence over a reader for ``CqlUserDefinedType``.
+        Without a class or such a reader, the driver reads a value of the type
+        as a namedtuple of its fields, named after the type.
 
         If the type already has a class, the new class replaces it.
 

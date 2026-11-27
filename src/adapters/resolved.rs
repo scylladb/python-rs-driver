@@ -5,12 +5,13 @@ use std::sync::Arc;
 use pyo3::PyTypeInfo;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyDict, PyString};
+use pyo3::types::{PyDict, PyString, PyTuple};
 use scylla::frame::response::result::{CollectionType, ColumnSpec, ColumnType, UserDefinedType};
 
 use crate::adapters::Adapters;
 use crate::cql_types::CqlEmpty;
 use crate::deserialize::error::DriverDeserializationError;
+use crate::deserialize::row_factory::{tuple_new, udt_namedtuple_class};
 use crate::deserialize::value::{PyDeserializedValue, fields_dict};
 
 /// What the deserializer does with a value besides its built-in deserialization.
@@ -37,14 +38,16 @@ impl ReadAdapter {
 pub(crate) enum UdtBuilder {
     /// `f(name=value, ...)`, for the class from `register_udt` or the reader of every UDT.
     Call(Py<PyAny>),
-    /// `{name: value, ...}`, for a UDT without a class or reader, or where that is `dict`.
-    /// It skips the copy that `dict(**fields)` makes, and it makes the keys once for all
-    /// values of the page.
+    /// `{name: value, ...}`, where the class or reader is `dict`. It skips the copy that
+    /// `dict(**fields)` makes, and it makes the keys once for all values of the page.
     Dict(PyOnceLock<Box<[Py<PyString>]>>),
+    /// A namedtuple named after the UDT, for a UDT without a class or reader.
+    /// The class is found for the first value, so resolving a page calls no Python.
+    NamedTuple(PyOnceLock<Py<PyAny>>),
 }
 
 impl UdtBuilder {
-    /// The class from `register_udt`, else the reader of every UDT, else a dict.
+    /// The class from `register_udt`, else the reader of every UDT, else a namedtuple.
     fn new(
         py: Python<'_>,
         typ: &ColumnType<'_>,
@@ -57,8 +60,9 @@ impl UdtBuilder {
             .or_else(|| adapters.reader_for(typ).map(|reader| reader.bind(py)));
 
         match builder {
-            Some(f) if !f.is(PyDict::type_object(py)) => Self::Call(f.clone().unbind()),
-            _ => Self::Dict(PyOnceLock::new()),
+            Some(f) if f.is(PyDict::type_object(py)) => Self::Dict(PyOnceLock::new()),
+            Some(f) => Self::Call(f.clone().unbind()),
+            None => Self::NamedTuple(PyOnceLock::new()),
         }
     }
 
@@ -93,8 +97,43 @@ impl UdtBuilder {
                 }
                 Ok(dict.into_any())
             }
+            Self::NamedTuple(class) => {
+                let class = class
+                    .get_or_try_init(py, || namedtuple_class(py, definition))
+                    .map_err(DriverDeserializationError::python_conversion_failed)?;
+                new_namedtuple(py, class.bind(py), fields)
+            }
         }
     }
+}
+
+fn namedtuple_class(py: Python<'_>, definition: &UserDefinedType<'_>) -> PyResult<Py<PyAny>> {
+    let names: Vec<&str> = definition
+        .field_types
+        .iter()
+        .map(|(name, _)| name.as_ref())
+        .collect();
+
+    udt_namedtuple_class(py, &definition.name, &names)
+}
+
+fn new_namedtuple<'py, 'n>(
+    py: Python<'py>,
+    class: &Bound<'py, PyAny>,
+    fields: impl Iterator<Item = Result<(&'n str, PyDeserializedValue), DriverDeserializationError>>,
+) -> Result<Bound<'py, PyAny>, DriverDeserializationError> {
+    // Collected before the tuple is made, so a field error keeps its own kind.
+    let values = fields
+        .map(|field| field.map(|(_, value)| value))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let values =
+        PyTuple::new(py, values).map_err(DriverDeserializationError::python_conversion_failed)?;
+
+    // tuple.__new__(cls, (v, ...))
+    tuple_new(py)
+        .and_then(|new| new.call1((class, values)))
+        .map_err(DriverDeserializationError::python_conversion_failed)
 }
 
 /// The UDTs and adapters of a value and below it. Exists only where at least one of them is.

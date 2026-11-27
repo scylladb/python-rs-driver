@@ -130,8 +130,8 @@ if TYPE_CHECKING:
     )
     """Python value of a CQL column of a scalar (non-collection) type."""
 
-    # CQL list and vector -> list, set -> set, tuple -> tuple,
-    # map and user defined type -> dict.
+    # CQL list and vector -> list, set -> set, map -> dict,
+    # tuple -> tuple, user defined type -> namedtuple (a tuple).
     CqlCollectionValue: TypeAlias = (
         list["CqlValue"] | set["CqlValue"] | tuple["CqlValue", ...] | dict["CqlValue", "CqlValue"]
     )

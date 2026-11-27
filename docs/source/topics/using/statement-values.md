@@ -150,6 +150,8 @@ If a type has both, the adapter takes precedence. So you can change how the driv
 
 ### User defined types
 
+By default, the driver reads a user defined type as a namedtuple of its fields, named after the type, so `row.address.street` works. Use `_asdict()` to get a `dict`. If a field name is not a valid Python identifier, the namedtuple uses a changed name, and the driver logs a warning.
+
 Register a class for a user defined type, and the driver writes and reads values of that type as objects of the class:
 
 ```python
@@ -172,6 +174,13 @@ The driver gets the fields from the type in the schema and matches them by name:
 - To write a value, the driver reads one attribute for each field. A missing attribute is an error. Other attributes are ignored. A `dict` is also written, with one item for each field. A namedtuple is also written, with one item for each field in the order of the type.
 - To read a value, the driver calls `Address(**fields)` with one keyword argument for each field. The class must accept all of them.
 - The registered class takes precedence over an adapter for the same class.
+
+To read one user defined type as a `dict`, register `dict` as its class. To read every user defined type as a `dict`, register `dict` as the reader for `CqlUserDefinedType`:
+
+```python
+adapters.register_udt("shop", "address", dict)
+adapters.register_reader(CqlUserDefinedType, dict)
+```
 
 ### Reading values as your own types
 

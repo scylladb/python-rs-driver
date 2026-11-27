@@ -34,7 +34,7 @@ The table below shows the default Python objects returned by the driver when rea
 | `set<T>` | `set` | `set` |
 | `map<K, V>` | `dict` | `dict` |
 | `tuple<...>` | `tuple` | `tuple` |
-| `udt` | `dict[str, object]`, or the class registered with `Adapters.register_udt()` | `dict[str, object]`, a namedtuple, or an object of the registered class |
+| `udt` | a namedtuple of the fields, named after the type, or the result of `Adapters.register_udt()` or a reader for `CqlUserDefinedType` | `dict[str, object]`, a namedtuple, or an object of the registered class |
 | `vector<T>` | `list` | `list` |
 | `null` | `None` | `None` |
 

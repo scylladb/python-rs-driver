@@ -363,7 +363,7 @@ fn column_names(py: Python<'_>, specs: &[ColumnSpec<'_>]) -> Vec<Py<PyString>> {
 
 /// `tuple.__new__`, which builds a namedtuple instance from an iterable of
 /// values.
-fn tuple_new(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+pub(crate) fn tuple_new(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
     static TUPLE_NEW: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
     TUPLE_NEW
@@ -373,6 +373,20 @@ fn tuple_new(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
                 .map(Bound::unbind)
         })
         .map(|new| new.bind(py).clone())
+}
+
+/// The namedtuple class for the values of a UDT, named after the UDT as the old driver does.
+pub(crate) fn udt_namedtuple_class(
+    py: Python<'_>,
+    udt_name: &str,
+    fields: &[&str],
+) -> PyResult<Py<PyAny>> {
+    let class_name = clean_name(udt_name);
+    if is_identifier(&class_name, keywords(py)?) {
+        namedtuple_class(py, &class_name, fields)
+    } else {
+        namedtuple_class(py, "Udt", fields)
+    }
 }
 
 /// Namedtuple classes keyed by their class name and the raw names they were built from.

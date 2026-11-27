@@ -86,6 +86,7 @@ async def session() -> AsyncGenerator[Session, None]:
     await ddl(setup, f"CREATE TYPE IF NOT EXISTS {KEYSPACE}.point (x int, y int)")
     await ddl(setup, f"CREATE TYPE IF NOT EXISTS {KEYSPACE}.route (start frozen<point>, stop frozen<point>)")
     await ddl(setup, f"CREATE TYPE IF NOT EXISTS {KEYSPACE}.plain (a int)")
+    await ddl(setup, f'CREATE TYPE IF NOT EXISTS {KEYSPACE}.odd ("class" int, "my-field" int)')
     session = await connect_with(make_adapters())
     yield session
     await ddl(setup, f"DROP KEYSPACE {KEYSPACE}")
@@ -234,18 +235,54 @@ async def test_nested_values_are_created_in_one_pass(session: Session, table_fac
     assert await read_back(session, table, "homes") == {Address("Main St", 1)}
     assert await read_back(session, table, "by_name") == {"a": Point(5, 6)}
     assert await read_back(session, table, "pair") == (Point(7, 8), 9)
-    # A UDT with no class stays a dict, and its registered fields still become objects.
-    assert await read_back(session, table, "route") == {"start": Point(0, 0), "stop": Point(1, 1)}
+    # A UDT with no class is a namedtuple, and its registered fields still become objects.
+    route = await read_back(session, table, "route")
+    assert route._asdict() == {"start": Point(0, 0), "stop": Point(1, 1)}
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_unregistered_udt_is_read_as_a_dict(session: Session, table_factory: TableFactory):
+async def test_unregistered_udt_is_read_as_a_namedtuple(session: Session, table_factory: TableFactory):
     table = await table_factory("id int PRIMARY KEY, value frozen<plain>", "unregistered")
 
     await session.execute(f"INSERT INTO {table} (id, value) VALUES (?, ?)", (1, {"a": 1}))
 
-    assert await read_back(session, table, "value") == {"a": 1}
+    value = await read_back(session, table, "value")
+    assert type(value).__name__ == "plain"
+    assert value._fields == ("a",)
+    assert value.a == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_unregistered_udt_round_trips(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, value frozen<plain>", "namedtuple_round_trip")
+    await session.execute(f"INSERT INTO {table} (id, value) VALUES (?, ?)", (1, {"a": 1}))
+    value = await read_back(session, table, "value")
+
+    await session.execute(f"INSERT INTO {table} (id, value) VALUES (?, ?)", (2, value))
+
+    result = await session.execute(f"SELECT value FROM {table} WHERE id = 2")
+    row = await result.first_row()
+    assert row is not None
+    assert row["value"] == value
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_namedtuple_with_renamed_fields_round_trips(session: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, value frozen<odd>", "renamed_round_trip")
+    await session.execute(f"INSERT INTO {table} (id, value) VALUES (?, ?)", (1, {"class": 1, "my-field": 2}))
+    value = await read_back(session, table, "value")
+    assert "class" not in value._fields
+    assert "my-field" not in value._fields
+
+    await session.execute(f"INSERT INTO {table} (id, value) VALUES (?, ?)", (2, value))
+
+    result = await session.execute(f"SELECT value FROM {table} WHERE id = 2")
+    row = await result.first_row()
+    assert row is not None
+    assert tuple(row["value"]) == (1, 2)
 
 
 @pytest.mark.asyncio

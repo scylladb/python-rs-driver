@@ -521,7 +521,7 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                 )));
             }
         },
-        // CQL UserDefinedType (UDT) → Python dict[str, value], or an object of the registered class
+        // CQL UserDefinedType (UDT) → a namedtuple, or an object of the registered class
         ColumnType::UserDefinedType { definition, .. } => {
             let Some(v) = val else {
                 return Ok(PyDeserializedValue::none(py));
