@@ -180,7 +180,9 @@ async def test_namedtuple_renaming_logs_a_warning(session: Session, users: str, 
     # Aliases not used by other tests, so the namedtuple class is not cached yet.
     await (await session.execute(f'SELECT id AS "lambda", name FROM {users}')).first_row()
 
-    assert any("cannot all be used as namedtuple fields" in record.getMessage() for record in caplog.records)
+    assert any(
+        "cannot all be used as fields of the namedtuple `Row`" in record.getMessage() for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio

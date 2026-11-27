@@ -5,7 +5,7 @@ from uuid import UUID
 
 from scylla._rust.types import UnsetType
 from scylla.cluster import ClusterState, Node
-from scylla.cql_types import CqlColumnType
+from scylla.cql_types import CqlType
 from scylla.results import ColumnSpec, PagingState, RowFactoryLike
 from scylla.routing import Target
 from scylla.session import ExecutionProfile
@@ -246,7 +246,7 @@ class ResponseFuture:
     @property
     def column_names(self) -> list[str] | None: ...
     @property
-    def column_types(self) -> list[CqlColumnType] | None:
+    def column_types(self) -> list[CqlType] | None:
         """CQL types of the result columns, ``None`` until a page with rows arrived."""
 
     @property
@@ -328,7 +328,7 @@ class ResultSet:
     @property
     def column_names(self) -> list[str] | None: ...
     @property
-    def column_types(self) -> list[CqlColumnType] | None: ...
+    def column_types(self) -> list[CqlType] | None: ...
     @property
     def was_applied(self) -> bool:
         """For an LWT result, whether the transaction was applied."""

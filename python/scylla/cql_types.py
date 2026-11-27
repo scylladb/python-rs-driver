@@ -8,6 +8,8 @@ Every public name starts with ``Cql``; the rest of the name tells what it is:
   or by a prepared statement. ``<Name>`` is the CQL type's own name.
 - ``CqlColumnType``, ``CqlNativeType`` and ``CqlCollectionType`` are base
   classes that group those descriptors, for ``isinstance`` checks.
+- ``CqlType`` is the union of all descriptors. The schema metadata uses it
+  for each type it holds. Use it to annotate such a type.
 - ``Cql*Value`` (``CqlValue``, ``CqlScalarValue``, ``CqlCollectionValue``)
   is a type alias for the Python objects the driver produces when reading a
   column. Writing accepts the same objects, except ``CqlEmpty``, and also
@@ -67,6 +69,10 @@ from ._rust.cql_types import (  # pyright: ignore[reportMissingModuleSource]
 )
 
 if TYPE_CHECKING:
+    # Recursive, so isinstance on a CqlType keeps known type arguments at every level.
+    # The stubs define it, because the type variables of the generic classes use it as bound.
+    from ._rust.cluster.metadata import CqlType
+
     CqlScalarValue: TypeAlias = (
         # CQL:
         # - Counter
@@ -124,8 +130,8 @@ if TYPE_CHECKING:
     )
     """Python value of a CQL column of a scalar (non-collection) type."""
 
-    # CQL list and vector -> list, set -> set, tuple -> tuple,
-    # map and user defined type -> dict.
+    # CQL list and vector -> list, set -> set, map -> dict,
+    # tuple -> tuple, user defined type -> namedtuple (a tuple).
     CqlCollectionValue: TypeAlias = (
         list["CqlValue"] | set["CqlValue"] | tuple["CqlValue", ...] | dict["CqlValue", "CqlValue"]
     )
@@ -134,6 +140,12 @@ if TYPE_CHECKING:
     CqlValue: TypeAlias = CqlScalarValue | CqlCollectionValue
     """Python value of any CQL column, as read by the driver."""
 else:
+    # Runtime stand-in: the same classes without type arguments. The recursive form needs type
+    # arguments, such as CqlListType[CqlType], and isinstance cannot check type arguments. So
+    # isinstance(x, CqlType) works only with a union of plain classes.
+    CqlType = CqlNativeType | CqlListType | CqlSetType | CqlMapType | CqlTupleType | CqlVectorType | CqlUserDefinedType
+    """A CQL type from the schema or from a prepared statement."""
+
     # Runtime stand-ins without recursion, so get_type_hints() can resolve them.
     CqlScalarValue = (
         int
@@ -188,6 +200,7 @@ __all__ = [
     "CqlTimeuuidType",
     "CqlTinyIntType",
     "CqlTupleType",
+    "CqlType",
     "CqlUserDefinedType",
     "CqlUuidType",
     "CqlValue",

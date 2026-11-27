@@ -294,7 +294,7 @@ impl RowBuilder {
     }
 
     fn named_tuple(py: Python<'_>, names: &[&str]) -> PyResult<Self> {
-        Ok(Self::NamedTuple(namedtuple_class(py, names)?))
+        Ok(Self::NamedTuple(namedtuple_class(py, "Row", names)?))
     }
 
     /// Builds one Python row out of the values of its columns, in column order.
@@ -363,7 +363,7 @@ fn column_names(py: Python<'_>, specs: &[ColumnSpec<'_>]) -> Vec<Py<PyString>> {
 
 /// `tuple.__new__`, which builds a namedtuple instance from an iterable of
 /// values.
-fn tuple_new(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+pub(crate) fn tuple_new(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
     static TUPLE_NEW: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
     TUPLE_NEW
@@ -375,16 +375,34 @@ fn tuple_new(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
         .map(|new| new.bind(py).clone())
 }
 
-/// Namedtuple classes keyed by the raw column names they were built from.
-/// Building one is slow, so it is done once per result shape.
+/// The namedtuple class for the values of a UDT, named after the UDT as the old driver does.
+pub(crate) fn udt_namedtuple_class(
+    py: Python<'_>,
+    udt_name: &str,
+    fields: &[&str],
+) -> PyResult<Py<PyAny>> {
+    let class_name = clean_name(udt_name);
+    if is_identifier(&class_name, keywords(py)?) {
+        namedtuple_class(py, &class_name, fields)
+    } else {
+        namedtuple_class(py, "Udt", fields)
+    }
+}
+
+/// Namedtuple classes keyed by their class name and the raw names they were built from.
+/// Building one is slow, so it is done once per shape.
 static NAMEDTUPLE_CLASSES: LazyLock<RwLock<HashMap<String, Py<PyAny>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 const NAMEDTUPLE_CACHE_LIMIT: usize = 512;
 
-fn namedtuple_class(py: Python<'_>, columns: &[&str]) -> PyResult<Py<PyAny>> {
-    let mut key = String::with_capacity(columns.iter().map(|name| name.len() + 1).sum());
-    for name in columns {
+/// `class_name` must be a valid class name.
+fn namedtuple_class(py: Python<'_>, class_name: &str, columns: &[&str]) -> PyResult<Py<PyAny>> {
+    // A class name never holds `\0`, so the key cannot mix it up with a column name.
+    let mut key = String::with_capacity(
+        class_name.len() + 1 + columns.iter().map(|name| name.len() + 1).sum::<usize>(),
+    );
+    for name in std::iter::once(class_name).chain(columns.iter().copied()) {
         key.push_str(name);
         key.push('\0');
     }
@@ -398,7 +416,7 @@ fn namedtuple_class(py: Python<'_>, columns: &[&str]) -> PyResult<Py<PyAny>> {
     let class = py
         .import(intern!(py, "collections"))?
         .getattr(intern!(py, "namedtuple"))?
-        .call1((intern!(py, "Row"), field_names(py, columns)?))?
+        .call1((class_name, field_names(py, class_name, columns)?))?
         .unbind();
 
     let Ok(mut classes) = NAMEDTUPLE_CLASSES.write_py_attached(py) else {
@@ -412,10 +430,10 @@ fn namedtuple_class(py: Python<'_>, columns: &[&str]) -> PyResult<Py<PyAny>> {
     Ok(classes.entry(key).or_insert(class).clone_ref(py))
 }
 
-/// Turns column names into namedtuple field names, mirroring the old Python
-/// driver: strip and replace characters that cannot appear in an identifier,
-/// rename what is still unusable to its position, then break ties.
-fn field_names(py: Python<'_>, columns: &[&str]) -> PyResult<Vec<String>> {
+/// Turns column or UDT field names into namedtuple field names, mirroring the
+/// old Python driver: strip and replace characters that cannot appear in an
+/// identifier, rename what is still unusable to its position, then break ties.
+fn field_names(py: Python<'_>, class_name: &str, columns: &[&str]) -> PyResult<Vec<String>> {
     let keywords = keywords(py)?;
     let mut names = Vec::with_capacity(columns.len());
     let mut seen = HashSet::with_capacity(columns.len());
@@ -442,9 +460,10 @@ fn field_names(py: Python<'_>, columns: &[&str]) -> PyResult<Vec<String>> {
     // `[applied]` -> `applied` does not.
     if renamed {
         log::warn!(
-            "Column names {columns:?} cannot all be used as namedtuple fields, so rows use \
-             {names:?}. Choose the names with `SELECT <column> AS <alias>`, or use a different \
-             row factory."
+            "Names {columns:?} cannot all be used as fields of the namedtuple `{class_name}`, so \
+             it uses {names:?}. For a row, choose the names with `SELECT <column> AS <alias>`, \
+             or use a different row factory. For a UDT, register a class for it with \
+             `Adapters.register_udt()`."
         );
     }
 

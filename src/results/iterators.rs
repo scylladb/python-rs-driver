@@ -1,7 +1,6 @@
 use crate::TaskExecutionMode;
 use crate::core::results::{PageCore, Pager, PendingRequestResult, next_row_with_paging};
-use crate::deserialize::row_factory::PyRowFactory;
-use crate::deserialize::rows::{ResolvedPage, RowsIteratorKind};
+use crate::deserialize::rows::{ResolvedPage, RowReader, RowsIteratorKind};
 use crate::future::{DriverFuture, boxed_py_future};
 use crate::results::page::{Page, PendingPage};
 use pyo3::exceptions::{PyRuntimeError, PyStopAsyncIteration, PyStopIteration};
@@ -55,13 +54,13 @@ pub struct AsyncRowsIterator {
 
 impl AsyncRowsIterator {
     pub(super) fn new(core: PageCore) -> Self {
-        let (page, query_pager, factory) = core.into_parts();
+        let (page, query_pager, reader) = core.into_parts();
 
         AsyncRowsIterator {
             state: Arc::new(Mutex::new(AsyncIteratorState {
                 rows_iterator: RowsIteratorKind::new(page),
                 query_pager,
-                factory,
+                reader,
             })),
         }
     }
@@ -87,10 +86,10 @@ impl AsyncRowsIterator {
             let AsyncIteratorState {
                 rows_iterator,
                 query_pager,
-                factory,
+                reader,
             } = &mut *state;
 
-            match next_row_with_paging(rows_iterator, query_pager, factory).await {
+            match next_row_with_paging(rows_iterator, query_pager, reader).await {
                 Some(Ok(row)) => Ok(row),
                 Some(Err(err)) => {
                     state.finish();
@@ -114,7 +113,7 @@ impl AsyncRowsIterator {
 struct AsyncIteratorState {
     rows_iterator: RowsIteratorKind,
     query_pager: Pager,
-    factory: PyRowFactory,
+    reader: RowReader,
 }
 
 impl AsyncIteratorState {
@@ -139,10 +138,10 @@ pub struct AsyncPagesIterator {
 
 impl AsyncPagesIterator {
     pub(super) fn new(first_page: Py<Page>) -> Self {
-        let (query_pager, factory) = first_page.get().core().clone_pager_and_factory();
+        let (query_pager, reader) = first_page.get().core().clone_pager_and_reader();
         let state = PagesState {
             query_pager,
-            factory,
+            reader,
             first_page: Some(first_page),
         };
 
@@ -175,7 +174,7 @@ impl AsyncPagesIterator {
 
             let PagesState {
                 query_pager,
-                factory,
+                reader,
                 ..
             } = &mut *state;
 
@@ -184,7 +183,7 @@ impl AsyncPagesIterator {
                     page: PendingPage::from(PendingRequestResult::new(
                         query_result,
                         query_pager.clone(),
-                        factory.clone(),
+                        reader.clone(),
                     )),
                     finished,
                 }),
@@ -210,7 +209,7 @@ struct PagesState {
     first_page: Option<Py<Page>>,
     query_pager: Pager,
     /// Kept unresolved; each page is resolved when it reaches Python.
-    factory: PyRowFactory,
+    reader: RowReader,
 }
 
 /// A page fetched by [`AsyncPagesIterator`], resolved when handed to Python.
