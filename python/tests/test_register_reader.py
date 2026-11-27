@@ -1,11 +1,12 @@
 import types
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
-from helpers.session import session_builder
+from helpers.session import session_builder, suite_adapters
 from scylla.adapters import Adapters
 from scylla.cql_types import (
     CqlColumnType,
@@ -43,6 +44,18 @@ def tag(name: str) -> Callable[[Any], Tagged]:
     return lambda value: Tagged(name, value)
 
 
+def tag_fields(name: str) -> Callable[..., Tagged]:
+    def reader(**fields: Any) -> Tagged:
+        return Tagged(name, fields)
+
+    return reader
+
+
+@dataclass(frozen=True)
+class Box:
+    n: int
+
+
 async def connect_with(adapters: Adapters) -> Session:
     session = await session_builder().adapters(adapters).connect()
     await session.use_keyspace(KEYSPACE)
@@ -60,6 +73,7 @@ async def setup() -> AsyncGenerator[Session, None]:
         """,
     )
     await ddl(setup, f"CREATE TYPE IF NOT EXISTS {KEYSPACE}.box (n int)")
+    await ddl(setup, f"CREATE TYPE IF NOT EXISTS {KEYSPACE}.shelf (top frozen<box>, label text)")
     await setup.use_keyspace(KEYSPACE)
     yield setup
     await ddl(setup, f"DROP KEYSPACE {KEYSPACE}")
@@ -100,6 +114,8 @@ async def read_back(session: Session, table: str, column: str) -> Any:
         CqlTupleType[CqlIntType, CqlTextType],
         CqlVectorType[CqlFloatType],
         CqlListType[CqlVectorType],
+        CqlUserDefinedType,
+        CqlListType[CqlUserDefinedType],
     ],
 )
 def test_register_reader_accepts_a_cql_type(cql_type: Any):
@@ -114,7 +130,6 @@ def test_register_reader_rejects_a_reader_that_is_not_callable():
 @pytest.mark.parametrize(
     "cql_type",
     [
-        CqlUserDefinedType,
         CqlColumnType,
         int,
         "int",
@@ -146,7 +161,7 @@ def test_register_reader_error_names_the_wrong_key():
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 async def test_native_reader_applies_at_every_depth(setup: Session, table_factory: TableFactory):
-    adapters = Adapters()
+    adapters = suite_adapters()
     adapters.register_reader(CqlIntType, tag("int"))
     session = await connect_with(adapters)
     table = await table_factory(
@@ -243,6 +258,51 @@ async def test_type_object_from_schema_is_a_key(
     session = await connect_with(adapters)
 
     assert await read_back(session, table, "value") == Tagged("schema", expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_udt_reader_gets_the_fields_of_every_udt_at_every_depth(setup: Session, table_factory: TableFactory):
+    adapters = Adapters()
+    adapters.register_reader(CqlUserDefinedType, tag_fields("udt"))
+    session = await connect_with(adapters)
+    table = await table_factory("id int PRIMARY KEY, boxes list<frozen<box>>, shelf frozen<shelf>", "udt_depth")
+    await setup.execute(f"INSERT INTO {table} (id, boxes, shelf) VALUES (1, [{{n: 1}}], {{top: {{n: 2}}, label: 'a'}})")
+
+    assert await read_back(session, table, "boxes") == [Tagged("udt", {"n": 1})]
+    assert await read_back(session, table, "shelf") == Tagged("udt", {"top": Tagged("udt", {"n": 2}), "label": "a"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_registered_udt_class_takes_precedence_over_the_udt_reader(setup: Session, table_factory: TableFactory):
+    adapters = Adapters()
+    adapters.register_reader(CqlUserDefinedType, dict)
+    adapters.register_udt(KEYSPACE, "box", Box)
+    session = await connect_with(adapters)
+    table = await table_factory("id int PRIMARY KEY, shelf frozen<shelf>", "udt_precedence")
+    await setup.execute(f"INSERT INTO {table} (id, shelf) VALUES (1, {{top: {{n: 2}}, label: 'a'}})")
+
+    shelf = await read_back(session, table, "shelf")
+
+    assert shelf == {"top": Box(2), "label": "a"}
+    assert type(shelf) is dict
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_one_udt_from_the_schema_is_not_a_key(setup: Session, table_factory: TableFactory):
+    table = await table_factory("id int PRIMARY KEY, value frozen<box>", "one_udt_key")
+    await setup.refresh_metadata()
+    keyspace = setup.cluster_state.get_keyspace(KEYSPACE)
+    assert keyspace is not None
+    schema_table = keyspace.tables.get(table)
+    assert schema_table is not None
+    column = schema_table.columns.get("value")
+    assert column is not None
+
+    with pytest.raises(TypeError, match="Use register_udt for one user defined type"):
+        Adapters().register_reader(column.typ, dict)
 
 
 @pytest.mark.asyncio

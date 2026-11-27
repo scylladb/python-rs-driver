@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from helpers.ddl import ddl
-from helpers.session import session_builder
+from helpers.session import session_builder, suite_adapters
 from scylla.adapters import Adapters
 from scylla.cql_types import CqlColumnType, CqlTextType
 from scylla.errors import (
@@ -80,7 +80,7 @@ def broken(value: Broken, cql_type: CqlColumnType) -> Any:
 
 
 def make_adapters() -> Adapters:
-    adapters = Adapters()
+    adapters = suite_adapters()
     adapters.register_writer(Money, money)
     adapters.register_writer(Point, lambda point, cql_type: asdict(point))
     adapters.register_writer(Enum, lambda member, cql_type: member.value)

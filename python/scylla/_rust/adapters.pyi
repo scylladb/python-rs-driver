@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from scylla.cql_types import CqlColumnType, CqlType
 
@@ -68,7 +68,7 @@ class Adapters:
     def register_reader(
         self,
         cql_type: CqlColumnType | type[CqlColumnType],
-        reader: Callable[[Any], object],
+        reader: Callable[..., object],
     ) -> None:
         """
         Register the reader for a CQL type.
@@ -98,25 +98,35 @@ class Adapters:
         A CQL type object, such as one from the schema metadata, selects the
         same type as the class with the same type arguments.
 
+        ``CqlUserDefinedType`` selects every user defined type. For such a
+        value, the driver calls ``reader(**fields)`` with one keyword argument
+        for each field, in place of the value it reads without the reader. A
+        null field gives ``None``. A class from :meth:`register_udt` takes
+        precedence over this reader. A user defined type from the schema
+        metadata is not a valid key: use :meth:`register_udt` for one user
+        defined type.
+
         If the type already has a reader, the new reader replaces it.
 
         Parameters
         ----------
         cql_type : CqlColumnType | type[CqlColumnType]
             The CQL type of the values to convert.
-        reader : Callable[[Any], object]
-            Called with the value that the driver reads without the reader.
+        reader : Callable[..., object]
+            Called with the value that the driver reads without the reader. For
+            a user defined type, called with the fields as keyword arguments.
 
         Raises
         ------
         TypeError
-            If ``reader`` is not callable, or if ``cql_type`` is a user defined
-            type. Use :meth:`register_udt` for a user defined type.
+            If ``reader`` is not callable, or if ``cql_type`` is one user
+            defined type. Use :meth:`register_udt` for one user defined type.
 
         Examples
         --------
         >>> adapters.register_reader(CqlTimestampType, lambda ts: ts.to_datetime())
         >>> adapters.register_reader(CqlVectorType[CqlFloatType], np.asarray)
+        >>> adapters.register_reader(CqlUserDefinedType, dict)
         """
     def register_udt(self, keyspace: str, name: str, cls: type) -> None:
         """
@@ -132,6 +142,8 @@ class Adapters:
 
         The attribute names and the keyword arguments must be the same as the
         field names in the schema.
+
+        The class takes precedence over a reader for ``CqlUserDefinedType``.
 
         If the type already has a class, the new class replaces it.
 

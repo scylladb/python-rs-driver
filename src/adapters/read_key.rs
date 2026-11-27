@@ -15,8 +15,8 @@ use scylla::frame::response::result::{CollectionType, ColumnType, NativeType};
 
 use super::error::DriverReadKeyError;
 use crate::cluster::metadata::column_type::{
-    PyCqlColumnType, PyCqlListType, PyCqlMapType, PyCqlSetType, PyCqlTupleType, PyCqlVectorType,
-    native_type_of,
+    PyCqlColumnType, PyCqlListType, PyCqlMapType, PyCqlSetType, PyCqlTupleType,
+    PyCqlUserDefinedType, PyCqlVectorType, native_type_of,
 };
 
 /// The CQL type that a reader is registered for: a `ColumnType` in which an element type can be
@@ -32,6 +32,8 @@ pub(super) enum ReadKey {
     /// `None` for a tuple class without type arguments, which matches tuples of every length.
     Tuple(Option<Vec<ReadKey>>),
     Vector(Box<ReadKey>),
+    /// Every user defined type. One UDT has `register_udt` instead.
+    Udt,
 }
 
 /// Converts the CQL type given to `register_reader`.
@@ -71,7 +73,14 @@ impl<'py> FromPyObject<'_, 'py> for ReadKey {
                 .transpose()?;
             return Ok(Self::Tuple(fields));
         }
-        // Also a UDT, which has its own `register_udt`.
+        if class.is(PyCqlUserDefinedType::type_object(py)) {
+            // Only the class itself: one UDT has `register_udt`.
+            if !key.is(&class) {
+                return Err(DriverReadKeyError::one_udt(&key));
+            }
+            return Ok(Self::Udt);
+        }
+
         Err(DriverReadKeyError::not_a_cql_type(&key))
     }
 }
@@ -104,7 +113,8 @@ impl ReadKey {
                     ..
                 },
             ) => key.matches(key_type) && value.matches(value_type),
-            (Self::Tuple(None), ColumnType::Tuple(_)) => true,
+            (Self::Tuple(None), ColumnType::Tuple(_))
+            | (Self::Udt, ColumnType::UserDefinedType { .. }) => true,
             (Self::Tuple(Some(fields)), ColumnType::Tuple(types)) => {
                 fields.len() == types.len()
                     && fields
@@ -128,7 +138,8 @@ impl ReadKey {
         match (self, other) {
             (Self::Any, Self::Any)
             | (Self::Native(_), Self::Native(_))
-            | (Self::Tuple(None), Self::Tuple(None)) => Ordering::Equal,
+            | (Self::Tuple(None), Self::Tuple(None))
+            | (Self::Udt, Self::Udt) => Ordering::Equal,
             (Self::Any, _) | (Self::Tuple(None), Self::Tuple(Some(_))) => Ordering::Less,
             (_, Self::Any) | (Self::Tuple(Some(_)), Self::Tuple(None)) => Ordering::Greater,
             (Self::List(mine), Self::List(theirs))
@@ -234,10 +245,13 @@ fn element_types<'py>(typ: &Bound<'py, PyAny>) -> PyArgs<'py> {
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
+    use std::sync::Arc;
 
-    use scylla::frame::response::result::{CollectionType, ColumnType, NativeType};
+    use scylla::frame::response::result::{
+        CollectionType, ColumnType, NativeType, UserDefinedType,
+    };
 
-    use super::ReadKey::{self, Any, List, Map, Native, Set, Tuple, Vector};
+    use super::ReadKey::{self, Any, List, Map, Native, Set, Tuple, Udt, Vector};
 
     fn int() -> ColumnType<'static> {
         ColumnType::Native(NativeType::Int)
@@ -272,6 +286,17 @@ mod tests {
         ColumnType::Vector {
             typ: Box::new(item),
             dimensions,
+        }
+    }
+
+    fn udt(name: &'static str) -> ColumnType<'static> {
+        ColumnType::UserDefinedType {
+            frozen: true,
+            definition: Arc::new(UserDefinedType {
+                name: name.into(),
+                keyspace: "ks".into(),
+                field_types: vec![("a".into(), int())],
+            }),
         }
     }
 
@@ -333,6 +358,15 @@ mod tests {
     }
 
     #[test]
+    fn udt_key_matches_every_udt() {
+        assert!(Udt.matches(&udt("address")));
+        assert!(Udt.matches(&udt("point")));
+        assert!(!Udt.matches(&ColumnType::Tuple(vec![int()])));
+        assert!(List(b(Udt)).matches(&list(udt("address"), false)));
+        assert!(!List(b(Udt)).matches(&list(int(), false)));
+    }
+
+    #[test]
     fn type_arguments_beat_a_bare_class() {
         let keys = [List(b(Any)), List(b(key_int()))];
         assert_eq!(best(&keys, &list(int(), false)), Some(&keys[1]));
@@ -388,6 +422,9 @@ mod tests {
                 Map(b(Any), b(key_int())),
                 Greater,
             ),
+            (Udt, Udt, Equal),
+            (Any, Udt, Less),
+            (List(b(Any)), List(b(Udt)), Less),
             (Tuple(None), Tuple(None), Equal),
             (Tuple(None), Tuple(Some(vec![key_int()])), Less),
             (Tuple(Some(vec![key_int()])), Tuple(None), Greater),

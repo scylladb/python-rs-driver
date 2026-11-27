@@ -194,4 +194,4 @@ The driver calls a reader with the value that it reads without the reader. The r
 - Matching ignores `frozen` and the dimensions of a vector. `CqlListType[CqlIntType]` also matches `frozen<list<int>>`, and `CqlVectorType[CqlFloatType]` matches float vectors of all sizes.
 - A reader also applies to the elements of collections, tuples, vectors and user defined types. The driver converts the elements before the value that contains them. In the example above, the reader for `list<timestamp>` gets a list of `datetime` objects.
 - The driver does not call a reader for a null or empty value. The exception is a null list, set or map: the driver reads it as an empty one, so the reader gets an empty `list`, `set` or `dict`.
-- Use `register_udt` for a user defined type.
+- `CqlUserDefinedType` selects every user defined type. For such a value, the driver calls `reader(**fields)` with one keyword argument for each field. So `adapters.register_reader(CqlUserDefinedType, dict)` reads every user defined type as a `dict`. A class from `register_udt` takes precedence over this reader. To select one user defined type, use `register_udt`.
