@@ -12,6 +12,7 @@ use std::sync::Once;
 use tokio::runtime::{Handle, Runtime};
 use tokio::task::JoinHandle;
 
+mod adapters;
 mod batch;
 mod cache;
 mod cluster;
@@ -169,6 +170,7 @@ fn scylla(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     add_submodule(py, module, "types", types::types)?;
     add_submodule(py, module, "cql_types", cql_types::cql_types)?;
+    add_submodule(py, module, "adapters", adapters::adapters)?;
     add_submodule(py, module, "batch", batch::batch)?;
     add_submodule(py, module, "policies", policies::policies)?;
     add_submodule(py, module, "cluster", cluster::cluster)?;

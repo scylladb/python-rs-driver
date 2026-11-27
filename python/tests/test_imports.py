@@ -6,6 +6,7 @@ import pytest
 
 PUBLIC_MODULES = [
     "scylla",
+    "scylla.adapters",
     "scylla.auth",
     "scylla.cluster",
     "scylla.errors",
@@ -37,6 +38,7 @@ def test_public_module_exports_everything_in_all(name: str) -> None:
 def test_root_has_the_everyday_names() -> None:
     from scylla import (
         UNSET,
+        Adapters,
         Batch,
         BatchType,
         Consistency,
@@ -62,6 +64,7 @@ def test_root_has_the_everyday_names() -> None:
     assert UNSET is importlib.import_module("scylla.statement").UNSET
     assert RequestResult is importlib.import_module("scylla.results").RequestResult
     assert ScyllaError is importlib.import_module("scylla.errors").ScyllaError
+    assert Adapters is importlib.import_module("scylla.adapters").Adapters
 
 
 def test_classes_report_their_public_module() -> None:

@@ -53,6 +53,9 @@ pub(crate) enum DriverValueSerializationError {
     /// The duration fields have different signs, which CQL cannot represent.
     #[error("All duration fields must have the same sign")]
     MixedSignDuration,
+    /// A vector element is null, which CQL cannot represent.
+    #[error("A vector element cannot be None")]
+    NullVectorElement,
     /// An error occurred while interacting with Python objects during serialization.
     #[error("Python serialization failed")]
     PythonInteropFailed { source: Box<PyErr> },
@@ -166,6 +169,10 @@ impl DriverValueSerializationError {
         Self::MixedSignDuration
     }
 
+    pub(crate) fn null_vector_element() -> Self {
+        Self::NullVectorElement
+    }
+
     pub(crate) fn python_interop_failed(source: PyErr) -> Self {
         Self::PythonInteropFailed {
             source: Box::new(source),
@@ -183,7 +190,7 @@ impl DriverValueSerializationError {
             Self::ValueOverflow => {
                 py_err!(py, ValueOverflowSerializationError, message; bind_marker)
             }
-            Self::MixedSignDuration => {
+            Self::MixedSignDuration | Self::NullVectorElement => {
                 py_err!(py, InvalidValueSerializationError, message; bind_marker)
             }
             Self::PythonInteropFailed { source } => with_cause(
