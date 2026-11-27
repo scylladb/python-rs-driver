@@ -13,16 +13,15 @@ use crate::TaskExecutionMode;
 use crate::core::session::{BoundStatement, fetch_page};
 use crate::core::traces::{PendingQueryTrace, TraceLog, fetch_trace};
 use crate::deserialize::error::DriverRowIterationError;
-use crate::deserialize::row_factory::PyRowFactory;
-use crate::deserialize::rows::{ResolvedPage, RowsIteratorKind};
+use crate::deserialize::rows::{ResolvedPage, RowReader, RowsIteratorKind};
 use crate::errors::execution::{DriverExecuteError, DriverTraceError};
 use crate::results::RequestResult;
 
 /// One page of a query result, together with the pager positioned after it.
 #[derive(Clone)]
 pub(crate) struct PageCore {
-    /// Kept to resolve a builder for every following page.
-    row_factory: PyRowFactory,
+    /// Kept to resolve every following page.
+    reader: RowReader,
     query_pager: Pager,
     page: ResolvedPage,
 }
@@ -32,15 +31,15 @@ impl PageCore {
         py: Python<'_>,
         query_result: QueryResult,
         query_pager: Pager,
-        row_factory: PyRowFactory,
+        reader: RowReader,
     ) -> Result<Self, DriverExecuteError> {
-        let page = ResolvedPage::new(py, Arc::new(query_result), &row_factory)
+        let page = ResolvedPage::new(py, Arc::new(query_result), &reader)
             .map_err(DriverExecuteError::row_factory_failed)?;
 
         Ok(Self {
             query_pager,
             page,
-            row_factory,
+            reader,
         })
     }
 
@@ -83,12 +82,12 @@ impl PageCore {
     }
 
     /// Clones what fetching the following pages needs, without the page itself.
-    pub(crate) fn clone_pager_and_factory(&self) -> (Pager, PyRowFactory) {
-        (self.query_pager.clone(), self.row_factory.clone())
+    pub(crate) fn clone_pager_and_reader(&self) -> (Pager, RowReader) {
+        (self.query_pager.clone(), self.reader.clone())
     }
 
-    pub(crate) fn into_parts(self) -> (ResolvedPage, Pager, PyRowFactory) {
-        (self.page, self.query_pager, self.row_factory)
+    pub(crate) fn into_parts(self) -> (ResolvedPage, Pager, RowReader) {
+        (self.page, self.query_pager, self.reader)
     }
 
     /// Returns `true` if more pages are available.
@@ -106,14 +105,14 @@ impl PageCore {
     /// further pages as needed, or `None` if no more rows exist.
     pub(crate) async fn first_row(self) -> PyResult<Py<PyAny>> {
         let Self {
-            row_factory,
+            reader,
             mut query_pager,
             page,
         } = self;
 
         let mut rows_iterator = RowsIteratorKind::new(page);
 
-        match next_row_with_paging(&mut rows_iterator, &mut query_pager, &row_factory).await {
+        match next_row_with_paging(&mut rows_iterator, &mut query_pager, &reader).await {
             Some(res) => res.map_err(Into::into),
             None => Ok(Python::attach(|py| py.None())),
         }
@@ -122,7 +121,7 @@ impl PageCore {
     /// Returns every remaining row across every remaining page as a list.
     pub(crate) async fn all(self) -> PyResult<Py<PyList>> {
         let Self {
-            row_factory,
+            reader,
             mut query_pager,
             page,
         } = self;
@@ -137,7 +136,7 @@ impl PageCore {
             Python::attach(|py| -> PyResult<()> {
                 if let Some(next_page) = next_page.take() {
                     rows_iterator
-                        .update(py, Arc::new(next_page), &row_factory)
+                        .update(py, Arc::new(next_page), &reader)
                         .map_err(DriverRowIterationError::PythonError)?;
                 }
 
@@ -195,29 +194,25 @@ pub(crate) fn columns(query_result: &QueryResult) -> Option<&[ColumnSpec<'_>]> {
 pub(crate) struct PendingRequestResult {
     query_result: QueryResult,
     query_pager: Pager,
-    factory: PyRowFactory,
+    reader: RowReader,
 }
 
 impl PendingRequestResult {
-    pub(crate) fn new(
-        query_result: QueryResult,
-        query_pager: Pager,
-        factory: PyRowFactory,
-    ) -> Self {
+    pub(crate) fn new(query_result: QueryResult, query_pager: Pager, reader: RowReader) -> Self {
         Self {
             query_result,
             query_pager,
-            factory,
+            reader,
         }
     }
 
     /// Binds the page to the row factory.
     pub(crate) fn resolve(self, py: Python<'_>) -> Result<PageCore, DriverExecuteError> {
-        PageCore::new(py, self.query_result, self.query_pager, self.factory)
+        PageCore::new(py, self.query_result, self.query_pager, self.reader)
     }
 
-    pub(crate) fn into_parts(self) -> (QueryResult, Pager, PyRowFactory) {
-        (self.query_result, self.query_pager, self.factory)
+    pub(crate) fn into_parts(self) -> (QueryResult, Pager, RowReader) {
+        (self.query_result, self.query_pager, self.reader)
     }
 }
 
@@ -236,14 +231,14 @@ impl<'py> IntoPyObject<'py> for PendingRequestResult {
 pub(crate) async fn next_row_with_paging(
     rows_iterator: &mut RowsIteratorKind,
     query_pager: &mut Pager,
-    factory: &PyRowFactory,
+    reader: &RowReader,
 ) -> Option<Result<Py<PyAny>, DriverRowIterationError>> {
     // Switched to under the same GIL acquisition that reads its first row.
     let mut next_page: Option<QueryResult> = None;
     loop {
         let row = Python::attach(|py| {
             if let Some(next_page) = next_page.take()
-                && let Err(err) = rows_iterator.update(py, Arc::new(next_page), factory)
+                && let Err(err) = rows_iterator.update(py, Arc::new(next_page), reader)
             {
                 return Some(Err(DriverRowIterationError::PythonError(err)));
             }
@@ -381,20 +376,16 @@ impl Pager {
 
     /// Fetches the next page, or returns `None` if no more pages exist.
     ///
-    /// The page is bound to `row_factory` when it is handed to Python.
+    /// The page is bound to `reader` when it is handed to Python.
     pub(crate) async fn fetch_next_pending_page(
         mut self,
-        row_factory: PyRowFactory,
+        reader: RowReader,
         mode: TaskExecutionMode,
     ) -> PyResult<Option<PendingRequestResult>> {
         let Some(query_result) = self.fetch_next_page(mode).await else {
             return Ok(None);
         };
 
-        Ok(Some(PendingRequestResult::new(
-            query_result?,
-            self,
-            row_factory,
-        )))
+        Ok(Some(PendingRequestResult::new(query_result?, self, reader)))
     }
 }

@@ -1,4 +1,7 @@
-use pyo3::{Py, PyClassInitializer, PyResult, Python, pyclass};
+use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
+use pyo3::types::PyType;
+use pyo3::{PyClassInitializer, PyTypeInfo};
 use scylla::cluster::metadata::{CollectionType, ColumnType, NativeType};
 
 /// Macro to generate native type subclasses
@@ -11,6 +14,30 @@ macro_rules! native_type_class {
             pub(crate) fn new() -> PyClassInitializer<Self> {
                 PyCqlNativeType::new().add_subclass(Self {})
             }
+
+            /// The one instance, shared because the type holds no state.
+            fn shared(py: Python<'_>) -> PyResult<Py<PyCqlColumnType>> {
+                static INSTANCE: PyOnceLock<Py<PyCqlColumnType>> = PyOnceLock::new();
+                INSTANCE
+                    .get_or_try_init(py, || create_py_and_cast!(py, Self::new()))
+                    .map(|instance| instance.clone_ref(py))
+            }
+        }
+    };
+}
+
+/// Generates the native type classes and [`native_type_of`].
+macro_rules! native_types {
+    ($($py_class:ident = $py_name:literal => $native:ident,)*) => {
+        $(native_type_class!($py_class, $py_name);)*
+
+        /// The native type that `cls` describes, if `cls` is a native type class.
+        pub(crate) fn native_type_of(cls: &Bound<'_, PyType>) -> Option<NativeType> {
+            let py = cls.py();
+            $(if cls.is(<$py_class as PyTypeInfo>::type_object(py)) {
+                return Some(NativeType::$native);
+            })*
+            None
         }
     };
 }
@@ -33,27 +60,28 @@ impl PyCqlNativeType {
     }
 }
 
-// Generate all native type classes
-native_type_class!(PyCqlAsciiType, "CqlAsciiType");
-native_type_class!(PyCqlBooleanType, "CqlBooleanType");
-native_type_class!(PyCqlBlobType, "CqlBlobType");
-native_type_class!(PyCqlCounterType, "CqlCounterType");
-native_type_class!(PyCqlDateType, "CqlDateType");
-native_type_class!(PyCqlDecimalType, "CqlDecimalType");
-native_type_class!(PyCqlDoubleType, "CqlDoubleType");
-native_type_class!(PyCqlDurationType, "CqlDurationType");
-native_type_class!(PyCqlFloatType, "CqlFloatType");
-native_type_class!(PyCqlIntType, "CqlIntType");
-native_type_class!(PyCqlBigIntType, "CqlBigIntType");
-native_type_class!(PyCqlTextType, "CqlTextType");
-native_type_class!(PyCqlTimestampType, "CqlTimestampType");
-native_type_class!(PyCqlInetType, "CqlInetType");
-native_type_class!(PyCqlSmallIntType, "CqlSmallIntType");
-native_type_class!(PyCqlTinyIntType, "CqlTinyIntType");
-native_type_class!(PyCqlTimeType, "CqlTimeType");
-native_type_class!(PyCqlTimeuuidType, "CqlTimeuuidType");
-native_type_class!(PyCqlUuidType, "CqlUuidType");
-native_type_class!(PyCqlVarintType, "CqlVarintType");
+native_types! {
+    PyCqlAsciiType = "CqlAsciiType" => Ascii,
+    PyCqlBooleanType = "CqlBooleanType" => Boolean,
+    PyCqlBlobType = "CqlBlobType" => Blob,
+    PyCqlCounterType = "CqlCounterType" => Counter,
+    PyCqlDateType = "CqlDateType" => Date,
+    PyCqlDecimalType = "CqlDecimalType" => Decimal,
+    PyCqlDoubleType = "CqlDoubleType" => Double,
+    PyCqlDurationType = "CqlDurationType" => Duration,
+    PyCqlFloatType = "CqlFloatType" => Float,
+    PyCqlIntType = "CqlIntType" => Int,
+    PyCqlBigIntType = "CqlBigIntType" => BigInt,
+    PyCqlTextType = "CqlTextType" => Text,
+    PyCqlTimestampType = "CqlTimestampType" => Timestamp,
+    PyCqlInetType = "CqlInetType" => Inet,
+    PyCqlSmallIntType = "CqlSmallIntType" => SmallInt,
+    PyCqlTinyIntType = "CqlTinyIntType" => TinyInt,
+    PyCqlTimeType = "CqlTimeType" => Time,
+    PyCqlTimeuuidType = "CqlTimeuuidType" => Timeuuid,
+    PyCqlUuidType = "CqlUuidType" => Uuid,
+    PyCqlVarintType = "CqlVarintType" => Varint,
+}
 
 #[pyclass(module = "scylla.cql_types", name = "CqlCollectionType", subclass, extends=PyCqlColumnType, frozen, get_all)]
 pub(crate) struct PyCqlCollectionType {
@@ -66,7 +94,7 @@ impl PyCqlCollectionType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlMapType", extends=PyCqlCollectionType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlMapType", extends=PyCqlCollectionType, frozen, get_all, generic)]
 pub(crate) struct PyCqlMapType {
     pub(crate) key_type: Py<PyCqlColumnType>,
     pub(crate) value_type: Py<PyCqlColumnType>,
@@ -85,7 +113,7 @@ impl PyCqlMapType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlSetType", extends=PyCqlCollectionType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlSetType", extends=PyCqlCollectionType, frozen, get_all, generic)]
 pub(crate) struct PyCqlSetType {
     pub(crate) column_type: Py<PyCqlColumnType>,
 }
@@ -96,7 +124,7 @@ impl PyCqlSetType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlListType", extends=PyCqlCollectionType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlListType", extends=PyCqlCollectionType, frozen, get_all, generic)]
 pub(crate) struct PyCqlListType {
     pub(crate) column_type: Py<PyCqlColumnType>,
 }
@@ -107,7 +135,7 @@ impl PyCqlListType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlTupleType", extends=PyCqlColumnType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlTupleType", extends=PyCqlColumnType, frozen, get_all, generic)]
 pub(crate) struct PyCqlTupleType {
     pub(crate) element_types: Vec<Py<PyCqlColumnType>>,
 }
@@ -118,7 +146,7 @@ impl PyCqlTupleType {
     }
 }
 
-#[pyclass(module = "scylla.cql_types", name = "CqlVectorType", extends=PyCqlColumnType, frozen, get_all)]
+#[pyclass(module = "scylla.cql_types", name = "CqlVectorType", extends=PyCqlColumnType, frozen, get_all, generic)]
 pub(crate) struct PyCqlVectorType {
     pub(crate) typ: Py<PyCqlColumnType>,
     pub(crate) dimensions: u16,
@@ -172,26 +200,26 @@ pub(crate) fn extract_column_type(
         {
             #[deny(clippy::wildcard_enum_match_arm)]
             match native_type {
-                NativeType::Ascii => create_py_and_cast!(py, PyCqlAsciiType::new()),
-                NativeType::BigInt => create_py_and_cast!(py, PyCqlBigIntType::new()),
-                NativeType::Blob => create_py_and_cast!(py, PyCqlBlobType::new()),
-                NativeType::Boolean => create_py_and_cast!(py, PyCqlBooleanType::new()),
-                NativeType::Counter => create_py_and_cast!(py, PyCqlCounterType::new()),
-                NativeType::Date => create_py_and_cast!(py, PyCqlDateType::new()),
-                NativeType::Decimal => create_py_and_cast!(py, PyCqlDecimalType::new()),
-                NativeType::Double => create_py_and_cast!(py, PyCqlDoubleType::new()),
-                NativeType::Duration => create_py_and_cast!(py, PyCqlDurationType::new()),
-                NativeType::Float => create_py_and_cast!(py, PyCqlFloatType::new()),
-                NativeType::Inet => create_py_and_cast!(py, PyCqlInetType::new()),
-                NativeType::Int => create_py_and_cast!(py, PyCqlIntType::new()),
-                NativeType::SmallInt => create_py_and_cast!(py, PyCqlSmallIntType::new()),
-                NativeType::Text => create_py_and_cast!(py, PyCqlTextType::new()),
-                NativeType::Time => create_py_and_cast!(py, PyCqlTimeType::new()),
-                NativeType::Timestamp => create_py_and_cast!(py, PyCqlTimestampType::new()),
-                NativeType::Timeuuid => create_py_and_cast!(py, PyCqlTimeuuidType::new()),
-                NativeType::TinyInt => create_py_and_cast!(py, PyCqlTinyIntType::new()),
-                NativeType::Uuid => create_py_and_cast!(py, PyCqlUuidType::new()),
-                NativeType::Varint => create_py_and_cast!(py, PyCqlVarintType::new()),
+                NativeType::Ascii => PyCqlAsciiType::shared(py),
+                NativeType::BigInt => PyCqlBigIntType::shared(py),
+                NativeType::Blob => PyCqlBlobType::shared(py),
+                NativeType::Boolean => PyCqlBooleanType::shared(py),
+                NativeType::Counter => PyCqlCounterType::shared(py),
+                NativeType::Date => PyCqlDateType::shared(py),
+                NativeType::Decimal => PyCqlDecimalType::shared(py),
+                NativeType::Double => PyCqlDoubleType::shared(py),
+                NativeType::Duration => PyCqlDurationType::shared(py),
+                NativeType::Float => PyCqlFloatType::shared(py),
+                NativeType::Inet => PyCqlInetType::shared(py),
+                NativeType::Int => PyCqlIntType::shared(py),
+                NativeType::SmallInt => PyCqlSmallIntType::shared(py),
+                NativeType::Text => PyCqlTextType::shared(py),
+                NativeType::Time => PyCqlTimeType::shared(py),
+                NativeType::Timestamp => PyCqlTimestampType::shared(py),
+                NativeType::Timeuuid => PyCqlTimeuuidType::shared(py),
+                NativeType::TinyInt => PyCqlTinyIntType::shared(py),
+                NativeType::Uuid => PyCqlUuidType::shared(py),
+                NativeType::Varint => PyCqlVarintType::shared(py),
                 _ => unreachable!("clippy testifies that the match is exhaustive"),
             }
         }

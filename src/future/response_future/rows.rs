@@ -7,8 +7,7 @@ use pyo3::types::{PyList, PyNone};
 use scylla::response::query_result::QueryResult;
 
 use crate::core::results::page_rows;
-use crate::deserialize::row_factory::PyRowFactory;
-use crate::deserialize::rows::ResolvedPage;
+use crate::deserialize::rows::{ResolvedPage, RowReader};
 use crate::errors::execution::DriverExecuteError;
 
 /// The rows of a settled page: a list, `None` for a result without rows, or the error.
@@ -17,8 +16,8 @@ pub(super) type Rows = PyResult<Option<Py<PyList>>>;
 /// The rows of a settled page, taken out of the lock.
 pub(super) enum PageRows {
     Built(Rows),
-    /// Not built yet: the response and the row factory to build them from.
-    ToBuild(Arc<QueryResult>, PyRowFactory),
+    /// Not built yet: the response and the reader to build them with.
+    ToBuild(Arc<QueryResult>, RowReader),
 }
 
 /// Builds the rows of a page. Runs the row factory, which is user Python, so
@@ -26,9 +25,9 @@ pub(super) enum PageRows {
 pub(super) fn build_rows(
     py: Python<'_>,
     query_result: Arc<QueryResult>,
-    factory: &PyRowFactory,
+    reader: &RowReader,
 ) -> Rows {
-    ResolvedPage::new(py, query_result, factory)
+    ResolvedPage::new(py, query_result, reader)
         .map_err(|err| DriverExecuteError::row_factory_failed(err).into())
         .and_then(|page| page_rows(py, page))
 }
