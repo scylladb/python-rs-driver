@@ -3,32 +3,54 @@
 use std::sync::Arc;
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyType};
+use pyo3::types::PyType;
 use scylla::frame::response::result::{CollectionType, ColumnSpec, ColumnType};
 
 use crate::adapters::Adapters;
 use crate::cql_types::CqlEmpty;
 use crate::deserialize::error::DriverDeserializationError;
-use crate::deserialize::value::PyDeserializedValue;
+use crate::deserialize::value::{PyDeserializedValue, fields_dict};
 
-/// What to do with a value after its built-in deserialization.
+/// What the deserializer does with a value besides its built-in deserialization.
 pub(crate) enum ReadAdapter {
-    /// `cls(**fields)`, for a UDT with a registered class.
-    UdtClass(Py<PyType>),
+    /// Builds a UDT value from its fields, while the UDT is read.
+    Udt(UdtBuilder),
     /// `reader(value)`, for a type with a registered reader.
     Reader(Py<PyAny>),
 }
 
 impl ReadAdapter {
+    /// The step after the built-in deserialization.
     fn apply<'py>(&self, value: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         match self {
-            // A null UDT stays None: only a field dict goes to the class.
-            Self::UdtClass(cls) => match value.cast::<PyDict>() {
-                Ok(fields) => cls.bind(value.py()).call((), Some(fields)),
-                Err(_) => Ok(value),
-            },
+            // The builder already made the value.
+            Self::Udt(_) => Ok(value),
             Self::Reader(_) if value.is_none() || value.is_instance_of::<CqlEmpty>() => Ok(value),
             Self::Reader(reader) => reader.bind(value.py()).call1((value,)),
+        }
+    }
+}
+
+/// How the deserializer builds the value of a UDT from its fields.
+pub(crate) enum UdtBuilder {
+    /// `cls(name=value, ...)`, for a UDT with a registered class.
+    Class(Py<PyType>),
+}
+
+impl UdtBuilder {
+    /// Builds a UDT value from its fields, in schema order.
+    pub(crate) fn build<'py, 'n>(
+        &self,
+        py: Python<'py>,
+        fields: impl Iterator<Item = Result<(&'n str, PyDeserializedValue), DriverDeserializationError>>,
+    ) -> Result<Bound<'py, PyAny>, DriverDeserializationError> {
+        match self {
+            Self::Class(cls) => {
+                let kwargs = fields_dict(py, fields)?;
+                cls.bind(py)
+                    .call((), Some(&kwargs))
+                    .map_err(DriverDeserializationError::python_conversion_failed)
+            }
         }
     }
 }
@@ -65,7 +87,7 @@ impl AdapterTree {
             ColumnType::UserDefinedType { definition, .. } => (
                 adapters
                     .udt_class(&definition.keyspace, &definition.name)
-                    .map(|cls| ReadAdapter::UdtClass(cls.clone_ref(py))),
+                    .map(|cls| ReadAdapter::Udt(UdtBuilder::Class(cls.clone_ref(py)))),
                 definition
                     .field_types
                     .iter()
@@ -101,6 +123,14 @@ impl AdapterTree {
     /// A tuple element or UDT field, by position.
     pub(crate) fn field(&self, index: usize) -> Option<&Self> {
         self.child(index)
+    }
+
+    /// How to build this value, if it is a UDT with its own builder.
+    pub(crate) fn udt(&self) -> Option<&UdtBuilder> {
+        match &self.adapter {
+            Some(ReadAdapter::Udt(builder)) => Some(builder),
+            _ => None,
+        }
     }
 
     /// Applies the adapter of this value, if it has one, to its deserialized form.

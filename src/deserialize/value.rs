@@ -312,7 +312,7 @@ where
 }
 
 /// `{name: value, ...}` of the fields of a UDT.
-fn fields_dict<'py, 'n>(
+pub(crate) fn fields_dict<'py, 'n>(
     py: Python<'py>,
     fields: impl Iterator<Item = Result<(&'n str, PyDeserializedValue), DriverDeserializationError>>,
 ) -> Result<Bound<'py, PyDict>, DriverDeserializationError> {
@@ -521,7 +521,7 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                 )));
             }
         },
-        // CQL UserDefinedType (UDT) → Python dict[str, value]
+        // CQL UserDefinedType (UDT) → Python dict[str, value], or an object of the registered class
         ColumnType::UserDefinedType { .. } => {
             let Some(v) = val else {
                 return Ok(PyDeserializedValue::none(py));
@@ -546,7 +546,11 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                 Ok((col_name.as_ref(), val))
             });
 
-            PyDeserializedValue::new(fields_dict(py, fields)?.into_any())
+            let udt = match adapters.and_then(AdapterTree::udt) {
+                Some(builder) => builder.build(py, fields)?,
+                None => fields_dict(py, fields)?.into_any(),
+            };
+            PyDeserializedValue::new(udt)
         }
         // CQL Vector → Python list
         ColumnType::Vector { .. } => {
