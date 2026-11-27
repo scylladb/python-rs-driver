@@ -311,6 +311,20 @@ where
     }
 }
 
+/// `{name: value, ...}` of the fields of a UDT.
+fn fields_dict<'py, 'n>(
+    py: Python<'py>,
+    fields: impl Iterator<Item = Result<(&'n str, PyDeserializedValue), DriverDeserializationError>>,
+) -> Result<Bound<'py, PyDict>, DriverDeserializationError> {
+    let dict = PyDict::new(py);
+    for field in fields {
+        let (name, value) = field?;
+        dict.set_item(name, value)
+            .map_err(DriverDeserializationError::python_conversion_failed)?;
+    }
+    Ok(dict)
+}
+
 fn deser_cql_py_value<'py, 'metadata, 'frame>(
     py: Python<'py>,
     typ: &'metadata ColumnType<'metadata>,
@@ -508,9 +522,7 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
             }
         },
         // CQL UserDefinedType (UDT) → Python dict[str, value]
-        ColumnType::UserDefinedType {
-            definition: _udt, ..
-        } => {
+        ColumnType::UserDefinedType { .. } => {
             let Some(v) = val else {
                 return Ok(PyDeserializedValue::none(py));
             };
@@ -518,9 +530,7 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
             let iter = UdtIterator::deserialize(typ, Some(v))
                 .map_err(DriverDeserializationError::scylla_decode_failed)?;
 
-            let dict = PyDict::new(py);
-
-            for (i, ((col_name, col_type), res)) in iter.enumerate() {
+            let fields = iter.enumerate().map(|(i, ((col_name, col_type), res))| {
                 let v = res
                     .map_err(DriverDeserializationError::scylla_decode_failed)
                     .map_err(|e| e.in_udt_field(col_name.clone()))?;
@@ -533,12 +543,10 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                 )
                 .map_err(|e| e.in_udt_field(col_name.clone()))?;
 
-                dict.set_item(col_name.clone(), val)
-                    .map_err(DriverDeserializationError::python_conversion_failed)
-                    .map_err(|e| e.in_udt_field(col_name.clone()))?;
-            }
+                Ok((col_name.as_ref(), val))
+            });
 
-            PyDeserializedValue::new(dict.into_any())
+            PyDeserializedValue::new(fields_dict(py, fields)?.into_any())
         }
         // CQL Vector → Python list
         ColumnType::Vector { .. } => {
