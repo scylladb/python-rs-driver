@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use pyo3::PyTypeInfo;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyDict, PyString, PyType};
@@ -36,8 +37,9 @@ impl ReadAdapter {
 pub(crate) enum UdtBuilder {
     /// `cls(name=value, ...)`, for a UDT with a registered class.
     Class(Py<PyType>),
-    /// `{name: value, ...}`, for a UDT without a registered class.
-    /// It makes the keys once for all values of the page.
+    /// `{name: value, ...}`, for a UDT without a registered class or registered with `dict`.
+    /// It skips the copy that `dict(**fields)` makes, and it makes the keys once for all
+    /// values of the page.
     Dict(PyOnceLock<Box<[Py<PyString>]>>),
 }
 
@@ -45,6 +47,7 @@ impl UdtBuilder {
     /// The registered class of the UDT, else a dict.
     fn new(py: Python<'_>, definition: &UserDefinedType<'_>, adapters: &Adapters) -> Self {
         match adapters.udt_class(&definition.keyspace, &definition.name) {
+            Some(cls) if cls.bind(py).is(PyDict::type_object(py)) => Self::Dict(PyOnceLock::new()),
             Some(cls) => Self::Class(cls.clone_ref(py)),
             None => Self::Dict(PyOnceLock::new()),
         }

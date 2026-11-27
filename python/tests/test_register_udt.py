@@ -299,6 +299,22 @@ async def test_constructor_with_kwargs_accepts_every_field(table_factory: TableF
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+async def test_udt_registered_as_dict_round_trips(table_factory: TableFactory):
+    adapters = Adapters()
+    adapters.register_udt(KEYSPACE, "address", dict)
+    dict_session = await connect_with(adapters)
+    table = await table_factory("id int PRIMARY KEY, homes list<frozen<address>>", "dict_class")
+    homes = [{"street": "Main St", "zip": 1}, {"street": "Side St", "zip": None}]
+    await dict_session.execute(f"INSERT INTO {table} (id, homes) VALUES (?, ?)", (1, homes))
+
+    read = await read_back(dict_session, table, "homes")
+
+    assert read == homes
+    assert all(type(home) is dict for home in read)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_changes_after_connect_do_not_reach_the_session(table_factory: TableFactory):
     adapters = Adapters()
     frozen_session = await connect_with(adapters)
