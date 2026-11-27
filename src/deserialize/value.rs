@@ -522,10 +522,14 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
             }
         },
         // CQL UserDefinedType (UDT) → Python dict[str, value], or an object of the registered class
-        ColumnType::UserDefinedType { .. } => {
+        ColumnType::UserDefinedType { definition, .. } => {
             let Some(v) = val else {
                 return Ok(PyDeserializedValue::none(py));
             };
+
+            let builder = adapters
+                .and_then(AdapterTree::udt)
+                .unwrap_or_else(|| unreachable!("resolve gives every UDT a builder"));
 
             let iter = UdtIterator::deserialize(typ, Some(v))
                 .map_err(DriverDeserializationError::scylla_decode_failed)?;
@@ -546,11 +550,7 @@ fn deser_cql_py_value<'py, 'metadata, 'frame>(
                 Ok((col_name.as_ref(), val))
             });
 
-            let udt = match adapters.and_then(AdapterTree::udt) {
-                Some(builder) => builder.build(py, fields)?,
-                None => fields_dict(py, fields)?.into_any(),
-            };
-            PyDeserializedValue::new(udt)
+            PyDeserializedValue::new(builder.build(py, definition, fields)?)
         }
         // CQL Vector → Python list
         ColumnType::Vector { .. } => {

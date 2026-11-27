@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use pyo3::prelude::*;
-use pyo3::types::PyType;
-use scylla::frame::response::result::{CollectionType, ColumnSpec, ColumnType};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::{PyDict, PyString, PyType};
+use scylla::frame::response::result::{CollectionType, ColumnSpec, ColumnType, UserDefinedType};
 
 use crate::adapters::Adapters;
 use crate::cql_types::CqlEmpty;
@@ -35,13 +36,25 @@ impl ReadAdapter {
 pub(crate) enum UdtBuilder {
     /// `cls(name=value, ...)`, for a UDT with a registered class.
     Class(Py<PyType>),
+    /// `{name: value, ...}`, for a UDT without a registered class.
+    /// It makes the keys once for all values of the page.
+    Dict(PyOnceLock<Box<[Py<PyString>]>>),
 }
 
 impl UdtBuilder {
-    /// Builds a UDT value from its fields, in schema order.
+    /// The registered class of the UDT, else a dict.
+    fn new(py: Python<'_>, definition: &UserDefinedType<'_>, adapters: &Adapters) -> Self {
+        match adapters.udt_class(&definition.keyspace, &definition.name) {
+            Some(cls) => Self::Class(cls.clone_ref(py)),
+            None => Self::Dict(PyOnceLock::new()),
+        }
+    }
+
+    /// Builds a value of `definition` from its fields, in schema order.
     pub(crate) fn build<'py, 'n>(
         &self,
         py: Python<'py>,
+        definition: &UserDefinedType<'_>,
         fields: impl Iterator<Item = Result<(&'n str, PyDeserializedValue), DriverDeserializationError>>,
     ) -> Result<Bound<'py, PyAny>, DriverDeserializationError> {
         match self {
@@ -51,20 +64,38 @@ impl UdtBuilder {
                     .call((), Some(&kwargs))
                     .map_err(DriverDeserializationError::python_conversion_failed)
             }
+            Self::Dict(keys) => {
+                let keys = keys.get_or_init(py, || {
+                    definition
+                        .field_types
+                        .iter()
+                        .map(|(name, _)| PyString::new(py, name).unbind())
+                        .collect()
+                });
+
+                let dict = PyDict::new(py);
+                for (key, field) in keys.iter().zip(fields) {
+                    let (_, value) = field?;
+                    dict.set_item(key, value)
+                        .map_err(DriverDeserializationError::python_conversion_failed)?;
+                }
+                Ok(dict.into_any())
+            }
         }
     }
 }
 
-/// The adapters of a value and below it. Exists only where at least one adapter applies.
+/// The UDTs and adapters of a value and below it. Exists only where at least one of them is.
 pub(crate) struct AdapterTree {
     adapter: Option<ReadAdapter>,
     /// The item; the key and the value; or the fields by position.
-    /// `None` where no adapter applies to that child or below it.
+    /// `None` where no UDT or adapter is in that child or below it.
     children: Box<[Option<AdapterTree>]>,
 }
 
 impl AdapterTree {
-    /// Walks `typ`. `None` if no adapter applies to it or below it.
+    /// Walks `typ`. `None` if no UDT or adapter is in it or below it.
+    /// Every UDT gets a `ReadAdapter::Udt`: the UDT branch of the deserializer depends on it.
     fn resolve(py: Python<'_>, typ: &ColumnType<'_>, adapters: &Adapters) -> Option<Self> {
         let child = |typ| Self::resolve(py, typ, adapters);
         let reader = || {
@@ -85,9 +116,7 @@ impl AdapterTree {
             } => (reader(), Box::new([child(key), child(value)])),
             ColumnType::Tuple(fields) => (reader(), fields.iter().map(child).collect()),
             ColumnType::UserDefinedType { definition, .. } => (
-                adapters
-                    .udt_class(&definition.keyspace, &definition.name)
-                    .map(|cls| ReadAdapter::Udt(UdtBuilder::Class(cls.clone_ref(py)))),
+                Some(ReadAdapter::Udt(UdtBuilder::new(py, definition, adapters))),
                 definition
                     .field_types
                     .iter()
@@ -125,7 +154,7 @@ impl AdapterTree {
         self.child(index)
     }
 
-    /// How to build this value, if it is a UDT with its own builder.
+    /// How to build this value, if it is a UDT.
     pub(crate) fn udt(&self) -> Option<&UdtBuilder> {
         match &self.adapter {
             Some(ReadAdapter::Udt(builder)) => Some(builder),
@@ -150,15 +179,12 @@ impl AdapterTree {
     }
 }
 
-/// The adapter trees of the columns of a page. Empty if no adapter applies to any column.
-#[derive(Clone, Default)]
+/// The adapter trees of the columns of a page. Empty if no column has a UDT or an adapter.
+#[derive(Clone)]
 pub(crate) struct ResolvedAdapters(Option<Arc<[Option<AdapterTree>]>>);
 
 impl ResolvedAdapters {
     pub(crate) fn resolve(py: Python<'_>, specs: &[ColumnSpec<'_>], adapters: &Adapters) -> Self {
-        if !adapters.has_read_adapters() {
-            return Self(None);
-        }
         let trees: Arc<[Option<AdapterTree>]> = specs
             .iter()
             .map(|spec| AdapterTree::resolve(py, spec.typ(), adapters))

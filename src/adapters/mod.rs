@@ -183,11 +183,6 @@ impl Adapters {
             .max_by(|(a, _), (b, _)| a.cmp_specificity(b))
             .map(|(_, reader)| reader)
     }
-
-    /// Whether reading a value can need more than its built-in deserialization.
-    pub(crate) fn has_read_adapters(&self) -> bool {
-        !self.readers.is_empty() || !self.udt_classes.is_empty()
-    }
 }
 
 #[pymodule]
